@@ -674,6 +674,124 @@ async fn the_appearance_switcher_is_not_an_open_redirect() {
     }
 }
 
+/// Switching the scheme must not cost the page you were reading.
+///
+/// The rail and the top bar are rendered once per panel, so the form's hidden
+/// `next` can only ever name that panel's root — it would throw a visitor off
+/// a site's detail page, or out of a half-filled sign-in form. The `Referer`
+/// is the page they were actually on, and under this platform's
+/// `Referrer-Policy` only a same-origin request carries one with a path.
+#[tokio::test]
+async fn the_switcher_comes_back_to_the_page_it_was_used_on() {
+    let (state, _dir) = platform().await;
+
+    // A deep page, and one with a query string, which must survive intact.
+    for (referer, expected) in [
+        ("/dashboard/sites/abc", "/dashboard/sites/abc"),
+        ("/console/customers?page=2", "/console/customers?page=2"),
+        ("/dashboard/signin", "/dashboard/signin"),
+        // A fragment is the browser's business, not the server's.
+        ("/pricing#plans", "/pricing"),
+    ] {
+        let (status, headers, _) =
+            appearance_from(&state, &format!("http://{HOST}{referer}"), "theme=dark&next=/").await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        assert_eq!(
+            headers.get(header::LOCATION).unwrap(),
+            expected,
+            "a switch on {referer} must come back to it"
+        );
+    }
+}
+
+/// The `Referer` is a header, so it is attacker-controlled in exactly the way
+/// the `next` field is — and it gets exactly the same treatment. A path only
+/// comes back out of it when the header names this platform's own host.
+#[tokio::test]
+async fn a_referer_from_elsewhere_is_not_followed() {
+    let (state, _dir) = platform().await;
+
+    for hostile in [
+        "https://evil.example/dashboard",
+        "http://evil.example:8080/console",
+        // A host that merely *starts* with ours is a different host.
+        "http://pro.localhost.evil.example/console",
+        "not-a-url",
+    ] {
+        let (status, headers, _) =
+            appearance_from(&state, hostile, "theme=dark&next=/pricing").await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        // Falls back to the form's own `next`, validated as it always was.
+        assert_eq!(
+            headers.get(header::LOCATION).unwrap(),
+            "/pricing",
+            "{hostile} must not be followed"
+        );
+    }
+
+    // And a hostile `Referer` cannot smuggle a destination past the `next`
+    // check either: both have to fail closed at once.
+    let (_, headers, _) =
+        appearance_from(&state, "https://evil.example/x", "theme=dark&next=//evil.example").await;
+    assert_eq!(headers.get(header::LOCATION).unwrap(), "/");
+}
+
+/// One POST to the switcher, carrying a `Referer`.
+///
+/// `send` deliberately sends none, which is what covers the fallback; this is
+/// the same request with the header a browser would actually attach.
+async fn appearance_from(
+    state: &pro_web::AppState,
+    referer: &str,
+    form: &str,
+) -> (StatusCode, axum::http::HeaderMap, String) {
+    let request = Request::builder()
+        .method("POST")
+        .uri("/appearance")
+        .header(header::HOST, HOST)
+        .header("origin", format!("http://{HOST}"))
+        .header(header::REFERER, referer)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from(form.to_string()))
+        .unwrap();
+    let response = pro_web::entry(state.clone()).oneshot(request).await.unwrap();
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+    (status, headers, String::from_utf8_lossy(&bytes).to_string())
+}
+
+/// A signed-out visitor only ever sees the public pages and the centred auth
+/// pages. A switcher missing from those is a switcher they do not have, which
+/// is what made dark mode unreachable before signing in.
+#[tokio::test]
+async fn a_signed_out_visitor_can_reach_the_switcher_everywhere() {
+    let (state, _dir) = platform().await;
+
+    for path in ["/", "/pricing", "/signup", "/dashboard/signin", "/console/signin", "/forgot"] {
+        let (status, body) = get(&state, path, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert!(
+            body.contains(r#"<details class="theme-menu">"#),
+            "{path} has no appearance switcher"
+        );
+        assert!(body.contains(r#"action="/appearance""#), "{path}");
+    }
+
+    // And the choice actually paints, on the auth surface as much as the
+    // public one — the cookie is read the same way on every page.
+    let (_, headers, _) =
+        send(&state, "POST", "/appearance", None, Some("theme=dark&next=/")).await;
+    let cookie = session_from(&headers);
+    for path in ["/", "/dashboard/signin", "/signup"] {
+        let (_, body) = get(&state, path, Some(&cookie)).await;
+        assert!(
+            body.contains(r#"<html lang="en" class="dark" data-theme="dark">"#),
+            "{path} did not render dark"
+        );
+    }
+}
+
 /// The console must not be *addressable* from a hostname a customer controls:
 /// that is enough to host a convincing copy of its sign-in page on a domain
 /// their own visitors already trust.

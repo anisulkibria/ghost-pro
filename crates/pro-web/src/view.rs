@@ -349,8 +349,10 @@ code, .mono { font-family: var(--mono); }
 
 /* ---- appearance menu ----
    Ghost's own switcher offers Dark, Light and System from the account menu.
-   Same trio here, in the rail foot beside sign-out — and with no script, so
-   each row is a one-button form that posts the choice and comes back. */
+   Same trio here — in the rail foot beside sign-out on the panels, in the top
+   bar on the public pages, and in the corner of the chrome-free auth and error
+   pages — and with no script, so each row is a one-button form that posts the
+   choice and comes back. */
 .theme-menu > summary { list-style: none; }
 .theme-menu > summary::-webkit-details-marker { display: none; }
 /* The button shows the *resolved* scheme, not the preference: System on a
@@ -358,12 +360,24 @@ code, .mono { font-family: var(--mono); }
 .theme-menu > summary .t-moon { display: none; }
 html.dark .theme-menu > summary .t-moon { display: block; }
 html.dark .theme-menu > summary .t-sun { display: none; }
-/* The popover anchors to the whole rail-foot row rather than the 32px button,
-   so it can span the rail's width and still open inside it — the rail
-   scrolls, and a box hanging past its edge would grow a scrollbar. */
-.theme-menu .pop { position: absolute; left: 0; right: 0; bottom: calc(100% + 10px); z-index: 45;
+/* The popover anchors to the switcher itself, so it opens beside the button
+   wherever the button is put. That default matters: an absolutely positioned
+   box with no positioned ancestor falls back to the initial containing block,
+   and `bottom: 100%` against *that* lands the menu off the top of the page —
+   which is what made the public pages' switcher unclickable. Opening downward
+   is likewise the safe default, because every placement but the rail's sits at
+   the top of the viewport. The rail is the one exception, right below. */
+.theme-menu { position: relative; }
+.theme-menu .pop { position: absolute; top: calc(100% + 10px); bottom: auto; left: auto; right: 0;
+  width: 220px; z-index: 45;
   background: var(--sc-lowest); border: 1px solid var(--outline-variant); border-radius: 14px;
   box-shadow: var(--shadow-2); padding: 6px; }
+/* In the rail the popover anchors to the whole rail-foot row rather than the
+   32px button, so it can span the rail's width and still open inside it — the
+   rail scrolls, and a box hanging past its edge would grow a scrollbar. The
+   foot sits at the bottom of a tall column, so there it opens upward. */
+.rail .theme-menu { position: static; }
+.rail .theme-menu .pop { top: auto; bottom: calc(100% + 10px); left: 0; right: 0; width: auto; }
 .pop-title { margin: 6px 12px 8px; font-size: 11px; font-weight: 600; letter-spacing: .06em;
   text-transform: uppercase; color: var(--on-surface-variant); }
 .menu-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 9px;
@@ -700,6 +714,9 @@ table.tbl td.empty-cell { padding: 32px 16px; text-align: center; color: var(--o
 .auth .b1 { width: 420px; height: 420px; background: var(--pink-bg); top: -140px; left: -120px; }
 .auth .b2 { width: 380px; height: 380px; background: var(--blue-bg); bottom: -140px; right: -100px; }
 .auth .b3 { width: 300px; height: 300px; background: var(--purple-bg); bottom: -80px; left: 18%; opacity: .35; }
+/* The appearance switcher on a page with no bar to put it in. Above the blobs,
+   which are `pointer-events: none` but painted later in the source. */
+.auth-top { position: absolute; top: 16px; right: 16px; z-index: 2; }
 .auth-box { width: min(420px, 100%); position: relative; animation: rise .5s var(--ease) both; }
 .auth-logo { width: 60px; height: 60px; border-radius: 20px; background: var(--primary-container);
   color: var(--on-primary-container); display: grid; place-items: center; margin: 0 auto 20px; }
@@ -750,10 +767,12 @@ table.tbl td.empty-cell { padding: 32px 16px; text-align: center; color: var(--o
   .nav-item { flex: none; padding: 8px 14px 8px 10px; scroll-snap-align: start; }
   .nav-item .ic { display: none; }
   .rail-foot { margin: 0; padding: 0 8px 10px; }
-  /* The appearance menu opens upward, which is right when the rail is a tall
-     column whose foot sits at the bottom of the screen. As a top strip the
-     same rule would throw the popup off the top of the page. */
-  .theme-menu .pop { top: calc(100% + 10px); bottom: auto; left: auto; right: 0; width: 220px; }
+  /* The rail's appearance menu opens upward, which is right when the rail is a
+     tall column whose foot sits at the bottom of the screen. As a top strip the
+     same rule would throw the popup off the top of the page, so the strip goes
+     back to the shared default: anchored to the button, opening downward. */
+  .rail .theme-menu { position: relative; }
+  .rail .theme-menu .pop { top: calc(100% + 10px); bottom: auto; left: auto; right: 0; width: 220px; }
   .content { padding: 0 16px 48px; }
   .page-head { flex-wrap: wrap; }
   .grid2 { grid-template-columns: 1fr; }
@@ -1055,6 +1074,12 @@ pub fn public_page(p: Page) -> String {
 ///
 /// `heading` and `sub` sit above the card, as Ghost's own auth screens do;
 /// `body` is the card's contents.
+///
+/// Chrome-free does not mean appearance-free: these are the pages a signed-out
+/// visitor spends the longest on, so the switcher rides in the top corner. It
+/// posts no `next` of its own — `crate::public::appearance` reads the page to
+/// come back to off the `Referer`, which is what keeps a half-typed sign-in
+/// form on screen when somebody flips to dark.
 pub fn auth_page(
     title: &str,
     platform: &str,
@@ -1068,6 +1093,7 @@ pub fn auth_page(
     let inner = format!(
         r#"<div class="auth">
 <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
+<div class="auth-top">{appearance}</div>
 <div class="auth-box">
 <div class="auth-logo">{mark}</div>
 <h1>{heading}</h1>
@@ -1076,6 +1102,7 @@ pub fn auth_page(
 <div class="card padded">{card}</div>
 {foot}
 </div></div>"#,
+        appearance = appearance(theme, ""),
         mark = svg("ghost"),
         heading = esc(heading),
         sub = esc(sub),
@@ -1711,6 +1738,66 @@ mod tests {
         p.theme = Theme::Dark;
         let html = page(p);
         assert!(html.contains(r#"<html lang="en" class="dark" data-theme="dark">"#), "got {html}");
+    }
+
+    /// The switcher must be *on* every surface, not just the panels. A visitor
+    /// who has not signed in only ever sees the public pages and the auth
+    /// pages, so a control missing from those is a control they do not have.
+    #[test]
+    fn every_surface_carries_the_switcher() {
+        let rail = page(sample_page("", None, &[]));
+        let public = public_page(sample_page("", None, &[]));
+        let centred = auth_page("Sign in", "Pro", Theme::Light, "Sign in", "", None, "", "");
+        for (surface, html) in [("rail", &rail), ("public", &public), ("auth", &centred)] {
+            assert!(
+                html.contains(r#"<details class="theme-menu">"#),
+                "the {surface} surface has no appearance switcher"
+            );
+            // All three choices, or it is not a switcher.
+            for choice in [r#"value="dark""#, r#"value="light""#, r#"value="system""#] {
+                assert!(html.contains(choice), "the {surface} switcher is missing {choice}");
+            }
+        }
+    }
+
+    /// The popover is `position: absolute`, so it needs a positioned ancestor.
+    /// Without one it resolves against the initial containing block, and the
+    /// rail's `bottom: 100%` then puts it off the top of the page — which is
+    /// exactly how the public pages' switcher became unclickable. The anchor
+    /// and the direction are both asserted, because either one alone is enough
+    /// to lose the menu.
+    #[test]
+    fn the_popover_is_anchored_to_the_switcher_and_opens_into_the_page() {
+        let css = style();
+
+        // An anchor on the control itself, for every placement but the rail's.
+        assert!(css.contains(".theme-menu { position: relative; }"), "no positioning context");
+        // And downward, because every such placement sits at the top of the page.
+        let default_pop = declarations(css, ".theme-menu .pop {");
+        assert!(
+            default_pop.contains("top: calc(100% + 10px)") && default_pop.contains("bottom: auto"),
+            "the default popover must open downward, got: {default_pop}"
+        );
+
+        // The rail is the exception: it anchors to the foot row and opens
+        // upward, out of the bottom of a tall column.
+        assert!(css.contains(".rail .theme-menu { position: static; }"));
+        let rail_pop = declarations(css, ".rail .theme-menu .pop {");
+        assert!(
+            rail_pop.contains("bottom: calc(100% + 10px)") && rail_pop.contains("top: auto"),
+            "the rail popover must open upward, got: {rail_pop}"
+        );
+    }
+
+    /// The declarations of the first rule with this selector. The stylesheet is
+    /// a string constant, so this is enough of a parser to assert on one rule.
+    fn declarations<'a>(css: &'a str, selector: &str) -> &'a str {
+        css.split(selector)
+            .nth(1)
+            .unwrap_or_else(|| panic!("no rule for {selector}"))
+            .split('}')
+            .next()
+            .unwrap()
     }
 
     /// A flash survives a redirect and is escaped on the way out.

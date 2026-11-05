@@ -209,6 +209,34 @@ fn host_of(url: &str) -> Option<String> {
     Some(pro_core::normalize_host(authority))
 }
 
+/// The path the request came from, when that was a page on this platform.
+///
+/// Only for coming back to where somebody already was — the appearance
+/// switcher, which has no session to protect and no state of its own. Never
+/// trust it for anything a cross-site page could exploit by setting it.
+///
+/// `Referrer-Policy: strict-origin-when-cross-origin` (see [`crate::reply`])
+/// sends the full URL on a same-origin request and only the bare origin
+/// cross-site, so a path arrives here only from one of our own pages. The host
+/// is checked regardless, and the fragment and the scheme-relative `//host`
+/// form are both dropped, so what comes back is always a path on this site.
+pub fn local_path_from_referer(headers: &HeaderMap, expected_host: &str) -> Option<String> {
+    let referer = headers.get("referer").and_then(|v| v.to_str().ok())?;
+    if host_of(referer)? != pro_core::normalize_host(expected_host) {
+        return None;
+    }
+    // Everything from the authority's first `/` on — the path and the query,
+    // with any fragment cut off.
+    let after_scheme = referer.split("://").nth(1)?;
+    let path = &after_scheme[after_scheme.find('/')?..];
+    let path = path.split('#').next()?;
+    if path.starts_with('/') && !path.starts_with("//") {
+        Some(path.to_string())
+    } else {
+        None
+    }
+}
+
 /// Refuse a cross-site POST.
 pub fn require_same_origin(headers: &HeaderMap, expected_host: &str) -> Result<()> {
     if same_origin(headers, expected_host) {

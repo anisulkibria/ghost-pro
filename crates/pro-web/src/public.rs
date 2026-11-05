@@ -93,7 +93,8 @@ pub async fn appearance(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_redirect("/", &chrome, async {
-        auth::require_same_origin(&headers, &state.config.host())?;
+        let host = state.config.host();
+        auth::require_same_origin(&headers, &host)?;
         let theme = Theme::parse(&form.theme)
             .ok_or_else(|| ProError::BadRequest("Unknown appearance.".into()))?;
 
@@ -101,15 +102,26 @@ pub async fn appearance(
         // a path on this platform. An open redirect is an open redirect even
         // when the parameter looks harmless, and `//evil.example` is a
         // protocol-relative URL that a naive `starts_with('/')` would pass.
+        //
+        // The `Referer` is preferred over the form's own `next`, because it is
+        // the page the visitor was actually reading: a rail or a top bar is
+        // rendered once per panel and can only name that panel's root, so the
+        // hidden field would throw somebody off a site's detail page or out of
+        // a half-filled sign-in form. It is validated the same way, and only a
+        // same-origin request carries a path at all — see
+        // `auth::local_path_from_referer`. The field stays as the fallback for
+        // the browsers and privacy tools that send no `Referer`.
         let next = form.next.trim();
-        let back = if next.starts_with('/') && !next.starts_with("//") {
-            next
-        } else {
-            "/"
-        };
+        let back = auth::local_path_from_referer(&headers, &host).unwrap_or_else(|| {
+            if next.starts_with('/') && !next.starts_with("//") {
+                next.to_string()
+            } else {
+                "/".to_string()
+            }
+        });
 
         Ok(redirect_with_cookie(
-            back,
+            &back,
             &auth::set_plain_cookie(view::THEME_COOKIE, theme.as_str(), state.secure_cookies()),
         ))
     }
