@@ -265,6 +265,25 @@ will fail. <a href="/console/settings">Fix</a>"#,
             esc(&live.billing_provider())
         ));
     }
+    // A checkout that completes and never reopens the site. Worth its own
+    // warning because it is invisible from the checkout path — the operator
+    // sees a working button, and only a paying customer finds out otherwise.
+    if live.billing_provider() != "none" {
+        if let Some(reason) = state.config.webhook_unreachable_reason() {
+            warnings.push(format!(
+                r#"{reason}. Serve the platform on a public address, or open paid sites by hand
+from <a href="/console/sites">Sites</a>."#,
+                reason = esc(&reason),
+            ));
+        } else if live.webhook_secret(&live.billing_provider()).is_none() {
+            warnings.push(format!(
+                r#"No webhook signing secret for <strong>{}</strong>, so every payment
+notification is refused and paid sites stay closed.
+<a href="/console/settings">Set one</a>"#,
+                esc(&live.billing_provider())
+            ));
+        }
+    }
     // The mailer's own verdict, not a second guess at it: this warning used
     // to check the transport alone, so a platform set to SMTP with no host or
     // no from address showed an all-clear console while every message went to
@@ -608,7 +627,11 @@ change what the customer is charged.</p></form></div>"#,
                     } else {
                         ""
                     },
-                    status = view::domain_pill(d.status),
+                    status = if tenant.status.serves_public() {
+                        view::domain_pill(d.status)
+                    } else {
+                        view::domain_pill_closed(d.status)
+                    },
                     kind = esc(d.kind.as_str()),
                     checked = esc(&view::when(d.last_checked_at.as_deref())),
                     error = esc(d.last_error.as_deref().unwrap_or("")),

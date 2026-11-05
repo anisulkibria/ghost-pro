@@ -1270,6 +1270,26 @@ pub fn domain_pill(status: pro_core::DomainStatus) -> String {
     status_pill(status.label(), kind)
 }
 
+/// The chip for a domain on a site that is not serving the public.
+///
+/// A domain's own state and whether the site answers are two different
+/// questions, and the address table is where a customer looks for the second
+/// one. On a suspended site every address is shut regardless of how healthy
+/// its DNS is, so saying so once — in place of the domain's state — is more
+/// use than a green chip that has to be read together with a banner further
+/// up the page.
+///
+/// A domain that has not resolved yet keeps its own label: "Waiting for DNS"
+/// is still the thing its owner has to act on, and it stays true whether the
+/// site is open or closed.
+pub fn domain_pill_closed(status: pro_core::DomainStatus) -> String {
+    use pro_core::DomainStatus as D;
+    match status {
+        D::Active | D::Verified => status_pill("Not serving", PillKind::Idle),
+        other => domain_pill(other),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Page furniture
 // ---------------------------------------------------------------------------
@@ -1974,6 +1994,36 @@ mod tests {
         assert!(domain_pill(pro_core::DomainStatus::Failed).contains("chip bad"));
         // The label comes from the model, so it stays consistent with the API.
         assert!(tenant_pill(pro_core::TenantStatus::Active).contains("Active"));
+    }
+
+    /// A domain chip describes the hostname, never the site's publication
+    /// state — so on a site that is not serving the public it must not read as
+    /// though visitors are getting the site.
+    #[test]
+    fn a_closed_site_shows_no_address_as_serving() {
+        use pro_core::DomainStatus as D;
+
+        for status in [D::Active, D::Verified] {
+            let chip = domain_pill_closed(status);
+            assert!(chip.contains("Not serving"), "got {chip}");
+            assert!(chip.contains("chip idle"), "and it must not read as healthy: {chip}");
+            assert!(!chip.contains("Live"), "got {chip}");
+        }
+
+        // A hostname that has not resolved yet keeps the instruction its owner
+        // still has to act on.
+        let pending = domain_pill_closed(D::Pending);
+        assert!(pending.contains("Waiting for DNS"), "got {pending}");
+        assert!(domain_pill_closed(D::Failed).contains("DNS not found"));
+    }
+
+    /// "Live" said the site was up. It was a statement about DNS and a
+    /// certificate, and on a suspended site it was the opposite of the truth.
+    #[test]
+    fn a_connected_domain_does_not_claim_to_be_live() {
+        let chip = domain_pill(pro_core::DomainStatus::Active);
+        assert!(chip.contains("Connected"), "got {chip}");
+        assert!(!chip.contains("Live"), "got {chip}");
     }
 
     /// A table's header may mark a column as numeric, and the class has to

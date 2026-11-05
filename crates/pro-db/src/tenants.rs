@@ -1,10 +1,11 @@
 //! Tenant records, and the two pieces of bookkeeping that only the database
 //! can do safely: allocating a port and claiming a slug.
 use pro_core::{ids, now_iso, DbErrorExt, ProError, Result, Tenant, TenantStatus};
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, SqlitePool};
+use crate::Db;
+use sqlx::any::AnyRow;
+use sqlx::Row;
 
-fn map(row: &SqliteRow) -> Tenant {
+fn map(row: &AnyRow) -> Tenant {
     Tenant {
         id: row.get("id"),
         slug: row.get("slug"),
@@ -44,7 +45,7 @@ const COLS: &str = "id, slug, name, account_id, plan_slug, status, port, period_
 /// missing, two tenants would be told to bind the same port and one would
 /// silently fail to start.
 pub async fn create(
-    pool: &SqlitePool,
+    pool: &Db,
     account_id: &str,
     slug: &str,
     name: &str,
@@ -123,7 +124,7 @@ pub async fn create(
     get(pool, &id).await
 }
 
-pub async fn get(pool: &SqlitePool, id: &str) -> Result<Tenant> {
+pub async fn get(pool: &Db, id: &str) -> Result<Tenant> {
     let row = sqlx::query(&format!("SELECT {COLS} FROM tenants WHERE id = ?"))
         .bind(id)
         .fetch_optional(pool)
@@ -133,7 +134,7 @@ pub async fn get(pool: &SqlitePool, id: &str) -> Result<Tenant> {
     Ok(map(&row))
 }
 
-pub async fn find_by_slug(pool: &SqlitePool, slug: &str) -> Result<Option<Tenant>> {
+pub async fn find_by_slug(pool: &Db, slug: &str) -> Result<Option<Tenant>> {
     let row = sqlx::query(&format!("SELECT {COLS} FROM tenants WHERE lower(slug) = lower(?)"))
         .bind(slug)
         .fetch_optional(pool)
@@ -143,7 +144,7 @@ pub async fn find_by_slug(pool: &SqlitePool, slug: &str) -> Result<Option<Tenant
 }
 
 /// Every tenant belonging to one customer, newest first.
-pub async fn list_for_account(pool: &SqlitePool, account_id: &str) -> Result<Vec<Tenant>> {
+pub async fn list_for_account(pool: &Db, account_id: &str) -> Result<Vec<Tenant>> {
     let rows = sqlx::query(&format!(
         "SELECT {COLS} FROM tenants WHERE account_id = ? AND status != 'deleted' \
          ORDER BY created_at DESC"
@@ -157,7 +158,7 @@ pub async fn list_for_account(pool: &SqlitePool, account_id: &str) -> Result<Vec
 
 /// Tenants for the operator's console, filtered and paged.
 pub async fn list(
-    pool: &SqlitePool,
+    pool: &Db,
     status: Option<TenantStatus>,
     search: Option<&str>,
     limit: i64,
@@ -184,14 +185,14 @@ pub async fn list(
     Ok(rows.iter().map(map).collect())
 }
 
-pub async fn count_by_status(pool: &SqlitePool) -> Result<Vec<(String, i64)>> {
+pub async fn count_by_status(pool: &Db) -> Result<Vec<(String, i64)>> {
     sqlx::query_as("SELECT status, COUNT(*) FROM tenants GROUP BY status")
         .fetch_all(pool)
         .await
         .db_err()
 }
 
-pub async fn set_status(pool: &SqlitePool, id: &str, status: TenantStatus) -> Result<()> {
+pub async fn set_status(pool: &Db, id: &str, status: TenantStatus) -> Result<()> {
     sqlx::query("UPDATE tenants SET status = ?, updated_at = ? WHERE id = ?")
         .bind(status.as_str())
         .bind(now_iso())
@@ -208,7 +209,7 @@ pub async fn set_status(pool: &SqlitePool, id: &str, status: TenantStatus) -> Re
 /// `hostSettings` is written and the tenant process restarted — which is
 /// `pro_provision::apply_plan`'s job, and is why that is the function callers
 /// should reach for rather than this one.
-pub async fn set_plan(pool: &SqlitePool, id: &str, plan_slug: &str) -> Result<()> {
+pub async fn set_plan(pool: &Db, id: &str, plan_slug: &str) -> Result<()> {
     sqlx::query("UPDATE tenants SET plan_slug = ?, updated_at = ? WHERE id = ?")
         .bind(plan_slug)
         .bind(now_iso())
@@ -219,7 +220,7 @@ pub async fn set_plan(pool: &SqlitePool, id: &str, plan_slug: &str) -> Result<()
     Ok(())
 }
 
-pub async fn suspend(pool: &SqlitePool, id: &str, reason: &str) -> Result<()> {
+pub async fn suspend(pool: &Db, id: &str, reason: &str) -> Result<()> {
     let now = now_iso();
     sqlx::query(
         "UPDATE tenants SET status = 'suspended', suspended_at = ?, suspended_reason = ?, \
@@ -235,7 +236,7 @@ pub async fn suspend(pool: &SqlitePool, id: &str, reason: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn unsuspend(pool: &SqlitePool, id: &str) -> Result<()> {
+pub async fn unsuspend(pool: &Db, id: &str) -> Result<()> {
     sqlx::query(
         "UPDATE tenants SET status = 'active', suspended_at = NULL, suspended_reason = NULL, \
          updated_at = ? WHERE id = ?",
@@ -250,7 +251,7 @@ pub async fn unsuspend(pool: &SqlitePool, id: &str) -> Result<()> {
 
 /// Remember (or forget) the platform's admin key for this site.
 pub async fn set_platform_key(
-    pool: &SqlitePool,
+    pool: &Db,
     id: &str,
     key_id: Option<&str>,
     key_secret: Option<&str>,
@@ -275,7 +276,7 @@ pub async fn set_platform_key(
 /// waiting to die — inert today, because the sweep only looks at
 /// `pending_deletion`, but a stale execution date on an active site is a
 /// trap for any future query that trusts it.
-pub async fn clear_deletion(pool: &SqlitePool, id: &str) -> Result<()> {
+pub async fn clear_deletion(pool: &Db, id: &str) -> Result<()> {
     sqlx::query(
         "UPDATE tenants SET status = 'active', delete_after = NULL, suspended_at = NULL, \
          suspended_reason = NULL, updated_at = ? WHERE id = ?",
@@ -294,7 +295,7 @@ pub async fn clear_deletion(pool: &SqlitePool, id: &str) -> Result<()> {
 /// customer changing their mind, and the second commonest is a mistake — so
 /// the window between "deleted" and "gone" is the single most valuable piece
 /// of this whole lifecycle.
-pub async fn schedule_deletion(pool: &SqlitePool, id: &str, grace_days: i64) -> Result<()> {
+pub async fn schedule_deletion(pool: &Db, id: &str, grace_days: i64) -> Result<()> {
     let now = now_iso();
     sqlx::query(
         "UPDATE tenants SET status = 'pending_deletion', delete_after = ?, updated_at = ? \
@@ -310,7 +311,7 @@ pub async fn schedule_deletion(pool: &SqlitePool, id: &str, grace_days: i64) -> 
 }
 
 /// Tenants whose grace period has expired and whose files may now go.
-pub async fn due_for_deletion(pool: &SqlitePool) -> Result<Vec<Tenant>> {
+pub async fn due_for_deletion(pool: &Db) -> Result<Vec<Tenant>> {
     let rows = sqlx::query(&format!(
         "SELECT {COLS} FROM tenants WHERE status = 'pending_deletion' \
          AND delete_after IS NOT NULL AND delete_after <= ?"
@@ -324,7 +325,7 @@ pub async fn due_for_deletion(pool: &SqlitePool) -> Result<Vec<Tenant>> {
 
 /// Mark a tenant's files as gone. The row survives so the slug is not
 /// immediately reissued and the audit trail still resolves.
-pub async fn mark_deleted(pool: &SqlitePool, id: &str) -> Result<()> {
+pub async fn mark_deleted(pool: &Db, id: &str) -> Result<()> {
     sqlx::query(
         "UPDATE tenants SET status = 'deleted', delete_after = NULL, storage_bytes = 0, \
          updated_at = ? WHERE id = ?",
@@ -344,7 +345,7 @@ pub async fn mark_deleted(pool: &SqlitePool, id: &str) -> Result<()> {
 /// *not* touched: that column means "an operator or the platform changed
 /// something", and letting traffic move it would make it useless for spotting
 /// real changes.
-pub async fn touch(pool: &SqlitePool, id: &str) -> Result<()> {
+pub async fn touch(pool: &Db, id: &str) -> Result<()> {
     sqlx::query("UPDATE tenants SET last_request_at = ? WHERE id = ?")
         .bind(now_iso())
         .bind(id)
@@ -354,7 +355,7 @@ pub async fn touch(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn set_storage_bytes(pool: &SqlitePool, id: &str, bytes: i64) -> Result<()> {
+pub async fn set_storage_bytes(pool: &Db, id: &str, bytes: i64) -> Result<()> {
     sqlx::query("UPDATE tenants SET storage_bytes = ? WHERE id = ?")
         .bind(bytes)
         .bind(id)
@@ -368,7 +369,7 @@ pub async fn set_storage_bytes(pool: &SqlitePool, id: &str, bytes: i64) -> Resul
 ///
 /// Called when a subscription renews, so the tenant's email allowance resets
 /// on their own billing anniversary rather than on a calendar month.
-pub async fn set_period_start(pool: &SqlitePool, id: &str, period_start: &str) -> Result<()> {
+pub async fn set_period_start(pool: &Db, id: &str, period_start: &str) -> Result<()> {
     sqlx::query("UPDATE tenants SET period_start = ?, updated_at = ? WHERE id = ?")
         .bind(period_start)
         .bind(now_iso())
@@ -379,7 +380,7 @@ pub async fn set_period_start(pool: &SqlitePool, id: &str, period_start: &str) -
     Ok(())
 }
 
-pub async fn rename(pool: &SqlitePool, id: &str, name: &str) -> Result<()> {
+pub async fn rename(pool: &Db, id: &str, name: &str) -> Result<()> {
     sqlx::query("UPDATE tenants SET name = ?, updated_at = ? WHERE id = ?")
         .bind(name)
         .bind(now_iso())
@@ -392,7 +393,7 @@ pub async fn rename(pool: &SqlitePool, id: &str, name: &str) -> Result<()> {
 
 /// How many sites this account has that are not deleted — for the per-account
 /// site allowance.
-pub async fn count_for_account(pool: &SqlitePool, account_id: &str) -> Result<i64> {
+pub async fn count_for_account(pool: &Db, account_id: &str) -> Result<i64> {
     sqlx::query_scalar(
         "SELECT COUNT(*) FROM tenants WHERE account_id = ? AND status != 'deleted'",
     )
@@ -406,7 +407,7 @@ pub async fn count_for_account(pool: &SqlitePool, account_id: &str) -> Result<i6
 mod tests {
     use super::*;
 
-    async fn fixture() -> (SqlitePool, String) {
+    async fn fixture() -> (Db, String) {
         let pool = crate::pool::open_in_memory().await.unwrap();
         let account = crate::accounts::create(&pool, "owner@example.com", "Owner", "hash")
             .await

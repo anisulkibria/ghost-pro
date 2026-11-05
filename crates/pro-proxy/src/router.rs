@@ -13,7 +13,7 @@
 //! front of a unique index: the database is the authority, and the cache is
 //! invalidated explicitly whenever routing changes rather than merely expiring.
 use pro_core::{normalize_host, Tenant};
-use pro_db::SqlitePool;
+use pro_db::Db;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -50,7 +50,7 @@ impl Router {
     }
 
     /// Resolve a `Host` header.
-    pub async fn resolve(&self, pool: &SqlitePool, host: &str) -> Route {
+    pub async fn resolve(&self, pool: &Db, host: &str) -> Route {
         let host = normalize_host(host);
         if host.is_empty() {
             return Route::Unknown;
@@ -166,7 +166,7 @@ pub struct Target {
 /// `publicSiteAccess` limit closes the public half of the site while leaving
 /// its admin reachable, so the owner can sign in and pay. Refusing at the edge
 /// instead would lock them out of the screen that fixes the problem.
-pub async fn target(pool: &SqlitePool, tenant_id: &str) -> Option<Target> {
+pub async fn target(pool: &Db, tenant_id: &str) -> Option<Target> {
     match pro_db::tenants::get(pool, tenant_id).await {
         Ok(tenant) if tenant.status.is_routable() => Some(Target { tenant }),
         Ok(tenant) => {
@@ -191,7 +191,7 @@ mod tests {
     use super::*;
     use pro_core::{DomainKind, DomainStatus, TenantStatus};
 
-    async fn fixture() -> (SqlitePool, Router, String) {
+    async fn fixture() -> (Db, Router, String) {
         let pool = pro_db::open_in_memory().await.unwrap();
         let account = pro_db::accounts::create(&pool, "o@example.com", "O", "h").await.unwrap();
         let tenant = pro_db::tenants::create(

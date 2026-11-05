@@ -191,6 +191,22 @@ impl TenantStatus {
         matches!(self, TenantStatus::Active | TenantStatus::Suspended | TenantStatus::PendingDeletion)
     }
 
+    /// Whether the *public* site answers a visitor, as opposed to the site
+    /// merely being routed to.
+    ///
+    /// The distinction [`Self::is_routable`] leaves out, and the one a
+    /// customer reading their dashboard actually cares about. A suspended site
+    /// is routable — that is what keeps its admin reachable so the owner can
+    /// pay — but its `publicSiteAccess` limit closes the public half, so a
+    /// visitor gets "this site is not currently published". Showing an address
+    /// on such a site as "Live" states the opposite of what happens.
+    ///
+    /// Pending deletion still serves: nothing has been removed yet, and the
+    /// owner can still cancel.
+    pub fn serves_public(self) -> bool {
+        matches!(self, TenantStatus::Active | TenantStatus::PendingDeletion)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             TenantStatus::Provisioning => "Setting up",
@@ -352,11 +368,19 @@ impl DomainStatus {
             _ => return None,
         })
     }
+    /// What to call this state to a customer.
+    ///
+    /// `Active` is "Connected", not "Live". Everything in this enum is a fact
+    /// about the *hostname* — whether DNS points here and a certificate has
+    /// been issued — and none of it says whether the site behind it is open to
+    /// the public. Calling it "Live" conflated the two, and on a site
+    /// suspended awaiting payment the dashboard showed a green "Live" chip
+    /// beside an address that was serving `503` to every visitor.
     pub fn label(self) -> &'static str {
         match self {
             DomainStatus::Pending => "Waiting for DNS",
             DomainStatus::Verified => "Issuing certificate",
-            DomainStatus::Active => "Live",
+            DomainStatus::Active => "Connected",
             DomainStatus::Failed => "DNS not found",
         }
     }
@@ -524,6 +548,24 @@ mod tests {
                     .is_suspended_for_billing(),
                 "{status:?} is not suspended"
             );
+        }
+    }
+
+    /// Routable and serving the public are different questions, and conflating
+    /// them is what showed a suspended site's address as "Live". A suspended
+    /// site is deliberately still routed — that is what keeps its admin
+    /// reachable so the owner can pay — while its public half is shut.
+    #[test]
+    fn a_suspended_site_is_routed_but_not_serving() {
+        assert!(TenantStatus::Suspended.is_routable(), "the admin must stay reachable");
+        assert!(!TenantStatus::Suspended.serves_public(), "but visitors get nothing");
+
+        assert!(TenantStatus::Active.serves_public());
+        // Nothing has been removed yet and the owner can still cancel.
+        assert!(TenantStatus::PendingDeletion.serves_public());
+
+        for status in [TenantStatus::Provisioning, TenantStatus::Deleted, TenantStatus::Failed] {
+            assert!(!status.serves_public(), "{status:?} must not serve the public");
         }
     }
 }

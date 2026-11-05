@@ -31,7 +31,9 @@ tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["multipart", "macros", "query"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["fs", "cors", "trace", "compression-gzip"] }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate", "chrono", "json"] }
+# `any` is what lets one build run on either engine, chosen from the URL at
+# runtime: SQLite locally, MySQL in production. See pro_db::pool.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "mysql", "any", "macros", "migrate", "chrono", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }

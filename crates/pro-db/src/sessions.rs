@@ -22,7 +22,8 @@
 //! standing between a customer and the console — and a cookie name is not a
 //! security boundary, it is a label.
 use pro_core::{ids, now_iso, DbErrorExt, ProError, Result};
-use sqlx::{Row, SqlitePool};
+use crate::Db;
+use sqlx::Row;
 
 /// Customer session cookie. `__Host-` locks it to this exact host over HTTPS
 /// with no `Domain` attribute, which stops a compromised tenant subdomain
@@ -84,7 +85,7 @@ pub const STAFF_TTL_DAYS: i64 = 7;
 /// A dump of the sessions table is therefore a list of useless hashes rather
 /// than a set of live logins.
 pub async fn create(
-    pool: &SqlitePool,
+    pool: &Db,
     subject: Subject,
     subject_id: &str,
     ip: Option<&str>,
@@ -121,7 +122,7 @@ pub async fn create(
 ///
 /// `subject` is not a hint — it is part of the lookup. A customer's token
 /// presented to the console finds nothing, even though the row exists.
-pub async fn resolve(pool: &SqlitePool, subject: Subject, token: &str) -> Result<String> {
+pub async fn resolve(pool: &Db, subject: Subject, token: &str) -> Result<String> {
     if token.is_empty() {
         return Err(ProError::Unauthorized("Not signed in.".into()));
     }
@@ -153,7 +154,7 @@ pub async fn resolve(pool: &SqlitePool, subject: Subject, token: &str) -> Result
 }
 
 /// End one session — signing out.
-pub async fn destroy(pool: &SqlitePool, token: &str) -> Result<()> {
+pub async fn destroy(pool: &Db, token: &str) -> Result<()> {
     sqlx::query("DELETE FROM sessions WHERE token_hash = ?")
         .bind(ids::sha256_hex(token))
         .execute(pool)
@@ -167,7 +168,7 @@ pub async fn destroy(pool: &SqlitePool, token: &str) -> Result<()> {
 /// Called on a password change and when an account is blocked — a password
 /// reset that left old sessions alive would not actually lock anybody out,
 /// which is the entire point of resetting it.
-pub async fn destroy_all(pool: &SqlitePool, subject: Subject, subject_id: &str) -> Result<u64> {
+pub async fn destroy_all(pool: &Db, subject: Subject, subject_id: &str) -> Result<u64> {
     let r = sqlx::query("DELETE FROM sessions WHERE subject_type = ? AND subject_id = ?")
         .bind(subject.as_str())
         .bind(subject_id)
@@ -179,7 +180,7 @@ pub async fn destroy_all(pool: &SqlitePool, subject: Subject, subject_id: &str) 
 
 /// Delete expired rows. Run on a timer; nothing depends on it for
 /// correctness, since every lookup already filters on `expires_at`.
-pub async fn purge_expired(pool: &SqlitePool) -> Result<u64> {
+pub async fn purge_expired(pool: &Db) -> Result<u64> {
     let r = sqlx::query("DELETE FROM sessions WHERE expires_at <= ?")
         .bind(now_iso())
         .execute(pool)
@@ -199,7 +200,7 @@ pub struct SessionInfo {
 }
 
 pub async fn list_for(
-    pool: &SqlitePool,
+    pool: &Db,
     subject: Subject,
     subject_id: &str,
 ) -> Result<Vec<SessionInfo>> {
@@ -231,7 +232,7 @@ pub async fn list_for(
 /// Scoped by subject so a caller can only ever revoke their own — passing
 /// somebody else's session id finds nothing.
 pub async fn revoke(
-    pool: &SqlitePool,
+    pool: &Db,
     subject: Subject,
     subject_id: &str,
     session_id: &str,
@@ -250,7 +251,7 @@ pub async fn revoke(
 mod tests {
     use super::*;
 
-    async fn pool() -> SqlitePool {
+    async fn pool() -> Db {
         crate::pool::open_in_memory().await.unwrap()
     }
 

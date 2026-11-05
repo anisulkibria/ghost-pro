@@ -9,10 +9,11 @@
 use pro_core::{
     ids, normalize_host, now_iso, DbErrorExt, Domain, DomainKind, DomainStatus, ProError, Result,
 };
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, SqlitePool};
+use crate::Db;
+use sqlx::any::AnyRow;
+use sqlx::Row;
 
-fn map(row: &SqliteRow) -> Domain {
+fn map(row: &AnyRow) -> Domain {
     Domain {
         id: row.get("id"),
         tenant_id: row.get("tenant_id"),
@@ -93,7 +94,7 @@ pub fn validate_hostname(host: &str) -> Result<String> {
 /// nothing to prove. A custom domain starts `Pending` and gets a verification
 /// token, and serves nothing until a DNS check promotes it.
 pub async fn add(
-    pool: &SqlitePool,
+    pool: &Db,
     tenant_id: &str,
     host: &str,
     kind: DomainKind,
@@ -150,7 +151,7 @@ pub async fn add(
     get(pool, &id).await
 }
 
-pub async fn get(pool: &SqlitePool, id: &str) -> Result<Domain> {
+pub async fn get(pool: &Db, id: &str) -> Result<Domain> {
     let row = sqlx::query(&format!("SELECT {COLS} FROM domains WHERE id = ?"))
         .bind(id)
         .fetch_optional(pool)
@@ -160,7 +161,7 @@ pub async fn get(pool: &SqlitePool, id: &str) -> Result<Domain> {
     Ok(map(&row))
 }
 
-pub async fn find_by_host(pool: &SqlitePool, host: &str) -> Result<Option<Domain>> {
+pub async fn find_by_host(pool: &Db, host: &str) -> Result<Option<Domain>> {
     let row = sqlx::query(&format!("SELECT {COLS} FROM domains WHERE lower(domain) = lower(?)"))
         .bind(normalize_host(host))
         .fetch_optional(pool)
@@ -169,7 +170,7 @@ pub async fn find_by_host(pool: &SqlitePool, host: &str) -> Result<Option<Domain
     Ok(row.as_ref().map(map))
 }
 
-pub async fn list_for_tenant(pool: &SqlitePool, tenant_id: &str) -> Result<Vec<Domain>> {
+pub async fn list_for_tenant(pool: &Db, tenant_id: &str) -> Result<Vec<Domain>> {
     let rows = sqlx::query(&format!(
         "SELECT {COLS} FROM domains WHERE tenant_id = ? ORDER BY is_primary DESC, created_at"
     ))
@@ -181,7 +182,7 @@ pub async fn list_for_tenant(pool: &SqlitePool, tenant_id: &str) -> Result<Vec<D
 }
 
 /// The tenant's canonical hostname — what its Ghost `url` is set to.
-pub async fn primary_for_tenant(pool: &SqlitePool, tenant_id: &str) -> Result<Option<Domain>> {
+pub async fn primary_for_tenant(pool: &Db, tenant_id: &str) -> Result<Option<Domain>> {
     let row = sqlx::query(&format!(
         "SELECT {COLS} FROM domains WHERE tenant_id = ? AND is_primary = 1"
     ))
@@ -193,7 +194,7 @@ pub async fn primary_for_tenant(pool: &SqlitePool, tenant_id: &str) -> Result<Op
 }
 
 /// How many custom domains this tenant has, for the plan's allowance.
-pub async fn count_custom(pool: &SqlitePool, tenant_id: &str) -> Result<i64> {
+pub async fn count_custom(pool: &Db, tenant_id: &str) -> Result<i64> {
     sqlx::query_scalar("SELECT COUNT(*) FROM domains WHERE tenant_id = ? AND kind = 'custom'")
         .bind(tenant_id)
         .fetch_one(pool)
@@ -207,7 +208,7 @@ pub async fn count_custom(pool: &SqlitePool, tenant_id: &str) -> Result<i64> {
 /// `active` domains, and only for tenants that are routable — a pending
 /// domain has not been proved, and a certificate for it would be a
 /// certificate for a hostname somebody else may control.
-pub async fn all_routable(pool: &SqlitePool) -> Result<Vec<(String, String)>> {
+pub async fn all_routable(pool: &Db) -> Result<Vec<(String, String)>> {
     sqlx::query_as(
         "SELECT d.domain, d.tenant_id FROM domains d \
          JOIN tenants t ON t.id = d.tenant_id \
@@ -220,7 +221,7 @@ pub async fn all_routable(pool: &SqlitePool) -> Result<Vec<(String, String)>> {
 }
 
 /// Domains waiting on DNS, for the verification sweeper.
-pub async fn pending_verification(pool: &SqlitePool, limit: i64) -> Result<Vec<Domain>> {
+pub async fn pending_verification(pool: &Db, limit: i64) -> Result<Vec<Domain>> {
     let rows = sqlx::query(&format!(
         "SELECT {COLS} FROM domains WHERE kind = 'custom' AND status IN ('pending', 'failed') \
          ORDER BY COALESCE(last_checked_at, '') LIMIT ?"
@@ -233,7 +234,7 @@ pub async fn pending_verification(pool: &SqlitePool, limit: i64) -> Result<Vec<D
 }
 
 pub async fn set_status(
-    pool: &SqlitePool,
+    pool: &Db,
     id: &str,
     status: DomainStatus,
     error: Option<&str>,
@@ -262,7 +263,7 @@ pub async fn set_status(
 /// Only a live domain may be promoted. Pointing a tenant's `url` at a hostname
 /// that does not resolve here yet would break every link on the site the
 /// moment it restarted.
-pub async fn set_primary(pool: &SqlitePool, tenant_id: &str, domain_id: &str) -> Result<()> {
+pub async fn set_primary(pool: &Db, tenant_id: &str, domain_id: &str) -> Result<()> {
     let d = get(pool, domain_id).await?;
     if d.tenant_id != tenant_id {
         return Err(ProError::NotFound("no such domain on this site".into()));
@@ -295,7 +296,7 @@ pub async fn set_primary(pool: &SqlitePool, tenant_id: &str, domain_id: &str) ->
 /// the one that still works when a customer's DNS breaks or their registrar
 /// lapses. Without it a tenant could become permanently unreachable, including
 /// its admin, with no way back in.
-pub async fn remove(pool: &SqlitePool, tenant_id: &str, domain_id: &str) -> Result<()> {
+pub async fn remove(pool: &Db, tenant_id: &str, domain_id: &str) -> Result<()> {
     let d = get(pool, domain_id).await?;
     if d.tenant_id != tenant_id {
         return Err(ProError::NotFound("no such domain on this site".into()));
@@ -334,7 +335,7 @@ pub async fn remove(pool: &SqlitePool, tenant_id: &str, domain_id: &str) -> Resu
 mod tests {
     use super::*;
 
-    async fn fixture() -> (SqlitePool, String) {
+    async fn fixture() -> (Db, String) {
         let pool = crate::pool::open_in_memory().await.unwrap();
         let account = crate::accounts::create(&pool, "o@example.com", "O", "h").await.unwrap();
         let tenant = crate::tenants::create(

@@ -7,15 +7,16 @@
 //! means everything downstream — entitlement, dunning, the dashboard — is
 //! written once rather than three times.
 use pro_core::{ids, now_iso, DbErrorExt, ProError, Result, Subscription};
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, SqlitePool};
+use crate::Db;
+use sqlx::any::AnyRow;
+use sqlx::Row;
 
 /// The statuses this table stores. Anything a provider sends is mapped onto
 /// one of these before it gets here.
 pub const STATUSES: &[&str] =
     &["trialing", "active", "past_due", "paused", "canceled", "expired"];
 
-fn map(row: &SqliteRow) -> Subscription {
+fn map(row: &AnyRow) -> Subscription {
     Subscription {
         id: row.get("id"),
         account_id: row.get("account_id"),
@@ -75,7 +76,7 @@ pub struct Upsert<'a> {
 ///   first failure rather than from the most recent retry. Without that, a
 ///   provider that retries daily would reset the clock every day and a site
 ///   would never be suspended.
-pub async fn upsert(pool: &SqlitePool, up: Upsert<'_>) -> Result<Subscription> {
+pub async fn upsert(pool: &Db, up: Upsert<'_>) -> Result<Subscription> {
     if let Some(status) = up.status {
         if !STATUSES.contains(&status) {
             // A provider status that was not translated is a bug in
@@ -167,7 +168,7 @@ pub async fn upsert(pool: &SqlitePool, up: Upsert<'_>) -> Result<Subscription> {
     }
 }
 
-pub async fn get(pool: &SqlitePool, id: &str) -> Result<Subscription> {
+pub async fn get(pool: &Db, id: &str) -> Result<Subscription> {
     let row = sqlx::query(&format!("SELECT {COLS} FROM subscriptions WHERE id = ?"))
         .bind(id)
         .fetch_optional(pool)
@@ -178,7 +179,7 @@ pub async fn get(pool: &SqlitePool, id: &str) -> Result<Subscription> {
 }
 
 pub async fn find_by_provider_id(
-    pool: &SqlitePool,
+    pool: &Db,
     provider: &str,
     subscription_id: &str,
 ) -> Result<Option<Subscription>> {
@@ -197,7 +198,7 @@ pub async fn find_by_provider_id(
 ///
 /// Prefers an entitling one. A site that was cancelled and then resubscribed
 /// has two rows, and the live one is the one that matters.
-pub async fn for_tenant(pool: &SqlitePool, tenant_id: &str) -> Result<Option<Subscription>> {
+pub async fn for_tenant(pool: &Db, tenant_id: &str) -> Result<Option<Subscription>> {
     let row = sqlx::query(&format!(
         "SELECT {COLS} FROM subscriptions WHERE tenant_id = ? \
          ORDER BY CASE WHEN status IN ('trialing','active','past_due') THEN 0 ELSE 1 END, \
@@ -210,7 +211,7 @@ pub async fn for_tenant(pool: &SqlitePool, tenant_id: &str) -> Result<Option<Sub
     Ok(row.as_ref().map(map))
 }
 
-pub async fn list_for_account(pool: &SqlitePool, account_id: &str) -> Result<Vec<Subscription>> {
+pub async fn list_for_account(pool: &Db, account_id: &str) -> Result<Vec<Subscription>> {
     let rows = sqlx::query(&format!(
         "SELECT {COLS} FROM subscriptions WHERE account_id = ? ORDER BY created_at DESC"
     ))
@@ -225,7 +226,7 @@ pub async fn list_for_account(pool: &SqlitePool, account_id: &str) -> Result<Vec
 ///
 /// Checkout happens before the site exists when payment is required up front,
 /// so the link is made once provisioning succeeds.
-pub async fn attach_tenant(pool: &SqlitePool, id: &str, tenant_id: &str) -> Result<()> {
+pub async fn attach_tenant(pool: &Db, id: &str, tenant_id: &str) -> Result<()> {
     sqlx::query("UPDATE subscriptions SET tenant_id = ?, updated_at = ? WHERE id = ?")
         .bind(tenant_id)
         .bind(now_iso())
@@ -243,7 +244,7 @@ pub async fn attach_tenant(pool: &SqlitePool, id: &str, tenant_id: &str) -> Resu
 /// narrow: only `past_due`, only with a recorded start, only where the tenant
 /// is still active. A site already suspended is not suspended again.
 pub async fn past_due_beyond_grace(
-    pool: &SqlitePool,
+    pool: &Db,
     grace_days: i64,
 ) -> Result<Vec<(Subscription, String)>> {
     let cutoff = pro_core::days_from_now(-grace_days);
@@ -268,7 +269,7 @@ pub async fn past_due_beyond_grace(
 }
 
 /// Trials that have ended without a payment method, with their tenant.
-pub async fn expired_trials(pool: &SqlitePool) -> Result<Vec<(Subscription, String)>> {
+pub async fn expired_trials(pool: &Db) -> Result<Vec<(Subscription, String)>> {
     let rows = sqlx::query(&format!(
         "SELECT {COLS} FROM subscriptions s \
          WHERE s.status = 'trialing' AND s.trial_ends_at IS NOT NULL \
@@ -291,7 +292,7 @@ pub async fn expired_trials(pool: &SqlitePool) -> Result<Vec<(Subscription, Stri
 /// Record a subscription an operator granted by hand — a comped site, an
 /// internal one, a customer being migrated in.
 pub async fn create_manual(
-    pool: &SqlitePool,
+    pool: &Db,
     account_id: &str,
     tenant_id: Option<&str>,
     plan_slug: &str,
@@ -316,7 +317,7 @@ pub async fn create_manual(
     get(pool, &id).await
 }
 
-pub async fn count_by_status(pool: &SqlitePool) -> Result<Vec<(String, i64)>> {
+pub async fn count_by_status(pool: &Db) -> Result<Vec<(String, i64)>> {
     sqlx::query_as("SELECT status, COUNT(*) FROM subscriptions GROUP BY status")
         .fetch_all(pool)
         .await
@@ -327,7 +328,7 @@ pub async fn count_by_status(pool: &SqlitePool) -> Result<Vec<(String, i64)>> {
 ///
 /// Counts only entitling subscriptions, so a cancelled site stops being
 /// counted the moment it lapses rather than at the end of its period.
-pub async fn active_by_plan(pool: &SqlitePool) -> Result<Vec<(String, i64)>> {
+pub async fn active_by_plan(pool: &Db) -> Result<Vec<(String, i64)>> {
     sqlx::query_as(
         "SELECT plan_slug, COUNT(*) FROM subscriptions \
          WHERE status IN ('trialing','active','past_due') GROUP BY plan_slug",
@@ -341,7 +342,7 @@ pub async fn active_by_plan(pool: &SqlitePool) -> Result<Vec<(String, i64)>> {
 mod tests {
     use super::*;
 
-    async fn fixture() -> (SqlitePool, String, String) {
+    async fn fixture() -> (Db, String, String) {
         let pool = crate::pool::open_in_memory().await.unwrap();
         let account = crate::accounts::create(&pool, "o@example.com", "O", "h").await.unwrap();
         let tenant = crate::tenants::create(

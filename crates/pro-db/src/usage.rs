@@ -11,7 +11,8 @@
 //! of uploads, which is an acceptable trade for a quota — the alternative is
 //! measuring a directory tree on every upload.
 use pro_core::{ids, now_iso, DbErrorExt, Result};
-use sqlx::{Row, SqlitePool};
+use crate::Db;
+use sqlx::Row;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Sample {
@@ -23,7 +24,7 @@ pub struct Sample {
 }
 
 pub async fn record(
-    pool: &SqlitePool,
+    pool: &Db,
     tenant_id: &str,
     members: i64,
     posts: i64,
@@ -48,7 +49,7 @@ pub async fn record(
 }
 
 /// The most recent reading for one tenant.
-pub async fn latest(pool: &SqlitePool, tenant_id: &str) -> Result<Option<Sample>> {
+pub async fn latest(pool: &Db, tenant_id: &str) -> Result<Option<Sample>> {
     let row = sqlx::query(
         "SELECT sampled_at, members, posts, storage_bytes, emails_sent FROM usage_samples \
          WHERE tenant_id = ? ORDER BY sampled_at DESC LIMIT 1",
@@ -67,7 +68,7 @@ pub async fn latest(pool: &SqlitePool, tenant_id: &str) -> Result<Option<Sample>
 }
 
 /// A tenant's readings over a window, oldest first, for a chart.
-pub async fn history(pool: &SqlitePool, tenant_id: &str, days: i64) -> Result<Vec<Sample>> {
+pub async fn history(pool: &Db, tenant_id: &str, days: i64) -> Result<Vec<Sample>> {
     let rows = sqlx::query(
         "SELECT sampled_at, members, posts, storage_bytes, emails_sent FROM usage_samples \
          WHERE tenant_id = ? AND sampled_at >= ? ORDER BY sampled_at",
@@ -94,7 +95,7 @@ pub async fn history(pool: &SqlitePool, tenant_id: &str, days: i64) -> Result<Ve
 /// A correlated subquery per tenant rather than a window function, because
 /// SQLite's bundled version in older distributions may lack them and this
 /// query runs once per dashboard load, not per request.
-pub async fn platform_totals(pool: &SqlitePool) -> Result<(i64, i64, i64)> {
+pub async fn platform_totals(pool: &Db) -> Result<(i64, i64, i64)> {
     let row = sqlx::query(
         "SELECT COALESCE(SUM(u.members), 0) AS members, \
                 COALESCE(SUM(u.posts), 0) AS posts, \
@@ -111,7 +112,7 @@ pub async fn platform_totals(pool: &SqlitePool) -> Result<(i64, i64, i64)> {
 
 /// Drop readings older than `days`. The dashboard charts a short window and
 /// nothing else reads further back.
-pub async fn purge(pool: &SqlitePool, days: i64) -> Result<u64> {
+pub async fn purge(pool: &Db, days: i64) -> Result<u64> {
     let r = sqlx::query("DELETE FROM usage_samples WHERE sampled_at < ?")
         .bind(pro_core::days_from_now(-days))
         .execute(pool)
@@ -124,7 +125,7 @@ pub async fn purge(pool: &SqlitePool, days: i64) -> Result<u64> {
 mod tests {
     use super::*;
 
-    async fn fixture() -> (SqlitePool, String) {
+    async fn fixture() -> (Db, String) {
         let pool = crate::pool::open_in_memory().await.unwrap();
         let account = crate::accounts::create(&pool, "o@example.com", "O", "h").await.unwrap();
         let tenant = crate::tenants::create(

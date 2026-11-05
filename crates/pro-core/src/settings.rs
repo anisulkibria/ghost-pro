@@ -822,6 +822,22 @@ impl Effective {
         }
     }
 
+    /// The secret a provider's webhooks are verified against.
+    ///
+    /// Without it every delivery is rejected rather than trusted, which fails
+    /// exactly like an unreachable platform: the payment succeeds and nothing
+    /// on this side ever hears about it. Gumroad's ping token is the same
+    /// thing under another name, so it answers here too.
+    pub fn webhook_secret(&self, provider: &str) -> Option<String> {
+        match provider {
+            "stripe" => self.stripe().webhook_secret,
+            "paddle" => self.paddle().webhook_secret,
+            "lemonsqueezy" => self.lemonsqueezy().webhook_secret,
+            "gumroad" => self.gumroad().ping_token,
+            _ => None,
+        }
+    }
+
     /// Providers with credentials present, in registry order. Webhooks are
     /// accepted for all of these, not only the active one — a subscription
     /// created at a provider keeps sending events there after new signups move
@@ -1233,6 +1249,25 @@ mod tests {
             }
         }
         assert!(groups().contains(&"Billing"));
+    }
+
+    /// A provider with credentials but no signing secret refuses every
+    /// delivery, which loses a payment as completely as having no credentials
+    /// at all — so the secret has to be readable to be checked for.
+    #[test]
+    fn a_webhook_secret_is_readable_per_provider() {
+        let e = eff(&[
+            ("billing.lemonsqueezy.webhookSecret", Value::String("ls_whsec".into())),
+            ("billing.gumroad.pingToken", Value::String("tok".into())),
+        ]);
+        assert_eq!(e.webhook_secret("lemonsqueezy").as_deref(), Some("ls_whsec"));
+        // Gumroad signs nothing, so its ping token is the same thing by
+        // another name and must answer here too.
+        assert_eq!(e.webhook_secret("gumroad").as_deref(), Some("tok"));
+        // Credentials present, secret absent: the state this exists to catch.
+        assert!(e.provider_is_configured("stripe"), "the file gives it a key");
+        assert_eq!(e.webhook_secret("stripe"), None);
+        assert_eq!(e.webhook_secret("braintree"), None);
     }
 
     /// Mail's reply-to is the support address, so an operator sets it once.

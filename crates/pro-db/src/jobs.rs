@@ -13,8 +13,9 @@
 //! two processes binding one port.
 use pro_core::{ids, now_iso, DbErrorExt, Result};
 use serde_json::Value;
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, SqlitePool};
+use crate::Db;
+use sqlx::any::AnyRow;
+use sqlx::Row;
 
 /// How many times a job is retried before it is left alone for an operator.
 ///
@@ -36,7 +37,7 @@ pub struct Job {
     pub created_at: String,
 }
 
-fn map(row: &SqliteRow) -> Job {
+fn map(row: &AnyRow) -> Job {
     Job {
         id: row.get("id"),
         kind: row.get("kind"),
@@ -59,7 +60,7 @@ const COLS: &str = "id, kind, tenant_id, payload, status, attempts, run_after, l
 
 /// Queue a job to run as soon as a worker is free.
 pub async fn enqueue(
-    pool: &SqlitePool,
+    pool: &Db,
     kind: &str,
     tenant_id: Option<&str>,
     payload: Value,
@@ -69,7 +70,7 @@ pub async fn enqueue(
 
 /// Queue a job for later — a retry, or tonight's backup.
 pub async fn enqueue_at(
-    pool: &SqlitePool,
+    pool: &Db,
     kind: &str,
     tenant_id: Option<&str>,
     payload: Value,
@@ -99,7 +100,7 @@ pub async fn enqueue_at(
 /// storage twice tells us nothing, and two concurrent backups of one directory
 /// race each other.
 pub async fn enqueue_unique(
-    pool: &SqlitePool,
+    pool: &Db,
     kind: &str,
     tenant_id: Option<&str>,
     payload: Value,
@@ -124,7 +125,7 @@ pub async fn enqueue_unique(
 /// The `status = 'pending'` in the WHERE clause is the lock: two workers
 /// racing on the same row produce one UPDATE that matches and one that does
 /// not, and only the winner gets the job back.
-pub async fn claim(pool: &SqlitePool) -> Result<Option<Job>> {
+pub async fn claim(pool: &Db) -> Result<Option<Job>> {
     let now = now_iso();
     loop {
         let candidate: Option<String> = sqlx::query_scalar(
@@ -160,7 +161,7 @@ pub async fn claim(pool: &SqlitePool) -> Result<Option<Job>> {
     }
 }
 
-pub async fn complete(pool: &SqlitePool, id: &str) -> Result<()> {
+pub async fn complete(pool: &Db, id: &str) -> Result<()> {
     sqlx::query("UPDATE jobs SET status = 'done', finished_at = ?, last_error = NULL WHERE id = ?")
         .bind(now_iso())
         .bind(id)
@@ -176,7 +177,7 @@ pub async fn complete(pool: &SqlitePool, id: &str) -> Result<()> {
 /// right shape for the failures these jobs actually see: a provider's API
 /// briefly unreachable, DNS not yet propagated, a disk momentarily full.
 /// Retrying a DNS check every second would not make it propagate faster.
-pub async fn fail(pool: &SqlitePool, job: &Job, error: &str) -> Result<()> {
+pub async fn fail(pool: &Db, job: &Job, error: &str) -> Result<()> {
     let give_up = job.attempts >= MAX_ATTEMPTS;
     if give_up {
         sqlx::query(
@@ -226,7 +227,7 @@ fn truncate(s: &str) -> String {
 /// sit there forever: nothing claims it, because claiming only looks at
 /// `pending`. Jobs that have exhausted their attempts go straight to `failed`
 /// so a crash loop cannot retry one indefinitely.
-pub async fn requeue_orphans(pool: &SqlitePool) -> Result<u64> {
+pub async fn requeue_orphans(pool: &Db) -> Result<u64> {
     let bumped = sqlx::query(
         "UPDATE jobs SET status = 'pending', last_error = 'interrupted by a restart' \
          WHERE status = 'running' AND attempts < ?",
@@ -260,7 +261,7 @@ pub async fn requeue_orphans(pool: &SqlitePool) -> Result<u64> {
 }
 
 /// Jobs an operator should look at.
-pub async fn list_failed(pool: &SqlitePool, limit: i64) -> Result<Vec<Job>> {
+pub async fn list_failed(pool: &Db, limit: i64) -> Result<Vec<Job>> {
     let rows = sqlx::query(&format!(
         "SELECT {COLS} FROM jobs WHERE status = 'failed' ORDER BY created_at DESC LIMIT ?"
     ))
@@ -272,7 +273,7 @@ pub async fn list_failed(pool: &SqlitePool, limit: i64) -> Result<Vec<Job>> {
 }
 
 /// Put a failed job back in the queue, resetting its attempts.
-pub async fn retry(pool: &SqlitePool, id: &str) -> Result<()> {
+pub async fn retry(pool: &Db, id: &str) -> Result<()> {
     sqlx::query(
         "UPDATE jobs SET status = 'pending', attempts = 0, run_after = ?, last_error = NULL, \
          finished_at = NULL WHERE id = ? AND status = 'failed'",
@@ -285,7 +286,7 @@ pub async fn retry(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn count_by_status(pool: &SqlitePool) -> Result<Vec<(String, i64)>> {
+pub async fn count_by_status(pool: &Db) -> Result<Vec<(String, i64)>> {
     sqlx::query_as("SELECT status, COUNT(*) FROM jobs GROUP BY status")
         .fetch_all(pool)
         .await
@@ -294,7 +295,7 @@ pub async fn count_by_status(pool: &SqlitePool) -> Result<Vec<(String, i64)>> {
 
 /// Delete finished jobs older than `days`, so the table does not grow without
 /// bound. Failed jobs are kept: they are the ones worth reading.
-pub async fn purge_done(pool: &SqlitePool, days: i64) -> Result<u64> {
+pub async fn purge_done(pool: &Db, days: i64) -> Result<u64> {
     let r = sqlx::query("DELETE FROM jobs WHERE status = 'done' AND finished_at < ?")
         .bind(pro_core::days_from_now(-days))
         .execute(pool)
@@ -308,7 +309,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    async fn pool() -> SqlitePool {
+    async fn pool() -> Db {
         crate::pool::open_in_memory().await.unwrap()
     }
 

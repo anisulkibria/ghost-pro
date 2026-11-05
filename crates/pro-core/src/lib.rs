@@ -32,6 +32,7 @@
 //! provider does not mean a restart. Only [`models::StaffRole::Owner`] may
 //! change the settings that decide how money is taken.
 pub mod config;
+pub mod database;
 pub mod error;
 pub mod ids;
 pub mod models;
@@ -39,6 +40,7 @@ pub mod plans;
 pub mod settings;
 
 pub use config::Config;
+pub use database::{Engine, Target as DbTarget, TenantStore};
 pub use error::{DbErrorExt, ProError, Result};
 pub use models::{
     suspension, Account, AuditEvent, Domain, DomainKind, DomainStatus, Staff, StaffRole,

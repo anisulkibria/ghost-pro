@@ -10,7 +10,8 @@
 //!   racing on one link produce one success.
 use pro_core::{ids, now_iso, DbErrorExt, ProError, Result};
 use serde_json::Value;
-use sqlx::{Row, SqlitePool};
+use crate::Db;
+use sqlx::Row;
 
 pub const VERIFY_EMAIL: &str = "verify_email";
 pub const RESET_PASSWORD: &str = "reset_password";
@@ -36,7 +37,7 @@ pub fn ttl_hours(kind: &str) -> i64 {
 ///
 /// Returned exactly once; only its hash is stored.
 pub async fn issue(
-    pool: &SqlitePool,
+    pool: &Db,
     kind: &str,
     subject_type: &str,
     subject_id: &str,
@@ -73,7 +74,7 @@ pub async fn issue(
 /// independent chance of being intercepted — and the user only ever uses the
 /// newest.
 pub async fn reissue(
-    pool: &SqlitePool,
+    pool: &Db,
     kind: &str,
     subject_type: &str,
     subject_id: &str,
@@ -106,7 +107,7 @@ pub struct Claim {
 /// requests arriving with the same link produce one UPDATE that matches and
 /// one that does not. Checking first and updating after would let both
 /// through, which for a reset link means two people setting the password.
-pub async fn consume(pool: &SqlitePool, kind: &str, token: &str) -> Result<Claim> {
+pub async fn consume(pool: &Db, kind: &str, token: &str) -> Result<Claim> {
     if token.is_empty() {
         return Err(ProError::BadRequest(expired_message(kind)));
     }
@@ -165,7 +166,7 @@ fn expired_message(kind: &str) -> String {
 /// Whether a subject has an unspent token of this kind, for a "we have already
 /// emailed you" message.
 pub async fn has_outstanding(
-    pool: &SqlitePool,
+    pool: &Db,
     kind: &str,
     subject_type: &str,
     subject_id: &str,
@@ -185,7 +186,7 @@ pub async fn has_outstanding(
 }
 
 /// Drop spent and expired rows. Nothing depends on this for correctness.
-pub async fn purge(pool: &SqlitePool) -> Result<u64> {
+pub async fn purge(pool: &Db) -> Result<u64> {
     let r = sqlx::query("DELETE FROM tokens WHERE used_at IS NOT NULL OR expires_at <= ?")
         .bind(now_iso())
         .execute(pool)
@@ -199,7 +200,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    async fn pool() -> SqlitePool {
+    async fn pool() -> Db {
         crate::pool::open_in_memory().await.unwrap()
     }
 

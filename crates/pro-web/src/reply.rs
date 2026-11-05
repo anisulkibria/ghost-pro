@@ -73,10 +73,24 @@ fn harden(headers: &mut HeaderMap) {
 /// tells the browser to re-request with `GET`, which is what makes the
 /// post-redirect-get pattern work and stops a reload from re-submitting the
 /// form.
+/// A `303` whose `Location` could not be built is a dead end — the browser
+/// stays where it is and the button the visitor pressed looks broken, with
+/// nothing in the log to say why. The target can come from outside (a payment
+/// provider's checkout url is whatever they hand back), so this is reachable
+/// without a bug here, and it is reported rather than swallowed.
 pub fn redirect(path: &str) -> Response {
     let mut response = StatusCode::SEE_OTHER.into_response();
-    if let Ok(value) = HeaderValue::from_str(path) {
-        response.headers_mut().insert(header::LOCATION, value);
+    match HeaderValue::from_str(path) {
+        Ok(value) => {
+            response.headers_mut().insert(header::LOCATION, value);
+        }
+        Err(e) => {
+            tracing::error!("cannot redirect to {path:?}: {e}");
+            return error_page(
+                &Chrome::plain("Ghost Pro"),
+                &pro_core::ProError::internal(format!("invalid redirect target: {e}")),
+            );
+        }
     }
     response
 }

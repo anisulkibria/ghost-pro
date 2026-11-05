@@ -19,10 +19,19 @@
 //! refuses once setup is complete, so it cannot be replayed, and using it
 //! means the platform needs no knowledge of the CMS's user schema. When
 //! Ghost-rust changes how users are stored, this keeps working.
+//! ## Where a tenant's data lives
+//!
+//! Step 2 differs by deployment. Locally, a tenant's database is a SQLite file
+//! inside its own directory and step 2 is just `mkdir`. On a MySQL deployment
+//! the platform creates a database *and a scoped login* per site
+//! ([`tenant_db`]) and writes those credentials into the config at step 3.
+//! Either way one customer's data is unreachable from another's process, which
+//! is the property worth preserving — see [`pro_core::TenantStore`].
 pub mod backup;
 pub mod config_file;
 mod lifecycle;
 mod storage;
+pub mod tenant_db;
 
 pub use lifecycle::{
     apply_plan, create_site, delete_site_files, restore_site, suspend_site, unsuspend_site,

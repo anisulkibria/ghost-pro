@@ -943,7 +943,11 @@ async fn domains_section(
             } else {
                 ""
             },
-            status = view::domain_pill(domain.status),
+            status = if tenant.status.serves_public() {
+                view::domain_pill(domain.status)
+            } else {
+                view::domain_pill_closed(domain.status)
+            },
             kind = if is_subdomain { "Built in" } else { "Your domain" },
             actions = {
                 let mut buttons = String::new();

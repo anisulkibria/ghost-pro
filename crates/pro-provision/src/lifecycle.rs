@@ -1,6 +1,6 @@
 //! Creating a site, reconfiguring it, and taking it away.
 use pro_core::{Config, DomainKind, Plan, ProError, Result, Tenant, TenantStatus};
-use pro_db::SqlitePool;
+use pro_db::Db;
 use pro_supervisor::Supervisor;
 use std::path::Path;
 use std::sync::Arc;
@@ -36,7 +36,7 @@ pub struct NewSite<'a> {
 /// half-built directory needs clearing up, and an operator needs to see why.
 /// Returning the error *and* leaving a record is the point.
 pub async fn create_site(
-    pool: &SqlitePool,
+    pool: &Db,
     config: &Arc<Config>,
     supervisor: &Supervisor,
     mail: &pro_core::config::MailConfig,
@@ -82,7 +82,7 @@ pub async fn create_site(
 }
 
 async fn build_and_start(
-    pool: &SqlitePool,
+    pool: &Db,
     config: &Arc<Config>,
     supervisor: &Supervisor,
     mail: &pro_core::config::MailConfig,
@@ -98,6 +98,19 @@ async fn build_and_start(
     let host = config.tenant_host(&tenant.slug);
     pro_db::domains::add(pool, &tenant.id, &host, DomainKind::Subdomain, true).await?;
 
+    // On a MySQL deployment the site gets its own database and its own login
+    // before anything is written. Done here, not lazily at first boot, so that
+    // a server that refuses the grant fails this provision — which is recorded
+    // and retryable — rather than leaving a site that starts and then cannot
+    // save a post.
+    let store = config.tenant_store()?;
+    let creds = match store {
+        pro_core::TenantStore::SqliteFile => None,
+        pro_core::TenantStore::MySqlServer { .. } => {
+            Some(crate::tenant_db::create(&store, &tenant.id).await?)
+        }
+    };
+
     let mut body = config_file::build(
         &config.tenant_url(&tenant.slug),
         tenant.port,
@@ -105,6 +118,7 @@ async fn build_and_start(
         new.period_start,
         &config.billing_url(),
         mail,
+        &config_file::database_block(creds.as_ref()),
     );
 
     // Bootstrap config: the `customIntegrations` flag is lifted for the site's
@@ -349,7 +363,7 @@ Deleting this revokes the platform's access to this site.",
 /// would appear to work and change nothing until the next restart — which
 /// might be weeks away.
 pub async fn apply_plan(
-    pool: &SqlitePool,
+    pool: &Db,
     config: &Arc<Config>,
     supervisor: &Supervisor,
     tenant: &Tenant,
@@ -378,7 +392,7 @@ pub async fn apply_plan(
 /// can sign in, see why, and pay. A 402 at the proxy would lock them out of
 /// the very screen that fixes it.
 pub async fn suspend_site(
-    pool: &SqlitePool,
+    pool: &Db,
     config: &Arc<Config>,
     supervisor: &Supervisor,
     tenant: &Tenant,
@@ -407,7 +421,7 @@ pub async fn suspend_site(
 
 /// Put a site back on its paid plan.
 pub async fn unsuspend_site(
-    pool: &SqlitePool,
+    pool: &Db,
     config: &Arc<Config>,
     supervisor: &Supervisor,
     tenant: &Tenant,
@@ -424,7 +438,7 @@ pub async fn unsuspend_site(
 /// be a hostname that already resolves here — which is why
 /// `pro_db::domains::set_primary` refuses anything but a live domain.
 pub async fn update_primary_domain(
-    pool: &SqlitePool,
+    pool: &Db,
     config: &Arc<Config>,
     supervisor: &Supervisor,
     tenant: &Tenant,
@@ -471,15 +485,34 @@ pub async fn delete_site_files(
     supervisor.stop(&tenant.id).await?;
 
     let dir = config.tenant_dir(&tenant.id);
-    if !dir.exists() {
-        return Ok(());
+    if dir.exists() {
+        let condemned = config
+            .tenants_dir()
+            .join(format!(".deleting-{}-{}", tenant.id, pro_core::ids::object_id()));
+        tokio::fs::rename(&dir, &condemned).await?;
+        tokio::fs::remove_dir_all(&condemned).await?;
+        tracing::info!(tenant = %tenant.slug, "site files removed");
     }
-    let condemned = config
-        .tenants_dir()
-        .join(format!(".deleting-{}-{}", tenant.id, pro_core::ids::object_id()));
-    tokio::fs::rename(&dir, &condemned).await?;
-    tokio::fs::remove_dir_all(&condemned).await?;
-    tracing::info!(tenant = %tenant.slug, "site files removed");
+
+    // On MySQL the site's data is not in that directory, so removing the files
+    // is only half the deletion. A database left behind is a former customer's
+    // content that nobody is looking after, and it still occupies the server.
+    //
+    // Logged rather than returned: the files are already gone, so failing here
+    // would leave the tenant permanently undeletable because the database
+    // server was briefly unreachable. An operator needs to know, and `doctor`
+    // is not the place — this is a named site and a named database.
+    let store = config.tenant_store()?;
+    if let pro_core::TenantStore::MySqlServer { .. } = store {
+        if let Err(e) = crate::tenant_db::drop(&store, &tenant.id).await {
+            tracing::error!(
+                tenant = %tenant.slug,
+                database = %store.database_name(&tenant.id).unwrap_or_default(),
+                "site files were removed but its database was not: {e}. \
+                 It must be dropped by hand."
+            );
+        }
+    }
     Ok(())
 }
 
@@ -519,7 +552,26 @@ mod tests {
         }))
         .unwrap();
         c.plans = pro_core::plans::default_plans();
+        // Away from the default 21000– range, which a real deployment on this
+        // machine is using. These tests allocate from an empty in-memory
+        // database, so they always pick the bottom of the range, and a live
+        // tenant listening there made a start that should have timed out look
+        // like a success — `a_failed_provision_is_recorded_as_failed` passed or
+        // failed depending on whether a site happened to be awake.
+        let floor = 40_000 + (rand_offset() % 20_000);
+        c.tenants.port_floor = floor;
+        c.tenants.port_ceiling = floor + 50;
         Arc::new(c)
+    }
+
+    /// A spread of ports per test process, so two concurrent runs of this
+    /// suite do not probe each other's.
+    fn rand_offset() -> u16 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::process::id().hash(&mut hasher);
+        pro_core::ids::object_id().hash(&mut hasher);
+        (hasher.finish() % u16::MAX as u64) as u16
     }
 
     /// Ghost's own password floor, checked before any directory exists so the

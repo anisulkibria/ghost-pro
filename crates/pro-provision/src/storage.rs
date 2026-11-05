@@ -36,7 +36,7 @@ pub fn tenant_dir_size(dir: &Path) -> u64 {
 /// design avoids. Those figures come from the tenant's own API instead, and
 /// a tenant that is hibernating simply keeps its last reading.
 pub async fn measure_tenant(
-    pool: &sqlx::SqlitePool,
+    pool: &pro_db::Db,
     config: &pro_core::Config,
     tenant_id: &str,
 ) -> Result<u64> {

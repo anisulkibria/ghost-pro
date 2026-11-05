@@ -14,6 +14,7 @@ pub enum Command {
     Serve,
     Setup(Args),
     Doctor,
+    Db,
     CreateStaff(Args),
     Help,
     Version,
@@ -63,6 +64,7 @@ pub fn parse() -> Command {
         "serve" | "start" | "run" => Command::Serve,
         "setup" | "install" => Command::Setup(args),
         "doctor" | "check" => Command::Doctor,
+        "db" | "database" => Command::Db,
         "create-staff" | "createstaff" | "staff" => Command::CreateStaff(args),
         "version" | "--version" | "-V" => Command::Version,
         _ => Command::Help,
@@ -80,6 +82,7 @@ COMMANDS
     serve                 Run the platform (the default)
     setup                 Write pro.json interactively
     doctor                Check this machine can serve the current config
+    db                    Create and check the database, on either engine
     create-staff          Create an operator login
     version               Print the version
 
@@ -99,10 +102,29 @@ CREATE-STAFF OPTIONS
     --password <password> Prompted for if omitted
     --role <role>         owner | admin | support (default: owner)
 
+DATABASE
+    With no `database.url` configured the platform uses a SQLite file at
+    <dataDir>/pro.db, created on first run. Nothing to install.
+
+    For production, name a MySQL server and the platform creates its own
+    schema on first connection. Put it in pro.production.json:
+
+        {{ "database": {{
+            "url": "mysql://pro:secret@db.internal:3306/pro",
+            "tenantUrl": "mysql://admin:secret@db.internal:3306"
+        }} }}
+
+    `url` is the control plane's own database. `tenantUrl` is the server each
+    site's database is created on, and its account needs CREATE DATABASE,
+    CREATE USER and GRANT. Leave `tenantUrl` out to keep one SQLite file per
+    site. Either can come from the environment instead, as
+    PRO_DATABASE__URL and PRO_DATABASE__TENANT_URL.
+
 EXAMPLES
     ghost-pro setup --url https://pro.example.com --subdomain-base sites.example.com \
         --ghost-binary /opt/ghost-rust/target/release/ghost --ssl --email you@example.com
     ghost-pro create-staff --email you@example.com --name "Your Name"
+    ghost-pro db
     ghost-pro doctor
     ghost-pro serve
 "#,
@@ -345,7 +367,36 @@ pub async fn doctor() -> Result<()> {
     }
 
     // ---- database --------------------------------------------------------
-    match pro_db::open(&config.db_path()).await {
+    //
+    // Reported before it is opened, because a connection that hangs or is
+    // refused is the most common thing `doctor` is run to diagnose, and
+    // knowing *which* database was being reached is most of the answer.
+    // A `database.url` this platform cannot open is reported and then stood in
+    // for by the local file, so the rest of `doctor` still runs — an operator
+    // fixing a bad URL should not have to run it again to see every *other*
+    // problem they have.
+    let target = match config.db_target() {
+        Ok(t) => t,
+        Err(e) => {
+            check(false, "database", &e.to_string());
+            problems += 1;
+            pro_core::DbTarget::sqlite_file(&config.db_path())
+        }
+    };
+    check(true, "database engine", &format!("{} — {}", target.engine().name(), target.redacted()));
+    if config.env == "production" && target.engine().is_single_machine() {
+        check(
+            false,
+            "database for production",
+            "this is a SQLite file, so the platform is pinned to this one machine \
+             and its database is one file on this disk. Set database.url to a \
+             mysql:// server in pro.production.json, then check it with: \
+             ghost-pro db",
+        );
+        problems += 1;
+    }
+
+    match pro_db::open(&target, config.database.pool_size(target.engine())).await {
         Ok(db) => {
             check(true, "database", "open and migrated");
 
@@ -402,6 +453,46 @@ pub async fn doctor() -> Result<()> {
                     &format!("{provider} is selected but its credentials are missing"),
                 );
                 problems += 1;
+            }
+
+            // Whether the money can actually finish moving.
+            //
+            // A platform can have perfect credentials, a priced plan and a
+            // working checkout and still never open a paid site, because
+            // reopening it happens on the provider's webhook and nothing else.
+            // Both ways that callback can be lost are silent from inside the
+            // checkout — so they are reported here, where the configuration
+            // is, instead of being discovered when a customer has paid.
+            if provider != "none" {
+                let endpoint = format!("{}/webhooks/{provider}", config.canonical_url());
+                match config.webhook_unreachable_reason() {
+                    Some(reason) => {
+                        check(
+                            false,
+                            "webhooks",
+                            &format!(
+                                "{reason}. Expose this machine and set `url` to that address \
+                                 (a tunnel such as cloudflared or ngrok is enough for \
+                                 development), or open paid sites by hand from \
+                                 /console/sites.",
+                            ),
+                        );
+                        problems += 1;
+                    }
+                    None if live.webhook_secret(&provider).is_none() => {
+                        check(
+                            false,
+                            "webhooks",
+                            &format!(
+                                "no signing secret for {provider}, so every delivery to \
+                                 {endpoint} is refused — a customer would be charged and \
+                                 their site would stay closed. Set it in the console."
+                            ),
+                        );
+                        problems += 1;
+                    }
+                    None => check(true, "webhooks", &format!("{provider} delivers to {endpoint}")),
+                }
             }
 
             // Asked of the mailer itself rather than re-derived here, so that
@@ -530,6 +621,79 @@ fn check(ok: bool, label: &str, detail: &str) {
     println!("  {} {label:<18} {detail}", if ok { "✓" } else { "✗" });
 }
 
+/// Create the database and the schema, and report what was found.
+///
+/// This exists so that pointing a deployment at MySQL is the same single step
+/// as running locally on SQLite: name a server, run this, and the platform has
+/// its schema. The alternative — telling an operator to run `CREATE DATABASE`
+/// and then a pile of DDL by hand — is how a production schema ends up one
+/// migration behind the binary.
+///
+/// Safe to run repeatedly. Creating the database and applying migrations are
+/// both no-ops once done, so this is the right thing to put in a deploy
+/// script ahead of `serve`.
+pub async fn db() -> Result<()> {
+    let config = Config::load(None)?;
+    let target = config.db_target()?;
+    let store = config.tenant_store()?;
+
+    println!("\nghost-pro database\n");
+    check(true, "engine", target.engine().name());
+    // Redacted: this is the one config value that routinely holds a password,
+    // and an operator runs this with somebody watching their screen.
+    check(true, "url", &target.redacted());
+    if let Some(path) = target.sqlite_path() {
+        check(true, "file", &path.display().to_string());
+    }
+
+    let pool = pro_db::open(&target, config.database.pool_size(target.engine())).await?;
+    check(true, "schema", "created and migrated");
+
+    // Proof the schema is really usable, not merely that the migration table
+    // says so — a half-applied migration would pass the line above.
+    let staff = pro_db::staff::count(&pool).await?;
+    let (tenants, accounts) =
+        (pro_db::tenants::count_by_status(&pool).await?, pro_db::accounts::count(&pool).await?);
+    let sites: i64 = tenants.iter().map(|(_, n)| n).sum();
+    check(true, "contents", &format!("{staff} staff, {accounts} accounts, {sites} sites"));
+
+    match &store {
+        pro_core::TenantStore::SqliteFile => check(
+            true,
+            "tenant databases",
+            "one SQLite file per site, inside its own directory",
+        ),
+        pro_core::TenantStore::MySqlServer { server, prefix } => {
+            check(
+                true,
+                "tenant databases",
+                &format!("{}, one per site, named {prefix}<id>", pro_core::database::redact(server)),
+            );
+            // The grants are checked now rather than at the first signup,
+            // because that failure would strand a customer who has already
+            // paid, mid-provision, with a half-created site.
+            match pro_provision::tenant_db::check_server(&store).await {
+                Ok(()) => check(true, "tenant grants", "can create a database and a user"),
+                Err(e) => {
+                    check(false, "tenant grants", &e.to_string());
+                    println!();
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    if config.env == "production" && target.engine().is_single_machine() {
+        println!(
+            "\nNote: this is a SQLite file, so the platform is pinned to this machine.\n\
+             Set database.url to a mysql:// server in pro.production.json to change that."
+        );
+    }
+
+    println!("\nReady. Run: ghost-pro serve\n");
+    Ok(())
+}
+
 /// Create an operator login.
 ///
 /// The only way to make the first one. A platform with no staff cannot be
@@ -538,7 +702,8 @@ fn check(ok: bool, label: &str, detail: &str) {
 /// is a race anybody on the internet can win.
 pub async fn create_staff(args: Args) -> Result<()> {
     let config = Config::load(None)?;
-    let db = pro_db::open(&config.db_path()).await?;
+    let target = config.db_target()?;
+    let db = pro_db::open(&target, config.database.pool_size(target.engine())).await?;
     let interactive = std::io::stdin().is_terminal();
 
     let email = match args.get("email") {

@@ -40,6 +40,8 @@ pub struct Config {
     #[serde(default)]
     pub paths: PathsConfig,
     #[serde(default)]
+    pub database: DatabaseConfig,
+    #[serde(default)]
     pub tenants: TenantsConfig,
     #[serde(default)]
     pub ssl: SslConfig,
@@ -140,6 +142,63 @@ fn default_data_dir() -> String {
 
 fn default_ghost_binary() -> String {
     "ghost".into()
+}
+
+/// Which database engine the platform and its tenants run on.
+///
+/// Every field is optional, and a config with no `database` block at all is
+/// the local default: one SQLite file for the control plane, one per tenant
+/// inside its own directory. Nothing has to be installed or created for that
+/// to work, which is the point — a fresh clone runs.
+///
+/// Production sets `url`, and usually `tenantUrl` as well. The two are
+/// separate because they are genuinely separate decisions: a small deployment
+/// can keep the control plane on MySQL for failover while tenants stay on
+/// their own files, and a large one wants both on a managed server.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseConfig {
+    /// The control plane's own database.
+    ///
+    /// `mysql://user:pass@host:3306/pro` in production; unset locally, which
+    /// means SQLite at `<dataDir>/pro.db`.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Pool ceiling. Defaults per engine — see [`DatabaseConfig::pool_size`].
+    #[serde(default)]
+    pub max_connections: Option<u32>,
+    /// The MySQL server tenant databases are created on, as
+    /// `mysql://admin:pass@host:3306` with no database named.
+    ///
+    /// The account in this URL needs `CREATE DATABASE`, `CREATE USER` and
+    /// `GRANT` — it provisions a database and a scoped login per tenant, and
+    /// is used for nothing else. Unset means every tenant keeps its own
+    /// SQLite file, as it does locally.
+    #[serde(default)]
+    pub tenant_url: Option<String>,
+    /// Prepended to each tenant's database and user name, so platform
+    /// databases are recognisable on a server that holds other things.
+    #[serde(default = "default_tenant_db_prefix")]
+    pub tenant_prefix: String,
+}
+
+fn default_tenant_db_prefix() -> String {
+    "ghost_".into()
+}
+
+impl DatabaseConfig {
+    /// Connections to open, defaulted per engine.
+    ///
+    /// The two engines want opposite things. SQLite serialises writes, so a
+    /// large pool only converts waiting into lock contention; MySQL handles
+    /// real concurrency, and a pool of 8 would become the bottleneck once
+    /// several app nodes serve the dashboard.
+    pub fn pool_size(&self, engine: crate::database::Engine) -> u32 {
+        self.max_connections.unwrap_or(match engine {
+            crate::database::Engine::Sqlite => 8,
+            crate::database::Engine::MySql => 32,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -649,9 +708,69 @@ impl Config {
         self.paths.theme_source.as_deref().map(|p| self.resolve_path(p))
     }
 
-    /// The control-plane database.
+    /// The control-plane database as a SQLite file.
+    ///
+    /// Still meaningful on a MySQL deployment: it is where a local database
+    /// *would* be, which is what `migrate` and an import both need in order
+    /// to find the file being moved off.
     pub fn db_path(&self) -> PathBuf {
         self.data_dir().join("pro.db")
+    }
+
+    /// The database the control plane runs on.
+    ///
+    /// This is the function that decides SQLite versus MySQL, and it is the
+    /// only one that does. A configured `database.url` wins; with none, the
+    /// local file. See [`crate::database`] for why presence of a URL is the
+    /// trigger rather than `PRO_ENV`.
+    pub fn db_target(&self) -> Result<crate::database::Target> {
+        match self.database.url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+            Some(url) => crate::database::Target::parse(url),
+            None => Ok(crate::database::Target::sqlite_file(&self.db_path())),
+        }
+    }
+
+    /// Where each tenant's own database lives.
+    ///
+    /// Independent of [`Self::db_target`]: tenants can stay on their own
+    /// files while the control plane is on MySQL. Only an explicit
+    /// `database.tenantUrl` moves them.
+    pub fn tenant_store(&self) -> Result<crate::database::TenantStore> {
+        let Some(url) = self.database.tenant_url.as_deref().map(str::trim).filter(|u| !u.is_empty())
+        else {
+            return Ok(crate::database::TenantStore::SqliteFile);
+        };
+
+        // Parsed through the same gate as the control-plane URL so that a
+        // `postgres://` here is refused at boot rather than at the first
+        // signup, when a customer is waiting for a site.
+        let target = crate::database::Target::parse(url)?;
+        if target.engine() != crate::database::Engine::MySql {
+            return Err(ProError::Config(format!(
+                "database.tenantUrl must be a mysql:// server, not {}. Leave it \
+                 unset to keep one SQLite file per tenant",
+                target.engine().name()
+            )));
+        }
+
+        // A database name in the server URL is a mistake worth catching: each
+        // tenant gets its own, so a name here would be silently ignored and
+        // the operator would wonder where their data went.
+        let server = url.trim_end_matches('/');
+        let after_host = server.split_once("://").map(|(_, r)| r).unwrap_or(server);
+        if let Some((_, path)) = after_host.split_once('/') {
+            if !path.is_empty() {
+                return Err(ProError::Config(format!(
+                    "database.tenantUrl names a database ({path}), but each tenant \
+                     gets its own — give the server only, as mysql://user:pass@host:3306"
+                )));
+            }
+        }
+
+        Ok(crate::database::TenantStore::MySqlServer {
+            server: server.to_string(),
+            prefix: self.database.tenant_prefix.clone(),
+        })
     }
 
     /// Root of all tenant directories; one subdirectory per tenant.
@@ -696,6 +815,68 @@ impl Config {
     /// The platform url with no trailing slash, which every link is built from.
     pub fn canonical_url(&self) -> String {
         self.url.trim_end_matches('/').to_string()
+    }
+
+    /// Whether [`Self::host`] is an address only this machine or this network
+    /// can resolve.
+    ///
+    /// One function because three callers need the same answer and must not
+    /// each invent it: a payment provider's webhook, an ACME challenge and a
+    /// customer's DNS all depend on this platform being reachable from
+    /// outside, and a hostname that is not is the single cause behind all
+    /// three failing.
+    pub fn host_is_local(&self) -> bool {
+        let host = self.host().to_ascii_lowercase();
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+
+        if host.is_empty()
+            || host == "localhost"
+            || host == "::1"
+            || host == "0.0.0.0"
+            || host.ends_with(".localhost")
+        {
+            return true;
+        }
+        // Reserved and special-use suffixes: never delegated in the public DNS,
+        // so nothing outside can look one up.
+        if [".local", ".localdomain", ".internal", ".home.arpa", ".test", ".invalid", ".example"]
+            .iter()
+            .any(|suffix| host.ends_with(suffix))
+        {
+            return true;
+        }
+        // Literal addresses in the loopback, private and link-local ranges.
+        if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
+            return ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified();
+        }
+        if let Ok(ip) = host.parse::<std::net::Ipv6Addr>() {
+            return ip.is_loopback() || ip.is_unspecified();
+        }
+        false
+    }
+
+    /// Why a payment provider's webhook could not reach this platform, or
+    /// `None` when it can.
+    ///
+    /// This is the failure that looks like a broken button. A provider takes
+    /// the customer's money and then calls back to say so, and reopening the
+    /// site happens *only* on that callback — so when the callback cannot
+    /// arrive, checkout completes, the money moves, and the site stays shut
+    /// with the same "Complete payment" banner on it. Nothing in the checkout
+    /// path can detect it: from here the checkout was created successfully.
+    ///
+    /// So it is reported where the configuration is, by `doctor` and by the
+    /// console, rather than waited for.
+    pub fn webhook_unreachable_reason(&self) -> Option<String> {
+        if !self.host_is_local() {
+            return None;
+        }
+        Some(format!(
+            "{} is not an address a payment provider can reach, so the webhook that \
+             confirms a payment will never arrive — a customer would be charged and \
+             their site would stay closed",
+            self.host()
+        ))
     }
 
     /// The full hostname for a tenant slug.
@@ -913,6 +1094,7 @@ mod tests {
             subdomain_base: "sites.example.com".into(),
             server: ServerConfig { host: "0.0.0.0".into(), port: Some(443), http_port: 80 },
             paths: PathsConfig::default(),
+            database: DatabaseConfig::default(),
             tenants: TenantsConfig::default(),
             ssl: SslConfig { enabled: true, ..Default::default() },
             billing: BillingConfig::default(),
@@ -1097,5 +1279,61 @@ mod tests {
         c.url = "http://pro.localhost:8080".into();
         assert_eq!(c.host(), "pro.localhost");
         assert_eq!(c.canonical_url(), "http://pro.localhost:8080");
+    }
+
+    /// The addresses nothing outside this machine can resolve. Getting this
+    /// list wrong in either direction matters: a false negative is a platform
+    /// that charges customers and never opens their sites, and a false
+    /// positive nags a production deployment that is working.
+    #[test]
+    fn local_hostnames_are_recognised() {
+        let mut c = cfg();
+        for url in [
+            "http://pro.localhost:8080",
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+            "http://127.1.2.3",
+            "http://10.0.0.5:8080",
+            "http://192.168.1.20",
+            "http://172.16.4.4",
+            "http://169.254.1.1",
+            "http://0.0.0.0:8080",
+            "http://[::1]:8080",
+            "https://pro.mymac.local",
+            "https://pro.internal",
+            "https://pro.home.arpa",
+            "https://pro.test",
+        ] {
+            c.url = url.into();
+            assert!(c.host_is_local(), "{url} must be recognised as local");
+            assert!(c.webhook_unreachable_reason().is_some(), "{url} must warn");
+        }
+    }
+
+    #[test]
+    fn public_hostnames_are_left_alone() {
+        let mut c = cfg();
+        for url in [
+            "https://pro.example.com",
+            "https://ghost-pro.io",
+            "http://203.0.113.10",
+            // Not a reserved suffix, however much it looks like one.
+            "https://pro.testing.example.com",
+            "https://localhost.example.com",
+        ] {
+            c.url = url.into();
+            assert!(!c.host_is_local(), "{url} must be treated as public");
+            assert_eq!(c.webhook_unreachable_reason(), None, "{url} must not warn");
+        }
+    }
+
+    /// The reason names the host, because an operator reading it in `doctor`
+    /// needs to know which address is the problem.
+    #[test]
+    fn the_webhook_reason_names_the_host() {
+        let mut c = cfg();
+        c.url = "http://pro.localhost:8080".into();
+        let reason = c.webhook_unreachable_reason().unwrap();
+        assert!(reason.contains("pro.localhost"), "got {reason}");
     }
 }

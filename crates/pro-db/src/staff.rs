@@ -1,11 +1,12 @@
 //! Platform staff: the operator's own logins.
 use pro_core::{ids, looks_like_email, now_iso, DbErrorExt, ProError, Result, Staff, StaffRole};
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, SqlitePool};
+use crate::Db;
+use sqlx::any::AnyRow;
+use sqlx::Row;
 
 use crate::accounts::{hash_password, verify_password};
 
-fn map(row: &SqliteRow) -> Staff {
+fn map(row: &AnyRow) -> Staff {
     Staff {
         id: row.get("id"),
         email: row.get("email"),
@@ -25,7 +26,7 @@ const COLS: &str =
     "id, email, name, password_hash, role, status, created_at, last_login_at";
 
 pub async fn create(
-    pool: &SqlitePool,
+    pool: &Db,
     email: &str,
     name: &str,
     password: &str,
@@ -66,7 +67,7 @@ pub async fn create(
     get(pool, &id).await
 }
 
-pub async fn get(pool: &SqlitePool, id: &str) -> Result<Staff> {
+pub async fn get(pool: &Db, id: &str) -> Result<Staff> {
     let row = sqlx::query(&format!("SELECT {COLS} FROM staff WHERE id = ?"))
         .bind(id)
         .fetch_optional(pool)
@@ -76,7 +77,7 @@ pub async fn get(pool: &SqlitePool, id: &str) -> Result<Staff> {
     Ok(map(&row))
 }
 
-pub async fn find_by_email(pool: &SqlitePool, email: &str) -> Result<Option<Staff>> {
+pub async fn find_by_email(pool: &Db, email: &str) -> Result<Option<Staff>> {
     let row = sqlx::query(&format!("SELECT {COLS} FROM staff WHERE lower(email) = lower(?)"))
         .bind(email.trim())
         .fetch_optional(pool)
@@ -87,7 +88,7 @@ pub async fn find_by_email(pool: &SqlitePool, email: &str) -> Result<Option<Staf
 
 /// Authenticate an operator. Constant-cost against an unknown address, for
 /// the same reason the customer path is.
-pub async fn authenticate(pool: &SqlitePool, email: &str, password: &str) -> Result<Staff> {
+pub async fn authenticate(pool: &Db, email: &str, password: &str) -> Result<Staff> {
     const DUMMY: &str = "$2b$12$C6UzMDM.H6dfI/f/IKcEeO3Wz1W4J1mP6RhJ0BCGcmJjK0KjCIWxK";
     let found = find_by_email(pool, email).await?;
     let hash = found.as_ref().map(|s| s.password_hash.as_str()).unwrap_or(DUMMY);
@@ -110,7 +111,7 @@ pub async fn authenticate(pool: &SqlitePool, email: &str, password: &str) -> Res
     }
 }
 
-pub async fn list(pool: &SqlitePool) -> Result<Vec<Staff>> {
+pub async fn list(pool: &Db) -> Result<Vec<Staff>> {
     let rows = sqlx::query(&format!("SELECT {COLS} FROM staff ORDER BY created_at"))
         .fetch_all(pool)
         .await
@@ -118,11 +119,11 @@ pub async fn list(pool: &SqlitePool) -> Result<Vec<Staff>> {
     Ok(rows.iter().map(map).collect())
 }
 
-pub async fn count(pool: &SqlitePool) -> Result<i64> {
+pub async fn count(pool: &Db) -> Result<i64> {
     sqlx::query_scalar("SELECT COUNT(*) FROM staff").fetch_one(pool).await.db_err()
 }
 
-async fn count_active_owners(pool: &SqlitePool) -> Result<i64> {
+async fn count_active_owners(pool: &Db) -> Result<i64> {
     sqlx::query_scalar("SELECT COUNT(*) FROM staff WHERE role = 'owner' AND status = 'active'")
         .fetch_one(pool)
         .await
@@ -140,7 +141,7 @@ async fn count_active_owners(pool: &SqlitePool) -> Result<i64> {
 ///   owner has no one who can change the payment provider, and no way to
 ///   appoint one.
 pub async fn set_role(
-    pool: &SqlitePool,
+    pool: &Db,
     actor: &Staff,
     target_id: &str,
     role: StaffRole,
@@ -175,7 +176,7 @@ pub async fn set_role(
 /// until their cookie expires, which is not what "disabled" means to whoever
 /// clicked it.
 pub async fn set_status(
-    pool: &SqlitePool,
+    pool: &Db,
     actor: &Staff,
     target_id: &str,
     status: &str,
@@ -208,7 +209,7 @@ pub async fn set_status(
 }
 
 /// Change a password, ending every other session for that person.
-pub async fn set_password(pool: &SqlitePool, id: &str, password: &str) -> Result<()> {
+pub async fn set_password(pool: &Db, id: &str, password: &str) -> Result<()> {
     if password.len() < 12 {
         return Err(ProError::BadRequest(
             "A staff password must be at least 12 characters.".into(),
@@ -224,7 +225,7 @@ pub async fn set_password(pool: &SqlitePool, id: &str, password: &str) -> Result
     Ok(())
 }
 
-pub async fn rename(pool: &SqlitePool, id: &str, name: &str) -> Result<()> {
+pub async fn rename(pool: &Db, id: &str, name: &str) -> Result<()> {
     sqlx::query("UPDATE staff SET name = ? WHERE id = ?")
         .bind(name.trim())
         .bind(id)
@@ -239,7 +240,7 @@ pub async fn rename(pool: &SqlitePool, id: &str, name: &str) -> Result<()> {
 /// This is what `ghost-pro setup` calls. It is a no-op once anybody exists, so
 /// it cannot be used to mint a second owner on a running platform.
 pub async fn bootstrap_owner(
-    pool: &SqlitePool,
+    pool: &Db,
     email: &str,
     name: &str,
     password: &str,
@@ -266,7 +267,7 @@ impl Assignable for Staff {
 mod tests {
     use super::*;
 
-    async fn fixture() -> (SqlitePool, Staff) {
+    async fn fixture() -> (Db, Staff) {
         let pool = crate::pool::open_in_memory().await.unwrap();
         let owner = bootstrap_owner(&pool, "owner@example.com", "Owner", "a-long-password")
             .await

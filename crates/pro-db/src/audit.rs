@@ -4,8 +4,9 @@
 //! fact: *what happened to this site, and was it us?*
 use pro_core::{ids, now_iso, AuditEvent, DbErrorExt, Result};
 use serde_json::Value;
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, SqlitePool};
+use crate::Db;
+use sqlx::any::AnyRow;
+use sqlx::Row;
 
 /// Record something that changed money, routing, or a site's existence.
 ///
@@ -14,7 +15,7 @@ use sqlx::{Row, SqlitePool};
 /// worth failing a customer's action over — if the trail cannot be written,
 /// the action should still happen and the log will carry it.
 pub async fn record(
-    pool: &SqlitePool,
+    pool: &Db,
     actor: &str,
     action: &str,
     tenant_id: Option<&str>,
@@ -46,7 +47,7 @@ pub async fn record(
     }
 }
 
-fn map(row: &SqliteRow) -> AuditEvent {
+fn map(row: &AnyRow) -> AuditEvent {
     AuditEvent {
         id: row.get("id"),
         actor: row.get("actor"),
@@ -62,7 +63,7 @@ const COLS: &str = "id, actor, action, tenant_id, account_id, meta, created_at";
 
 /// The trail, newest first, optionally narrowed to one site or one actor.
 pub async fn list(
-    pool: &SqlitePool,
+    pool: &Db,
     tenant_id: Option<&str>,
     actor: Option<&str>,
     limit: i64,
@@ -93,7 +94,7 @@ pub async fn list(
 /// Called on a long timer. The default retention is generous because this
 /// table is small — a row per administrative action, not per request — and
 /// because the questions it answers tend to be asked months later.
-pub async fn purge(pool: &SqlitePool, days: i64) -> Result<u64> {
+pub async fn purge(pool: &Db, days: i64) -> Result<u64> {
     let r = sqlx::query("DELETE FROM audit_events WHERE created_at < ?")
         .bind(pro_core::days_from_now(-days))
         .execute(pool)
@@ -127,8 +128,25 @@ pub enum WebhookClaim {
 /// is treated as fresh every time, because there is nothing to deduplicate on.
 /// That is the honest behaviour; the handlers for those events are written to
 /// be idempotent in themselves.
+/// How much of a provider's event body is kept.
+///
+/// A payload is unbounded and attacker-adjacent, and this copy exists so a
+/// failed event can be read and replayed by hand — not as an archive.
+///
+/// The specific number is set by MySQL. A string wider than roughly 16,000
+/// characters is reported over the wire as a *blob* rather than as text, and
+/// sqlx's `Any` driver will not decode a blob into a `String` — so a larger
+/// payload would store fine and then fail the moment an operator opened it.
+/// 14,000 also keeps the row inside MySQL's 65,535-byte limit once the other
+/// columns are counted (`utf8mb4` charges 4 bytes per declared character).
+///
+/// The cap is the same on both engines deliberately: an event that can be
+/// replayed on a developer's SQLite database can be replayed in production.
+/// For scale, the largest events Stripe sends are a few kilobytes.
+pub const MAX_PAYLOAD_CHARS: usize = 14_000;
+
 pub async fn claim_webhook(
-    pool: &SqlitePool,
+    pool: &Db,
     provider: &str,
     event_id: &str,
     event_type: &str,
@@ -146,9 +164,7 @@ pub async fn claim_webhook(
     .bind(event_id)
     .bind(event_type)
     .bind(now_iso())
-    // Truncated: a payload is unbounded and this copy exists so a failed
-    // event can be read and replayed, not as an archive.
-    .bind(payload.chars().take(64_000).collect::<String>())
+    .bind(payload.chars().take(MAX_PAYLOAD_CHARS).collect::<String>())
     .execute(pool)
     .await;
 
@@ -168,7 +184,7 @@ pub async fn claim_webhook(
 
 /// Mark an event as handled.
 pub async fn finish_webhook(
-    pool: &SqlitePool,
+    pool: &Db,
     provider: &str,
     event_id: &str,
     error: Option<&str>,
@@ -192,7 +208,7 @@ pub async fn finish_webhook(
 /// was briefly unavailable, say. Without this, a transient failure would be
 /// permanently recorded as "seen" and the provider's retry ignored, losing the
 /// event for good.
-pub async fn release_webhook(pool: &SqlitePool, provider: &str, event_id: &str) -> Result<()> {
+pub async fn release_webhook(pool: &Db, provider: &str, event_id: &str) -> Result<()> {
     sqlx::query("DELETE FROM webhook_events WHERE provider = ? AND event_id = ?")
         .bind(provider)
         .bind(event_id)
@@ -208,7 +224,7 @@ pub async fn release_webhook(pool: &SqlitePool, provider: &str, event_id: &str) 
 /// it is returned exactly as stored — re-serialising it would change the
 /// bytes that were signed, which is the same trap the receive path avoids.
 pub async fn webhook_payload(
-    pool: &SqlitePool,
+    pool: &Db,
     provider: &str,
     event_id: &str,
 ) -> Result<Option<String>> {
@@ -224,7 +240,7 @@ pub async fn webhook_payload(
 }
 
 /// Events that failed to process, for an operator to read.
-pub async fn failed_webhooks(pool: &SqlitePool, limit: i64) -> Result<Vec<(String, String, String, String)>> {
+pub async fn failed_webhooks(pool: &Db, limit: i64) -> Result<Vec<(String, String, String, String)>> {
     sqlx::query_as(
         "SELECT provider, event_id, event_type, COALESCE(error, '') FROM webhook_events \
          WHERE error IS NOT NULL ORDER BY received_at DESC LIMIT ?",
@@ -235,7 +251,7 @@ pub async fn failed_webhooks(pool: &SqlitePool, limit: i64) -> Result<Vec<(Strin
     .db_err()
 }
 
-pub async fn purge_webhooks(pool: &SqlitePool, days: i64) -> Result<u64> {
+pub async fn purge_webhooks(pool: &Db, days: i64) -> Result<u64> {
     let r = sqlx::query(
         "DELETE FROM webhook_events WHERE received_at < ? AND error IS NULL",
     )
@@ -251,7 +267,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    async fn pool() -> SqlitePool {
+    async fn pool() -> Db {
         crate::pool::open_in_memory().await.unwrap()
     }
 
@@ -376,7 +392,7 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(stored.len(), 64_000);
+        assert_eq!(stored.len(), super::MAX_PAYLOAD_CHARS);
     }
 
     #[tokio::test]

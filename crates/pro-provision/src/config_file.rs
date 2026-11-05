@@ -31,18 +31,14 @@ pub fn build(
     period_start: &str,
     billing_url: &str,
     mail: &pro_core::config::MailConfig,
+    database: &Value,
 ) -> Value {
     json!({
         "url": public_url,
         // Loopback only. Every request arrives through the platform's proxy,
         // so a tenant is not addressable from outside even if its port leaked.
         "server": { "host": "127.0.0.1", "port": port },
-        "database": {
-            "client": "sqlite3",
-            // Relative to the working directory, which is this tenant's own
-            // directory — so the whole site is one movable, archivable tree.
-            "connection": { "filename": "content/data/ghost.db" }
-        },
+        "database": database,
         "paths": { "contentPath": "content" },
         // The edge terminates TLS for every hostname; a tenant doing its own
         // ACME would both fail (it cannot bind 443) and be redundant.
@@ -51,6 +47,42 @@ pub fn build(
         // The plan, in the only form the CMS understands.
         "hostSettings": plan.host_settings(period_start, billing_url),
     })
+}
+
+/// The `database` block for a tenant, in the form its CMS expects.
+///
+/// Knex's shape, which is what Ghost's config uses and Ghost-rust reads: a
+/// `client` naming the engine and a `connection` holding either a filename or
+/// a set of server fields.
+///
+/// The SQLite filename is deliberately *relative*. The tenant process runs
+/// with its own directory as the working directory, so the whole site stays
+/// one movable, archivable tree — which is what makes a backup a single zip
+/// and a move between machines a single copy.
+///
+/// On MySQL that property is gone: the archive holds the files and the
+/// database is on a server, so the two have to be captured together. See
+/// [`crate::backup`].
+pub fn database_block(creds: Option<&crate::tenant_db::Credentials>) -> Value {
+    match creds {
+        None => json!({
+            "client": "sqlite3",
+            "connection": { "filename": "content/data/ghost.db" }
+        }),
+        Some(c) => json!({
+            "client": "mysql",
+            "connection": {
+                "host": c.host,
+                "port": c.port,
+                "user": c.user,
+                "password": c.password,
+                "database": c.database,
+                // utf8mb4 or a post cannot hold an emoji, and the failure is a
+                // truncated row rather than an error.
+                "charset": "utf8mb4",
+            }
+        }),
+    }
 }
 
 /// The tenant's transactional mail.
@@ -129,6 +161,7 @@ mod tests {
             "2026-01-01T00:00:00Z",
             "https://pro.example.com/billing",
             &mail(),
+            &database_block(None),
         );
 
         assert_eq!(cfg["url"], "https://alice.sites.example.com");
@@ -146,7 +179,7 @@ mod tests {
     #[test]
     fn host_settings_is_an_object_with_limits() {
         let plan = &pro_core::plans::default_plans()[0];
-        let cfg = build("https://a.example.com", 21000, plan, "2026-01-01T00:00:00Z", "https://b/billing", &mail());
+        let cfg = build("https://a.example.com", 21000, plan, "2026-01-01T00:00:00Z", "https://b/billing", &mail(), &database_block(None));
 
         assert!(cfg["hostSettings"].is_object());
         assert!(cfg["hostSettings"]["limits"].is_object());
@@ -160,7 +193,7 @@ mod tests {
     #[test]
     fn url_is_the_public_one_not_the_loopback_one() {
         let plan = &pro_core::plans::default_plans()[0];
-        let cfg = build("https://blog.customer.com", 21005, plan, "2026-01-01T00:00:00Z", "https://b/billing", &mail());
+        let cfg = build("https://blog.customer.com", 21005, plan, "2026-01-01T00:00:00Z", "https://b/billing", &mail(), &database_block(None));
         assert!(cfg["url"].as_str().unwrap().starts_with("https://"));
         assert_eq!(cfg["server"]["host"], "127.0.0.1");
     }
@@ -168,7 +201,7 @@ mod tests {
     #[test]
     fn inherits_platform_smtp() {
         let plan = &pro_core::plans::default_plans()[0];
-        let cfg = build("https://a.example.com", 21000, plan, "2026-01-01T00:00:00Z", "https://b/billing", &mail());
+        let cfg = build("https://a.example.com", 21000, plan, "2026-01-01T00:00:00Z", "https://b/billing", &mail(), &database_block(None));
         assert_eq!(cfg["mail"]["transport"], "SMTP");
         assert_eq!(cfg["mail"]["options"]["host"], "smtp.example.com");
         assert_eq!(cfg["mail"]["options"]["auth"]["user"], "user");
@@ -181,11 +214,11 @@ mod tests {
     fn falls_back_when_there_is_no_smtp() {
         let plan = &pro_core::plans::default_plans()[0];
         let no_mail = MailConfig { transport: "log".into(), ..mail() };
-        let cfg = build("https://a.example.com", 21000, plan, "2026-01-01T00:00:00Z", "https://b/billing", &no_mail);
+        let cfg = build("https://a.example.com", 21000, plan, "2026-01-01T00:00:00Z", "https://b/billing", &no_mail, &database_block(None));
         assert_eq!(cfg["mail"]["transport"], "Direct");
 
         let smtp_without_host = MailConfig { host: None, ..mail() };
-        let cfg2 = build("https://a.example.com", 21000, plan, "2026-01-01T00:00:00Z", "https://b/billing", &smtp_without_host);
+        let cfg2 = build("https://a.example.com", 21000, plan, "2026-01-01T00:00:00Z", "https://b/billing", &smtp_without_host, &database_block(None));
         assert_eq!(cfg2["mail"]["transport"], "Direct");
     }
 
@@ -199,8 +232,56 @@ mod tests {
             "2026-01-01T00:00:00Z",
             "https://b/billing",
             &mail(),
+            &database_block(None),
         );
         assert_eq!(cfg["hostSettings"]["limits"]["publicSiteAccess"]["disabled"], true);
+    }
+
+    /// With no MySQL configured, a tenant keeps its own file — and the path
+    /// stays *relative*, which is what makes the whole site one movable tree.
+    #[test]
+    fn a_local_tenant_gets_a_relative_sqlite_path() {
+        let db = database_block(None);
+        assert_eq!(db["client"], "sqlite3");
+        assert_eq!(db["connection"]["filename"], "content/data/ghost.db");
+        assert!(
+            !db["connection"]["filename"].as_str().unwrap().starts_with('/'),
+            "an absolute path would pin the site to one machine"
+        );
+    }
+
+    /// On MySQL the tenant is handed its own database and its own login, in
+    /// the shape Ghost's config expects.
+    #[test]
+    fn a_mysql_tenant_gets_its_own_database_and_user() {
+        let creds = crate::tenant_db::Credentials {
+            database: "ghost_c32a6ef5d844be317eca55e2".into(),
+            user: "ghost_c32a6ef5d844be317eca55e2".into(),
+            password: "s3cret".into(),
+            host: "db.internal".into(),
+            port: 3307,
+        };
+        let db = database_block(Some(&creds));
+        assert_eq!(db["client"], "mysql");
+        assert_eq!(db["connection"]["database"], "ghost_c32a6ef5d844be317eca55e2");
+        assert_eq!(db["connection"]["user"], "ghost_c32a6ef5d844be317eca55e2");
+        assert_eq!(db["connection"]["host"], "db.internal");
+        assert_eq!(db["connection"]["port"], 3307);
+        // Without utf8mb4 a post holding an emoji is silently truncated.
+        assert_eq!(db["connection"]["charset"], "utf8mb4");
+    }
+
+    /// The tenant's whole config is written to its directory, so a site must
+    /// never be handed credentials for a database that is not its own.
+    #[test]
+    fn two_tenants_never_share_a_database() {
+        let store = pro_core::TenantStore::MySqlServer {
+            server: "mysql://root:r@db:3306".into(),
+            prefix: "ghost_".into(),
+        };
+        let a = store.database_name("aaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let b = store.database_name("bbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
+        assert_ne!(a, b);
     }
 
     /// A tenant may be starting while this runs; a reader must never see a
@@ -211,7 +292,7 @@ mod tests {
         tokio::fs::create_dir_all(&dir).await.unwrap();
 
         let plan = &pro_core::plans::default_plans()[0];
-        let body = build("https://a.example.com", 21000, plan, "2026-01-01T00:00:00Z", "https://b/billing", &mail());
+        let body = build("https://a.example.com", 21000, plan, "2026-01-01T00:00:00Z", "https://b/billing", &mail(), &database_block(None));
         write(&dir, "production", &body).await.unwrap();
 
         let back = read(&dir, "production").await.unwrap();

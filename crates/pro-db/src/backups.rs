@@ -8,7 +8,7 @@
 //! A handful per tenant is kept, pruned oldest-first: unbounded backups fill a
 //! disk, and the oldest copy of a site is rarely the one anybody wants.
 use pro_core::{ProError, Result};
-use sqlx::SqlitePool;
+use crate::Db;
 
 /// One archive, as the platform knows it.
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -35,7 +35,7 @@ pub fn reason_label(reason: &str) -> &'static str {
 
 /// Record a finished archive.
 pub async fn record(
-    pool: &SqlitePool,
+    pool: &Db,
     tenant_id: &str,
     path: &str,
     size_bytes: i64,
@@ -61,13 +61,18 @@ pub async fn record(
 
 /// A tenant's archives, newest first.
 pub async fn list_for_tenant(
-    pool: &SqlitePool,
+    pool: &Db,
     tenant_id: &str,
     limit: i64,
 ) -> Result<Vec<Backup>> {
+    // `id` breaks the tie rather than SQLite's `rowid`, which MySQL has no
+    // equivalent of. It only has to be *deterministic*: the tiebreak decides
+    // the order of two snapshots taken in the same second, and `take_pruned`
+    // orders identically, so whichever rows this call shows are exactly the
+    // ones pruning keeps.
     sqlx::query_as(&format!(
         "SELECT id, tenant_id, path, size_bytes, reason, created_at \
-         FROM backups WHERE tenant_id = ? ORDER BY created_at DESC, rowid DESC LIMIT {limit}"
+         FROM backups WHERE tenant_id = ? ORDER BY created_at DESC, id DESC LIMIT {limit}"
     ))
     .bind(tenant_id)
     .fetch_all(pool)
@@ -76,7 +81,7 @@ pub async fn list_for_tenant(
 }
 
 /// One archive by id — the lookup behind a download or restore.
-pub async fn get(pool: &SqlitePool, id: &str) -> Result<Backup> {
+pub async fn get(pool: &Db, id: &str) -> Result<Backup> {
     sqlx::query_as(
         "SELECT id, tenant_id, path, size_bytes, reason, created_at \
          FROM backups WHERE id = ?",
@@ -90,7 +95,7 @@ pub async fn get(pool: &SqlitePool, id: &str) -> Result<Backup> {
 
 /// When this tenant was last backed up, if ever — the nightly pass skips
 /// sites backed up more recently than its interval.
-pub async fn last_backup_at(pool: &SqlitePool, tenant_id: &str) -> Result<Option<String>> {
+pub async fn last_backup_at(pool: &Db, tenant_id: &str) -> Result<Option<String>> {
     let row: Option<(String,)> = sqlx::query_as(
         "SELECT created_at FROM backups WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 1",
     )
@@ -106,14 +111,19 @@ pub async fn last_backup_at(pool: &SqlitePool, tenant_id: &str) -> Result<Option
 /// a row for a deleted file is a download that 404s; a file with no row is
 /// unreachable and quietly eats disk forever.
 pub async fn take_pruned(
-    pool: &SqlitePool,
+    pool: &Db,
     tenant_id: &str,
     keep: i64,
 ) -> Result<Vec<(String, String)>> {
-    sqlx::query_as(
+    // Ordered exactly as `list_for_tenant`, so "the rows past `keep`" means
+    // the same thing in both — see the note there about the `id` tiebreak.
+    // `skip_first` is "every row after the offset", which SQLite spells with a
+    // negative limit and MySQL refuses.
+    sqlx::query_as(&format!(
         "SELECT id, path FROM backups WHERE tenant_id = ? \
-         ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ?",
-    )
+         ORDER BY created_at DESC, id DESC {}",
+        crate::dialect::skip_first()
+    ))
     .bind(tenant_id)
     .bind(keep)
     .fetch_all(pool)
@@ -122,7 +132,7 @@ pub async fn take_pruned(
 }
 
 /// Remove one row, once its file is gone.
-pub async fn remove(pool: &SqlitePool, id: &str) -> Result<()> {
+pub async fn remove(pool: &Db, id: &str) -> Result<()> {
     sqlx::query("DELETE FROM backups WHERE id = ?")
         .bind(id)
         .execute(pool)
@@ -135,7 +145,7 @@ pub async fn remove(pool: &SqlitePool, id: &str) -> Result<()> {
 mod tests {
     use super::*;
 
-    async fn pool() -> sqlx::SqlitePool {
+    async fn pool() -> crate::Db {
         let pool = crate::open_in_memory().await.unwrap();
         sqlx::query("INSERT INTO accounts (id, email, name, password_hash, status, created_at) \
                      VALUES ('a1', 'a@example.com', 'A', 'x', 'active', '2026-01-01T00:00:00Z')")
@@ -154,7 +164,7 @@ mod tests {
 
     /// `record` stamps now; tests want controlled orderings, so the row's
     /// timestamp is set after the insert.
-    async fn seed(pool: &SqlitePool, tenant: &str, reason: &str, at: &str) -> Backup {
+    async fn seed(pool: &Db, tenant: &str, reason: &str, at: &str) -> Backup {
         let backup = record(pool, tenant, &format!("/tmp/{tenant}-{at}.zip"), 100, reason)
             .await
             .unwrap();

@@ -9,7 +9,7 @@
 use pro_core::settings::{self, Effective};
 use pro_core::{Config, DbErrorExt, ProError, Result, StaffRole};
 use serde_json::Value;
-use sqlx::SqlitePool;
+use crate::Db;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
@@ -20,7 +20,7 @@ pub struct SettingsStore {
 
 impl SettingsStore {
     /// Read every override and build the live view.
-    pub async fn load(pool: &SqlitePool, config: Arc<Config>) -> Result<Self> {
+    pub async fn load(pool: &Db, config: Arc<Config>) -> Result<Self> {
         let overrides = read_all(pool).await?;
         let effective = Arc::new(Effective::new(config.clone(), overrides));
         Ok(Self { config, current: RwLock::new(effective) })
@@ -52,7 +52,7 @@ impl SettingsStore {
     /// set is refused outright rather than partly honoured.
     pub async fn save(
         &self,
-        pool: &SqlitePool,
+        pool: &Db,
         changes: &[(String, Option<Value>)],
         actor_role: StaffRole,
         actor: &str,
@@ -83,12 +83,16 @@ impl SettingsStore {
             match value {
                 Some(v) => {
                     let encoded = serde_json::to_string(v)?;
-                    sqlx::query(
-                        "INSERT INTO platform_settings (key, value, updated_at, updated_by) \
-                         VALUES (?, ?, ?, ?) \
-                         ON CONFLICT(key) DO UPDATE SET value = excluded.value, \
-                             updated_at = excluded.updated_at, updated_by = excluded.updated_by",
-                    )
+                    // `key` is a reserved word in MySQL, and the upsert tail is
+                    // spelled differently by each engine; both come from
+                    // `crate::dialect` so this statement reads the same either
+                    // way. Single-key table, which is what makes MySQL's
+                    // "any unique key" form equivalent to SQLite's.
+                    sqlx::query(&format!(
+                        "INSERT INTO platform_settings (`key`, value, updated_at, updated_by) \
+                         VALUES (?, ?, ?, ?) {}",
+                        crate::dialect::upsert(&["key"], &["value", "updated_at", "updated_by"])
+                    ))
                     .bind(key)
                     .bind(&encoded)
                     .bind(&now)
@@ -101,7 +105,7 @@ impl SettingsStore {
                 // shows through again, rather than storing a blank that would
                 // mask it.
                 None => {
-                    sqlx::query("DELETE FROM platform_settings WHERE key = ?")
+                    sqlx::query("DELETE FROM platform_settings WHERE `key` = ?")
                         .bind(key)
                         .execute(&mut *tx)
                         .await
@@ -147,7 +151,7 @@ impl SettingsStore {
     }
 
     /// Re-read the overrides and swap in a fresh view.
-    pub async fn refresh(&self, pool: &SqlitePool) -> Result<()> {
+    pub async fn refresh(&self, pool: &Db) -> Result<()> {
         let overrides = read_all(pool).await?;
         let next = Arc::new(Effective::new(self.config.clone(), overrides));
         match self.current.write() {
@@ -164,8 +168,8 @@ impl SettingsStore {
     }
 }
 
-async fn read_all(pool: &SqlitePool) -> Result<BTreeMap<String, Value>> {
-    let rows: Vec<(String, String)> = sqlx::query_as("SELECT key, value FROM platform_settings")
+async fn read_all(pool: &Db) -> Result<BTreeMap<String, Value>> {
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT `key`, value FROM platform_settings")
         .fetch_all(pool)
         .await
         .db_err()?;
@@ -227,7 +231,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    async fn fixture() -> (SqlitePool, SettingsStore) {
+    async fn fixture() -> (Db, SettingsStore) {
         let pool = crate::pool::open_in_memory().await.unwrap();
         let mut cfg: Config = serde_json::from_value(json!({
             "url": "https://pro.example.com",
@@ -394,7 +398,7 @@ mod tests {
     #[tokio::test]
     async fn ignores_unknown_stored_keys() {
         let (pool, store) = fixture().await;
-        sqlx::query("INSERT INTO platform_settings (key, value, updated_at) VALUES (?, ?, ?)")
+        sqlx::query("INSERT INTO platform_settings (`key`, value, updated_at) VALUES (?, ?, ?)")
             .bind("billing.someFutureThing")
             .bind("\"x\"")
             .bind(pro_core::now_iso())
@@ -409,7 +413,7 @@ mod tests {
     #[tokio::test]
     async fn survives_a_corrupt_row() {
         let (pool, store) = fixture().await;
-        sqlx::query("INSERT INTO platform_settings (key, value, updated_at) VALUES (?, ?, ?)")
+        sqlx::query("INSERT INTO platform_settings (`key`, value, updated_at) VALUES (?, ?, ?)")
             .bind("platform.name")
             .bind("{not json")
             .bind(pro_core::now_iso())

@@ -1,6 +1,6 @@
 //! What every handler needs.
 use pro_core::{Config, Effective};
-use pro_db::{SettingsStore, SqlitePool};
+use pro_db::{SettingsStore, Db};
 use pro_mail::Mailer;
 use pro_proxy::{Forwarder, Router as HostRouter};
 use pro_supervisor::Supervisor;
@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: SqlitePool,
+    pub db: Db,
     pub config: Arc<Config>,
     pub settings: Arc<SettingsStore>,
     pub supervisor: Arc<Supervisor>,

@@ -64,6 +64,7 @@ async fn run(command: cli::Command) -> Result<()> {
         }
         cli::Command::Setup(args) => cli::setup(args).await,
         cli::Command::Doctor => cli::doctor().await,
+        cli::Command::Db => cli::db().await,
         cli::Command::CreateStaff(args) => cli::create_staff(args).await,
         cli::Command::Serve => serve_platform().await,
     }
@@ -92,8 +93,22 @@ async fn serve_platform() -> Result<()> {
         })?;
     }
 
-    let db = pro_db::open(&config.db_path()).await?;
-    tracing::info!("control plane database at {}", config.db_path().display());
+    let target = config.db_target()?;
+    let db = pro_db::open(&target, config.database.pool_size(target.engine())).await?;
+    // Redacted, because on MySQL this URL carries the password and this line
+    // goes to `server.log`.
+    tracing::info!("control plane database: {}", target.redacted());
+
+    // A production platform on SQLite works, and is not warned about lightly —
+    // but it is pinned to this one machine, and an operator who assumed
+    // otherwise will find that out during an incident rather than now.
+    if config.env == "production" && target.engine().is_single_machine() {
+        tracing::warn!(
+            "running production on SQLite: this platform cannot be served from a \
+             second machine, and the database is one file on this disk. Set \
+             database.url to a mysql:// server to change that"
+        );
+    }
 
     let settings = Arc::new(pro_db::SettingsStore::load(&db, config.clone()).await?);
     let supervisor = Arc::new(pro_supervisor::Supervisor::new(config.clone())?);
@@ -244,7 +259,7 @@ async fn serve_platform() -> Result<()> {
 /// asking a certificate authority to vouch for a hostname somebody else may
 /// control — which would also fail, and burn rate limit doing so.
 async fn certificate_domains(
-    db: &pro_db::SqlitePool,
+    db: &pro_db::Db,
     config: &Config,
 ) -> Result<Vec<String>> {
     let mut domains = vec![config.host()];

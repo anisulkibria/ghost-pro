@@ -1,7 +1,8 @@
 //! Customer accounts, and the password handling that goes with them.
 use pro_core::{ids, looks_like_email, now_iso, Account, DbErrorExt, ProError, Result};
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, SqlitePool};
+use crate::Db;
+use sqlx::any::AnyRow;
+use sqlx::Row;
 
 /// bcrypt cost.
 ///
@@ -33,7 +34,7 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
     bcrypt::verify(password, hash).unwrap_or(false)
 }
 
-fn map(row: &SqliteRow) -> Account {
+fn map(row: &AnyRow) -> Account {
     Account {
         id: row.get("id"),
         email: row.get("email"),
@@ -52,7 +53,7 @@ const COLS: &str = "id, email, name, password_hash, status, email_verified_at, \
                     billing_provider, billing_customer_id, created_at, last_login_at";
 
 pub async fn create(
-    pool: &SqlitePool,
+    pool: &Db,
     email: &str,
     name: &str,
     password_hash: &str,
@@ -90,7 +91,7 @@ pub async fn create(
     get(pool, &id).await
 }
 
-pub async fn get(pool: &SqlitePool, id: &str) -> Result<Account> {
+pub async fn get(pool: &Db, id: &str) -> Result<Account> {
     let row = sqlx::query(&format!("SELECT {COLS} FROM accounts WHERE id = ?"))
         .bind(id)
         .fetch_optional(pool)
@@ -100,7 +101,7 @@ pub async fn get(pool: &SqlitePool, id: &str) -> Result<Account> {
     Ok(map(&row))
 }
 
-pub async fn find_by_email(pool: &SqlitePool, email: &str) -> Result<Option<Account>> {
+pub async fn find_by_email(pool: &Db, email: &str) -> Result<Option<Account>> {
     let row = sqlx::query(&format!("SELECT {COLS} FROM accounts WHERE lower(email) = lower(?)"))
         .bind(email.trim())
         .fetch_optional(pool)
@@ -115,7 +116,7 @@ pub async fn find_by_email(pool: &SqlitePool, email: &str) -> Result<Option<Acco
 /// webhook that resolved to the wrong account would move somebody else's
 /// subscription.
 pub async fn find_by_customer(
-    pool: &SqlitePool,
+    pool: &Db,
     provider: &str,
     customer_id: &str,
 ) -> Result<Option<Account>> {
@@ -136,7 +137,7 @@ pub async fn find_by_customer(
 /// Without that, "no such account" returns in microseconds and a real account
 /// with a wrong password takes a quarter-second — which is a reliable oracle
 /// for enumerating a platform's customers.
-pub async fn authenticate(pool: &SqlitePool, email: &str, password: &str) -> Result<Account> {
+pub async fn authenticate(pool: &Db, email: &str, password: &str) -> Result<Account> {
     // bcrypt hash of a value nothing can match, at the same cost as a real one.
     const DUMMY: &str = "$2b$12$C6UzMDM.H6dfI/f/IKcEeO3Wz1W4J1mP6RhJ0BCGcmJjK0KjCIWxK";
 
@@ -159,7 +160,7 @@ pub async fn authenticate(pool: &SqlitePool, email: &str, password: &str) -> Res
     }
 }
 
-pub async fn touch_login(pool: &SqlitePool, id: &str) -> Result<()> {
+pub async fn touch_login(pool: &Db, id: &str) -> Result<()> {
     sqlx::query("UPDATE accounts SET last_login_at = ? WHERE id = ?")
         .bind(now_iso())
         .bind(id)
@@ -169,7 +170,7 @@ pub async fn touch_login(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn mark_verified(pool: &SqlitePool, id: &str) -> Result<()> {
+pub async fn mark_verified(pool: &Db, id: &str) -> Result<()> {
     sqlx::query("UPDATE accounts SET email_verified_at = ? WHERE id = ? AND email_verified_at IS NULL")
         .bind(now_iso())
         .bind(id)
@@ -179,7 +180,7 @@ pub async fn mark_verified(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn set_password(pool: &SqlitePool, id: &str, password_hash: &str) -> Result<()> {
+pub async fn set_password(pool: &Db, id: &str, password_hash: &str) -> Result<()> {
     sqlx::query("UPDATE accounts SET password_hash = ? WHERE id = ?")
         .bind(password_hash)
         .bind(id)
@@ -191,7 +192,7 @@ pub async fn set_password(pool: &SqlitePool, id: &str, password_hash: &str) -> R
 
 /// Record which provider this customer pays through and their id there.
 pub async fn set_billing_customer(
-    pool: &SqlitePool,
+    pool: &Db,
     id: &str,
     provider: &str,
     customer_id: &str,
@@ -206,7 +207,7 @@ pub async fn set_billing_customer(
     Ok(())
 }
 
-pub async fn set_status(pool: &SqlitePool, id: &str, status: &str) -> Result<()> {
+pub async fn set_status(pool: &Db, id: &str, status: &str) -> Result<()> {
     sqlx::query("UPDATE accounts SET status = ? WHERE id = ?")
         .bind(status)
         .bind(id)
@@ -227,7 +228,7 @@ pub async fn set_status(pool: &SqlitePool, id: &str, status: &str) -> Result<()>
 /// changing an address failed on `no such column: updated_at` every time,
 /// leaving an account stuck on an address it could neither confirm nor
 /// replace.
-pub async fn set_email(pool: &SqlitePool, id: &str, email: &str) -> Result<()> {
+pub async fn set_email(pool: &Db, id: &str, email: &str) -> Result<()> {
     sqlx::query("UPDATE accounts SET email = ?, email_verified_at = NULL WHERE id = ?")
         .bind(email)
         .bind(id)
@@ -245,7 +246,7 @@ pub async fn set_email(pool: &SqlitePool, id: &str, email: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn rename(pool: &SqlitePool, id: &str, name: &str) -> Result<()> {
+pub async fn rename(pool: &Db, id: &str, name: &str) -> Result<()> {
     sqlx::query("UPDATE accounts SET name = ? WHERE id = ?")
         .bind(name.trim())
         .bind(id)
@@ -257,7 +258,7 @@ pub async fn rename(pool: &SqlitePool, id: &str, name: &str) -> Result<()> {
 
 /// Accounts for the operator's console.
 pub async fn list(
-    pool: &SqlitePool,
+    pool: &Db,
     search: Option<&str>,
     limit: i64,
     offset: i64,
@@ -276,7 +277,7 @@ pub async fn list(
     Ok(rows.iter().map(map).collect())
 }
 
-pub async fn count(pool: &SqlitePool) -> Result<i64> {
+pub async fn count(pool: &Db) -> Result<i64> {
     sqlx::query_scalar("SELECT COUNT(*) FROM accounts").fetch_one(pool).await.db_err()
 }
 
@@ -284,7 +285,7 @@ pub async fn count(pool: &SqlitePool) -> Result<i64> {
 mod tests {
     use super::*;
 
-    async fn pool() -> SqlitePool {
+    async fn pool() -> Db {
         crate::pool::open_in_memory().await.unwrap()
     }
 
