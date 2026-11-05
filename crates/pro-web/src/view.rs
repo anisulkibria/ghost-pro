@@ -1122,39 +1122,74 @@ pub fn auth_page(
 /// In the query string rather than a cookie: these are short, never secret,
 /// and a cookie-based flash needs either a session for anonymous visitors or
 /// server-side storage, both of which are more machinery than a sentence
-/// deserves. The text is always escaped on the way out, and the `ok` flag is
-/// the only thing a URL can influence.
+/// deserves. The text is always escaped on the way out, and the kind is the
+/// only other thing a URL can influence.
 pub struct Flash {
     pub message: String,
-    pub ok: bool,
+    pub kind: FlashKind,
+}
+
+/// Three outcomes, because two were not enough.
+///
+/// [`FlashKind::Warn`] is for an action that *did* what was asked and still
+/// left something wrong — saving an SMTP configuration that cannot send is the
+/// case it exists for. Reporting that as success is how an operator comes to
+/// believe mail works; reporting it as an error claims nothing was saved, and
+/// invites them to submit the form again.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum FlashKind {
+    Ok,
+    Warn,
+    Err,
 }
 
 impl Flash {
     pub fn ok(message: impl Into<String>) -> Self {
-        Self { message: message.into(), ok: true }
+        Self { message: message.into(), kind: FlashKind::Ok }
     }
     pub fn err(message: impl Into<String>) -> Self {
-        Self { message: message.into(), ok: false }
+        Self { message: message.into(), kind: FlashKind::Err }
+    }
+    /// Saved, but not working yet — and the message says which.
+    pub fn warn(message: impl Into<String>) -> Self {
+        Self { message: message.into(), kind: FlashKind::Warn }
     }
 
-    /// Read a flash out of `?ok=…` / `?err=…`.
+    /// Whether this reports success. Warnings do not: something was saved, but
+    /// the operator still has a thing to fix.
+    pub fn is_ok(&self) -> bool {
+        self.kind == FlashKind::Ok
+    }
+
+    /// Read a flash out of `?ok=…` / `?warn=…` / `?err=…`.
     pub fn from_query(query: &std::collections::HashMap<String, String>) -> Option<Self> {
         if let Some(m) = query.get("ok") {
             return Some(Flash::ok(m.clone()));
+        }
+        if let Some(m) = query.get("warn") {
+            return Some(Flash::warn(m.clone()));
         }
         query.get("err").map(|m| Flash::err(m.clone()))
     }
 
     /// Append this flash to a redirect target.
     pub fn to_query(&self) -> String {
-        let key = if self.ok { "ok" } else { "err" };
+        let key = match self.kind {
+            FlashKind::Ok => "ok",
+            FlashKind::Warn => "warn",
+            FlashKind::Err => "err",
+        };
         format!("{key}={}", urlencode(&self.message))
     }
 }
 
 fn flash_banner(flash: &Flash) -> String {
     banner(
-        if flash.ok { BannerKind::Ok } else { BannerKind::Error },
+        match flash.kind {
+            FlashKind::Ok => BannerKind::Ok,
+            FlashKind::Warn => BannerKind::Warn,
+            FlashKind::Err => BannerKind::Error,
+        },
         &esc(&flash.message),
     )
 }
@@ -1811,7 +1846,7 @@ mod tests {
         let mut query = std::collections::HashMap::new();
         query.insert("err".to_string(), "<script>".to_string());
         let parsed = Flash::from_query(&query).unwrap();
-        assert!(!parsed.ok);
+        assert!(!parsed.is_ok());
         let html = page(sample_page("", Some(&parsed), &[]));
         assert!(html.contains("&lt;script&gt;"));
         assert!(html.contains(r#"class="banner error""#));
@@ -1823,8 +1858,25 @@ mod tests {
         let mut query = std::collections::HashMap::new();
         query.insert("ok".to_string(), "done".to_string());
         query.insert("err".to_string(), "nope".to_string());
-        assert!(Flash::from_query(&query).unwrap().ok);
+        assert!(Flash::from_query(&query).unwrap().is_ok());
         assert!(Flash::from_query(&std::collections::HashMap::new()).is_none());
+    }
+
+    /// A warning is saved-but-not-working: it round-trips as its own kind and
+    /// draws as a warning, not as the success it is not.
+    #[test]
+    fn a_warning_flash_is_neither_success_nor_failure() {
+        let f = Flash::warn("Settings saved. Mail is still not being sent.");
+        assert!(f.to_query().starts_with("warn="));
+        assert!(!f.is_ok());
+
+        let mut query = std::collections::HashMap::new();
+        query.insert("warn".to_string(), "Settings saved, but mail is off".to_string());
+        let parsed = Flash::from_query(&query).unwrap();
+        assert_eq!(parsed.kind, FlashKind::Warn);
+        let html = page(sample_page("", Some(&parsed), &[]));
+        assert!(html.contains(r#"class="banner warn""#), "got {html}");
+        assert!(html.contains("but mail is off"));
     }
 
     #[test]

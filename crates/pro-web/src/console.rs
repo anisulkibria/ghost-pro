@@ -1718,12 +1718,39 @@ async fn save_settings_inner(
     )
     .await;
 
-    let message = if before != after {
+    let mut message = if before != after {
         format!("Settings saved. New checkouts now go to {after}.")
     } else {
         "Settings saved.".to_string()
     };
-    Ok(redirect_with("/console/settings", Flash::ok(message)))
+
+    // An operator who just filled in SMTP details has to be told here whether
+    // mail will now actually leave the machine. Saying only "Settings saved."
+    // is how somebody configures SMTP, believes it worked, and finds out from
+    // a customer-facing banner that every message is still going to the log —
+    // with no indication of which field is missing.
+    //
+    // Only when this submission touched mail: on a development platform left
+    // on the log transport deliberately, every unrelated save would otherwise
+    // carry the same complaint. The console's own overview warns about that
+    // standing state already.
+    let touched_mail = changes.iter().any(|(k, _)| k.starts_with("mail."));
+    let mail_problem = touched_mail
+        .then(|| state.mailer().not_live_reason())
+        .flatten();
+
+    match mail_problem {
+        Some(reason) => {
+            message.push_str(&format!(" Mail is still not being sent: {reason}."));
+            Ok(redirect_with("/console/settings", Flash::warn(message)))
+        }
+        None => {
+            if touched_mail {
+                message.push_str(" Platform email is being sent over SMTP.");
+            }
+            Ok(redirect_with("/console/settings", Flash::ok(message)))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

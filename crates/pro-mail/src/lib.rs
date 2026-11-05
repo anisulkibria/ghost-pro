@@ -38,9 +38,34 @@ fn blank(value: &Option<String>) -> bool {
     value.as_ref().map(|v| v.trim().is_empty()).unwrap_or(true)
 }
 
+/// A trimmed value, or `None` when it is blank.
+fn present(value: &Option<String>) -> Option<&str> {
+    value.as_deref().map(str::trim).filter(|v| !v.is_empty())
+}
+
 impl Mailer {
     pub fn new(config: MailConfig, platform_name: String) -> Self {
         Self { config, platform_name }
+    }
+
+    /// The address platform mail is sent from.
+    ///
+    /// Falls back to the SMTP username when that is itself an address, which
+    /// is the overwhelmingly common case: Gmail, Fastmail, Mailgun and most
+    /// hosts authenticate as the identity they let you send as, so an operator
+    /// who fills in host, username and password has already said what the from
+    /// address is. Requiring them to type it a second time in another field
+    /// meant a complete-looking SMTP configuration that silently sent nothing
+    /// — mail stayed on the log transport and the only clue was a banner
+    /// telling customers to read `server.log`.
+    ///
+    /// The `@` test is what keeps the inference honest. SendGrid's username is
+    /// the literal `apikey` and Amazon SES issues an access key id; neither is
+    /// a mailbox, so for those [`Self::not_live_reason`] still asks for
+    /// `mail.fromAddress` by name rather than building a nonsense sender.
+    fn from_address(&self) -> Option<&str> {
+        present(&self.config.from_address)
+            .or_else(|| present(&self.config.user).filter(|u| u.contains('@')))
     }
 
     /// Whether mail will actually leave the machine.
@@ -77,7 +102,7 @@ impl Mailer {
         if blank(&self.config.host) {
             missing.push("mail.host");
         }
-        if blank(&self.config.from_address) {
+        if self.from_address().is_none() {
             missing.push("mail.fromAddress");
         }
         if missing.is_empty() {
@@ -92,7 +117,7 @@ impl Mailer {
     }
 
     fn from(&self) -> Result<lettre::message::Mailbox> {
-        let address = self.config.from_address.clone().ok_or_else(|| {
+        let address = self.from_address().map(str::to_string).ok_or_else(|| {
             ProError::Config("mail.fromAddress must be set to send platform email".into())
         })?;
         let name = self.config.from_name.clone().unwrap_or_else(|| self.platform_name.clone());
@@ -247,6 +272,56 @@ mod tests {
     fn smtp_without_a_from_address_is_not_live() {
         let cfg = MailConfig { from_address: None, ..smtp_config() };
         assert!(!Mailer::new(cfg, "P".into()).is_live());
+    }
+
+    /// The case that sent an operator chasing a phantom: host, username and
+    /// password all filled in from a Gmail app password, and the platform
+    /// still told every customer it could not send — because the separate
+    /// from-address field was blank. An SMTP username that is an address says
+    /// what the sender is.
+    #[test]
+    fn the_smtp_username_serves_as_the_from_address() {
+        let cfg = MailConfig {
+            host: Some("smtp.gmail.com".into()),
+            user: Some("du.shaheen@gmail.com".into()),
+            from_address: None,
+            from_name: None,
+            ..smtp_config()
+        };
+        let mailer = Mailer::new(cfg, "Ghost Pro".into());
+        assert_eq!(mailer.not_live_reason(), None, "a usable Gmail setup must read as live");
+        assert!(mailer.is_live());
+        // And it is what the message is actually sent from, with the platform
+        // name standing in for the unset from-name.
+        assert_eq!(
+            mailer.from().unwrap().to_string(),
+            "Ghost Pro <du.shaheen@gmail.com>"
+        );
+    }
+
+    /// An explicit from address still wins — the fallback only fills a gap.
+    #[test]
+    fn an_explicit_from_address_wins_over_the_username() {
+        let cfg =
+            MailConfig { user: Some("postmaster@mg.example.com".into()), ..smtp_config() };
+        assert_eq!(Mailer::new(cfg, "P".into()).from_address(), Some("hello@example.com"));
+    }
+
+    /// SendGrid's username is the literal `apikey` and SES issues an access
+    /// key id. Neither is a mailbox, so the fallback must not invent a sender
+    /// out of one — the operator is asked for the field by name instead.
+    #[test]
+    fn a_username_that_is_not_an_address_is_not_a_sender() {
+        for user in ["apikey", "AKIAIOSFODNN7EXAMPLE", "   "] {
+            let cfg =
+                MailConfig { user: Some(user.into()), from_address: None, ..smtp_config() };
+            let mailer = Mailer::new(cfg, "P".into());
+            assert!(!mailer.is_live(), "{user:?} must not read as a from address");
+            assert!(
+                mailer.not_live_reason().unwrap().contains("mail.fromAddress"),
+                "and the reason must name the field to fill in"
+            );
+        }
     }
 
     /// A field holding spaces is not a configured field.

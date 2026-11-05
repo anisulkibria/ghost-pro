@@ -441,7 +441,9 @@ pub static REGISTRY: &[SettingDef] = &[
         group: "Mail",
         label: "From address",
         help: "The address platform email is sent from. Must be one your SMTP provider \
-               will accept.",
+               will accept. Leave blank to send as the SMTP username above, which is \
+               what most providers expect — set it only if you authenticate as one \
+               address and send as another.",
         kind: Kind::Text,
         min_role: StaffRole::Admin,
         fallback: |c| opt(&c.mail.from_address),
