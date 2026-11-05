@@ -164,14 +164,23 @@ ports, mail, billing — run against the deployment directory as it stands:
   ✓ database           open and migrated
   ✓ operator login     1 configured
   ✓ billing            no provider — sites work, nothing is charged
-  ✗ mail               log only — customers will receive no email.
+  ✗ mail               mail.transport is "log", so messages are written to the
+                       platform log instead of being sent. Customers receive no
+                       email — set this in the console.
   ✓ edge port          0.0.0.0:8080 is free
 ```
 
 On a local install, `mail` is the only expected complaint: with no SMTP server
-configured, mail is written to the log instead of sent. Billing reporting "no
-provider" is also fine — sites work, nothing is charged. Set both in the
-console when you need them.
+configured, mail is written to the log instead of sent — including the
+confirmation link a new account needs, so a signup can still be walked end to
+end on a machine with no mail server. Billing reporting "no provider" is also
+fine — sites work, nothing is charged. Set both in the console when you need
+them.
+
+Mail counts as configured only when **Transport** is SMTP and both **SMTP
+host** and **From address** are filled in. A half-filled SMTP setup is
+reported here by the field it is missing, rather than passing this check and
+then failing on every send.
 
 Two checks are worth stopping for:
 
@@ -322,6 +331,12 @@ it does. Leave off any flag and it prompts for that value instead.
 Then `./run.sh doctor` — it checks each of these and names what is missing —
 followed by `./run.sh staff` for the first login, and the console's Plans and
 Mail screens, which `doctor` will keep complaining about until they are set.
+
+On the Mail screen, **From address** is as necessary as the host and the
+credentials, and some providers accept only one specific value for it: Gmail,
+for instance, rejects any From address other than the account that
+authenticated. If a send fails, the reason is in the platform log — the
+platform never reports an email as sent when it was not.
 
 Run it under a service manager rather than `run.sh` on a real server, so it
 comes back after a reboot. `SIGTERM` is the correct stop signal: the platform

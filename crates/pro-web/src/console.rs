@@ -265,12 +265,17 @@ will fail. <a href="/console/settings">Fix</a>"#,
             esc(&live.billing_provider())
         ));
     }
-    if live.mail().transport != "smtp" {
-        warnings.push(
-            r#"Mail is set to log only, so customers receive no email.
-<a href="/console/settings">Configure SMTP</a>"#
-                .to_string(),
-        );
+    // The mailer's own verdict, not a second guess at it: this warning used
+    // to check the transport alone, so a platform set to SMTP with no host or
+    // no from address showed an all-clear console while every message went to
+    // the log.
+    if let Some(reason) = pro_mail::Mailer::new(live.mail(), live.platform_name()).not_live_reason()
+    {
+        warnings.push(format!(
+            r#"{reason} — so customers receive no email.
+<a href="/console/settings">Configure SMTP</a>"#,
+            reason = esc(&reason),
+        ));
     }
     for warning in &warnings {
         body.push_str(&view::banner(BannerKind::Warn, warning));

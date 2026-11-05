@@ -378,21 +378,32 @@ async fn signup_inner(
         )
         .await?;
         let link = state.url(&format!("/verify?token={}", view::urlencode(&verify_token)));
-        let _ = mailer
+
+        // On a platform with no working mail server, an operator testing the
+        // flow would otherwise be stuck forever. The link is in the log — and
+        // the dashboard the customer lands on says so rather than claiming an
+        // email is on its way.
+        if let Some(reason) = mailer.not_live_reason() {
+            tracing::warn!(
+                "{} cannot receive their confirmation link, so it is here instead: {link} \
+                 ({reason})",
+                account.email
+            );
+        }
+        if let Err(e) = mailer
             .send(pro_mail::templates::verify_email(
                 &live.platform_name(),
                 &account.email,
                 &account.name,
                 &link,
             ))
-            .await;
-
-        // On a platform with no working mail server, an operator testing the
-        // flow would otherwise be stuck forever. The link is in the log.
-        if !mailer.is_live() {
-            tracing::warn!(
-                "mail is not configured, so {} cannot receive their confirmation link. \
-                 It is: {link}",
+            .await
+        {
+            // Not fatal: the account exists and the link is above, so failing
+            // the signup here would be worse than letting them in to a
+            // dashboard that tells them to ask for the link again.
+            tracing::error!(
+                "could not send a confirmation link to {}: {e}. The link is: {link}",
                 account.email
             );
         }
@@ -550,10 +561,10 @@ pub async fn resend_verification(State(state): State<AppState>, headers: HeaderM
         let link = state.url(&format!("/verify?token={}", view::urlencode(&token)));
         let live = state.live();
         let mailer = state.mailer();
-        if !mailer.is_live() {
-            tracing::warn!("mail is not configured; confirmation link for {}: {link}", account.email);
+        if let Some(reason) = mailer.not_live_reason() {
+            tracing::warn!("confirmation link for {}: {link} ({reason})", account.email);
         }
-        let _ = mailer
+        let outcome = mailer
             .send(pro_mail::templates::verify_email(
                 &live.platform_name(),
                 &account.email,
@@ -562,10 +573,26 @@ pub async fn resend_verification(State(state): State<AppState>, headers: HeaderM
             ))
             .await;
 
-        Ok(redirect_with(
-            "/dashboard",
-            Flash::ok(format!("Confirmation link sent to {}.", account.email)),
-        ))
+        // Three different things can have happened, and they need three
+        // different sentences. Reporting "sent" for all of them is what makes
+        // somebody wait on an inbox instead of fixing the platform.
+        let flash = match (outcome, mailer.is_live()) {
+            (Err(e), _) => {
+                tracing::error!("could not send a confirmation link to {}: {e}", account.email);
+                Flash::err(format!(
+                    "We could not send the email to {}. The platform's mail settings are \
+                     not working — the error is in the platform log.",
+                    account.email
+                ))
+            }
+            (Ok(()), false) => Flash::ok(
+                "This platform is not configured to send email, so the new confirmation \
+                 link was written to the platform log instead."
+                    .to_string(),
+            ),
+            (Ok(()), true) => Flash::ok(format!("Confirmation link sent to {}.", account.email)),
+        };
+        Ok(redirect_with("/dashboard", flash))
     }.await)
 }
 
@@ -626,19 +653,27 @@ pub async fn forgot(
             .await?;
             let link = state.url(&format!("/reset?token={}", view::urlencode(&token)));
             let mailer = state.mailer();
-            if !mailer.is_live() {
-                tracing::warn!("mail is not configured; reset link for {}: {link}", account.email);
+            if let Some(reason) = mailer.not_live_reason() {
+                tracing::warn!("reset link for {}: {link} ({reason})", account.email);
             }
-            let _ = mailer
+            if let Err(e) = mailer
                 .send(pro_mail::templates::reset_password(
                     &live.platform_name(),
                     &account.email,
                     &account.name,
                     &link,
                 ))
-                .await;
+                .await
+            {
+                tracing::error!("could not send a reset link to {}: {e}", account.email);
+            }
         }
 
+        // Deliberately the same answer whether or not the address is
+        // registered, so this stays vague where the others are specific: a
+        // sentence that varied with the account's existence would turn this
+        // form into a customer-list oracle. What mail is doing is reported to
+        // the operator in the log and on the console dashboard instead.
         Ok(redirect_with(
             "/dashboard/signin",
             Flash::ok("If that address has an account, a reset link is on its way."),
@@ -761,7 +796,33 @@ pub async fn health(State(state): State<AppState>) -> Response {
 ///
 /// Lives here rather than in the dashboard because the resend endpoint it
 /// posts to is this module's.
-pub fn verify_notice(email: &str) -> String {
+///
+/// `mail_live` is not decoration. On a platform that is not configured to
+/// send, the old unconditional "We sent a link to you@example.com" was a
+/// plain falsehood: it pointed somebody at an inbox nothing had been
+/// delivered to, and left them waiting instead of looking at the one place
+/// the link actually is. So the notice says which situation this is, and the
+/// button's label says what pressing it will do.
+pub fn verify_notice(email: &str, mail_live: bool) -> String {
+    if !mail_live {
+        return view::banner(
+            BannerKind::Warn,
+            &format!(
+                r#"<strong>Confirm your email.</strong> This platform is not configured to send
+email, so no link was sent to {email} — it was written to the platform log instead
+(<code>server.log</code>), and following it from there confirms the address and lets you
+create your first site. {resend}"#,
+                email = esc(email),
+                resend = view::action_button(
+                    "/dashboard/resend-verification",
+                    "Write a new link to the log",
+                    "tonal small",
+                    None
+                ),
+            ),
+        );
+    }
+
     view::banner(
         BannerKind::Warn,
         &format!(

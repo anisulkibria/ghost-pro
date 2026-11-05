@@ -221,24 +221,27 @@ pub async fn set_status(pool: &SqlitePool, id: &str, status: &str) -> Result<()>
 /// Unverified on purpose: the new address has done nothing to prove it
 /// belongs to this account, and the dashboard's verification gate is what
 /// makes an unproven address a bump rather than a hole.
+///
+/// No `updated_at` here: `accounts` keeps `created_at` and `last_login_at`,
+/// and every other write in this module matches that. This one did not, so
+/// changing an address failed on `no such column: updated_at` every time,
+/// leaving an account stuck on an address it could neither confirm nor
+/// replace.
 pub async fn set_email(pool: &SqlitePool, id: &str, email: &str) -> Result<()> {
-    sqlx::query(
-        "UPDATE accounts SET email = ?, email_verified_at = NULL, updated_at = ? WHERE id = ?",
-    )
-    .bind(email)
-    .bind(pro_core::now_iso())
-    .bind(id)
-    .execute(pool)
-    .await
-    .map_err(|e| {
-        // The unique index is the only expected failure, and it deserves a
-        // sentence rather than a driver error.
-        if e.to_string().contains("accounts_email_unique") {
-            ProError::Conflict("That email is already in use.".into())
-        } else {
-            ProError::Db(e.to_string())
-        }
-    })?;
+    sqlx::query("UPDATE accounts SET email = ?, email_verified_at = NULL WHERE id = ?")
+        .bind(email)
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            // The unique index is the only expected failure, and it deserves
+            // a sentence rather than a driver error.
+            if e.to_string().contains("accounts_email_unique") {
+                ProError::Conflict("That email is already in use.".into())
+            } else {
+                ProError::Db(e.to_string())
+            }
+        })?;
     Ok(())
 }
 
@@ -384,6 +387,33 @@ mod tests {
         assert!(first.is_some());
         mark_verified(&pool, &a.id).await.unwrap();
         assert_eq!(get(&pool, &a.id).await.unwrap().email_verified_at, first, "not moved");
+    }
+
+    /// Changing an address had no test, which is how it shipped writing to a
+    /// column `accounts` does not have: every attempt failed on `no such
+    /// column: updated_at`, against the real schema these tests run on.
+    #[tokio::test]
+    async fn changes_an_email_and_unverifies_it() {
+        let pool = pool().await;
+        let a = create(&pool, "old@example.com", "O", "h").await.unwrap();
+        mark_verified(&pool, &a.id).await.unwrap();
+
+        set_email(&pool, &a.id, "new@example.com").await.unwrap();
+
+        let after = get(&pool, &a.id).await.unwrap();
+        assert_eq!(after.email, "new@example.com");
+        assert!(!after.is_verified(), "a new address starts unproven");
+    }
+
+    /// Taking an address somebody else holds is a conflict, not a 500.
+    #[tokio::test]
+    async fn refuses_changing_to_an_address_in_use() {
+        let pool = pool().await;
+        create(&pool, "taken@example.com", "T", "h").await.unwrap();
+        let b = create(&pool, "mine@example.com", "M", "h").await.unwrap();
+
+        let err = set_email(&pool, &b.id, "taken@example.com").await.unwrap_err();
+        assert_eq!(err.status(), 409, "got {err}");
     }
 
     /// A customer id is only meaningful alongside the provider that issued it.

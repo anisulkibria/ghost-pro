@@ -32,6 +32,12 @@ pub struct Mailer {
     platform_name: String,
 }
 
+/// Unset, or set to nothing but spaces — which an operator pasting into a
+/// settings field does by accident, and which must not read as configured.
+fn blank(value: &Option<String>) -> bool {
+    value.as_ref().map(|v| v.trim().is_empty()).unwrap_or(true)
+}
+
 impl Mailer {
     pub fn new(config: MailConfig, platform_name: String) -> Self {
         Self { config, platform_name }
@@ -42,7 +48,47 @@ impl Mailer {
     /// The dashboard uses this to decide whether to promise a customer an
     /// email, rather than telling them to check an inbox nothing was sent to.
     pub fn is_live(&self) -> bool {
-        self.config.transport == "smtp" && self.config.host.is_some()
+        self.not_live_reason().is_none()
+    }
+
+    /// Why mail cannot leave the machine, in a sentence an operator can act
+    /// on — or `None` when it can.
+    ///
+    /// One function, because every place that reports mail state (the console
+    /// dashboard, `doctor`, the log line on a send) was previously deciding
+    /// for itself what "configured" meant, and they disagreed. `transport:
+    /// "smtp"` with no host passed the console's check and failed the
+    /// mailer's, so the platform told an operator mail was fine while quietly
+    /// writing every message to the log.
+    ///
+    /// A missing `fromAddress` counts, too. Without it a send fails inside
+    /// [`Self::from`] *after* the customer has been told to check their
+    /// inbox, which is the same broken promise arriving by a longer route.
+    pub fn not_live_reason(&self) -> Option<String> {
+        if self.config.transport != "smtp" {
+            return Some(format!(
+                "mail.transport is {:?}, so messages are written to the platform log \
+                 instead of being sent",
+                self.config.transport
+            ));
+        }
+
+        let mut missing: Vec<&str> = Vec::new();
+        if blank(&self.config.host) {
+            missing.push("mail.host");
+        }
+        if blank(&self.config.from_address) {
+            missing.push("mail.fromAddress");
+        }
+        if missing.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "mail.transport is \"smtp\" but {} {} not set, so messages are written to \
+             the platform log instead of being sent",
+            missing.join(" and "),
+            if missing.len() == 1 { "is" } else { "are" },
+        ))
     }
 
     fn from(&self) -> Result<lettre::message::Mailbox> {
@@ -61,12 +107,14 @@ impl Mailer {
     /// not to send" is not a failure of the caller's operation — a signup
     /// should still succeed on a development machine with no SMTP.
     pub async fn send(&self, message: Message) -> Result<()> {
-        if !self.is_live() {
-            tracing::info!(
+        if let Some(reason) = self.not_live_reason() {
+            // WARN, not INFO: a message that was not sent is the kind of thing
+            // somebody goes looking for in the log after waiting for an email
+            // that never came, and the reason is the whole answer.
+            tracing::warn!(
                 to = %message.to,
                 subject = %message.subject,
-                "mail.transport is {:?}, so this message was logged rather than sent:\n{}",
-                self.config.transport,
+                "not sent — {reason}. The message, link and all, was:\n{}",
                 message.text
             );
             return Ok(());
@@ -176,6 +224,49 @@ mod tests {
         let half = MailConfig { host: None, ..smtp_config() };
         assert!(!Mailer::new(half, "P".into()).is_live());
         assert!(Mailer::new(smtp_config(), "P".into()).is_live());
+    }
+
+    /// The trap this pair of tests exists for: `transport: "smtp"` with a
+    /// field missing used to pass the console's and `doctor`'s idea of
+    /// "configured" while the mailer quietly logged every message.
+    #[test]
+    fn a_half_configured_smtp_says_which_field_is_missing() {
+        let no_host = MailConfig { host: None, ..smtp_config() };
+        let reason = Mailer::new(no_host, "P".into()).not_live_reason().unwrap();
+        assert!(reason.contains("mail.host"), "got {reason}");
+        assert!(!reason.contains("mail.fromAddress"), "got {reason}");
+
+        let neither = MailConfig { host: None, from_address: None, ..smtp_config() };
+        let reason = Mailer::new(neither, "P".into()).not_live_reason().unwrap();
+        assert!(reason.contains("mail.host") && reason.contains("mail.fromAddress"), "got {reason}");
+    }
+
+    /// Without a from address a send fails *after* the customer has been told
+    /// to check their inbox, so it has to count as not live.
+    #[test]
+    fn smtp_without_a_from_address_is_not_live() {
+        let cfg = MailConfig { from_address: None, ..smtp_config() };
+        assert!(!Mailer::new(cfg, "P".into()).is_live());
+    }
+
+    /// A field holding spaces is not a configured field.
+    #[test]
+    fn whitespace_does_not_count_as_configured() {
+        let cfg = MailConfig { host: Some("   ".into()), ..smtp_config() };
+        assert!(!Mailer::new(cfg, "P".into()).is_live());
+    }
+
+    /// The log transport's reason names the transport, so an operator reading
+    /// it knows this is a setting and not a failure.
+    #[test]
+    fn the_log_transport_explains_itself() {
+        let reason = log_mailer().not_live_reason().unwrap();
+        assert!(reason.contains("mail.transport"), "got {reason}");
+    }
+
+    #[test]
+    fn a_fully_configured_smtp_has_no_reason() {
+        assert!(Mailer::new(smtp_config(), "P".into()).not_live_reason().is_none());
     }
 
     /// A development machine with no SMTP must still complete a signup.

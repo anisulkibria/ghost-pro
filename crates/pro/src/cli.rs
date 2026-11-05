@@ -404,15 +404,22 @@ pub async fn doctor() -> Result<()> {
                 problems += 1;
             }
 
-            if live.mail().transport == "smtp" && live.mail().host.is_some() {
-                check(true, "mail", "SMTP configured");
-            } else {
-                check(
-                    false,
-                    "mail",
-                    "log only — customers will receive no email. Set this in the console.",
-                );
-                problems += 1;
+            // Asked of the mailer itself rather than re-derived here, so that
+            // "configured" means one thing across doctor, the console and the
+            // sending path. This check used to pass on `transport: "smtp"`
+            // with no host — the one state in which the platform claims to
+            // send and does not.
+            let mailer = pro_mail::Mailer::new(live.mail(), live.platform_name());
+            match mailer.not_live_reason() {
+                None => check(true, "mail", "SMTP configured"),
+                Some(reason) => {
+                    check(
+                        false,
+                        "mail",
+                        &format!("{reason}. Customers receive no email — set this in the console."),
+                    );
+                    problems += 1;
+                }
             }
 
             let tenants = pro_db::tenants::count_by_status(&db).await.unwrap_or_default();

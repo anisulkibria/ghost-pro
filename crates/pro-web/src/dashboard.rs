@@ -103,7 +103,7 @@ async fn sites_inner(
     // and saying so plainly is better than a Create button that refuses.
     let unverified = live.require_email_verification() && !account.is_verified();
     let notice = if unverified {
-        crate::public::verify_notice(&account.email)
+        crate::public::verify_notice(&account.email, state.mailer().is_live())
     } else {
         String::new()
     };

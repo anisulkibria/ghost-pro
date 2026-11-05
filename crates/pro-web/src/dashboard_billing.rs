@@ -650,7 +650,7 @@ async fn account_inner(
 their own separate logins.</p>"#,
         head = view::page_head("Account", &esc(&account.email), ""),
         notice = if unverified {
-            crate::public::verify_notice(&account.email)
+            crate::public::verify_notice(&account.email, state.mailer().is_live())
         } else {
             String::new()
         },
@@ -785,7 +785,13 @@ pub async fn change_email(
         .await?;
         let link = state.url(&format!("/verify?token={}", view::urlencode(&token)));
         let mailer = state.mailer();
-        let _ = mailer
+        if let Some(reason) = mailer.not_live_reason() {
+            tracing::warn!(
+                "{email} cannot receive their new confirmation link, so it is here \
+                 instead: {link} ({reason})"
+            );
+        }
+        let delivery = mailer
             .send(pro_mail::templates::verify_email(
                 &live.platform_name(),
                 &email,
@@ -793,12 +799,8 @@ pub async fn change_email(
                 &link,
             ))
             .await;
-        if !mailer.is_live() {
-            tracing::warn!(
-                "mail is not configured, so {} cannot receive their new confirmation link. \
-                 It is: {link}",
-                email
-            );
+        if let Err(e) = &delivery {
+            tracing::error!("could not send a confirmation link to {email}: {e}. It is: {link}");
         }
 
         pro_db::audit::record(
@@ -811,10 +813,21 @@ pub async fn change_email(
         )
         .await;
 
-        Ok(redirect_with(
-            "/dashboard/account",
-            Flash::ok("Email updated. Check the new address to confirm it."),
-        ))
+        // The address changed either way — only the route to confirming it
+        // differs, so say which route this platform actually has.
+        let flash = match (delivery, mailer.is_live()) {
+            (Err(_), _) => Flash::err(
+                "Email updated, but the confirmation link could not be sent. The \
+                 platform's mail settings are not working — the error is in the platform \
+                 log.",
+            ),
+            (Ok(()), false) => Flash::ok(
+                "Email updated. This platform is not configured to send email, so the \
+                 confirmation link was written to the platform log.",
+            ),
+            (Ok(()), true) => Flash::ok("Email updated. Check the new address to confirm it."),
+        };
+        Ok(redirect_with("/dashboard/account", flash))
     }.await)
 }
 
