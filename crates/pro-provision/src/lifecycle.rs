@@ -173,7 +173,9 @@ async fn create_tree(dir: &Path) -> Result<()> {
 /// `custom_theme_settings` a theme declares. A shared tree would let one
 /// tenant's theme change show up on another's site.
 async fn install_themes(config: &Arc<Config>, dir: &Path) -> Result<()> {
-    let Some(source) = &config.paths.theme_source else {
+    // Relative paths are taken from the deployment directory, so a config can
+    // point at the Ghost-rust checkout beside it without naming this machine.
+    let Some(source) = config.theme_source_path() else {
         // Not fatal. Ghost-rust falls back to its built-in rendering, and a
         // platform may deliberately ship no themes and let customers upload.
         tracing::warn!(
@@ -181,13 +183,11 @@ async fn install_themes(config: &Arc<Config>, dir: &Path) -> Result<()> {
         );
         return Ok(());
     };
-    let source = Path::new(source);
     if !source.exists() {
         tracing::warn!("paths.themeSource {} does not exist; skipping", source.display());
         return Ok(());
     }
     let dest = dir.join("content/themes");
-    let source = source.to_path_buf();
     // A recursive copy is blocking work.
     tokio::task::spawn_blocking(move || copy_dir(&source, &dest))
         .await

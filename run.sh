@@ -62,24 +62,26 @@ PY
     fi
 }
 
-PORT=$(edge_port)
-SCHEME=http
-if command -v python3 >/dev/null 2>&1 && [ -f "$PRO_DIR/pro.json" ]; then
-    # Only for the URL printed in messages; a wrong guess here costs nothing.
-    SCHEME=$(python3 -c 'import json,sys
+# The platform's own address, as it tells customers. Read from the config
+# where there is one, otherwise assembled from the port — this is only used in
+# the messages printed here, so a guess costs nothing.
+config_url() {
+    local url="" scheme=http
+    if command -v python3 >/dev/null 2>&1 && [ -f "$PRO_DIR/pro.json" ]; then
+        url=$(python3 -c 'import json,sys
+try: c=json.load(open(sys.argv[1]))
+except Exception: raise SystemExit(1)
+print(c.get("url") or "")' "$PRO_DIR/pro.json" 2>/dev/null || true)
+        scheme=$(python3 -c 'import json,sys
 try: c=json.load(open(sys.argv[1]))
 except Exception: print("http"); raise SystemExit
 print("https" if (c.get("ssl") or {}).get("enabled") else "http")' "$PRO_DIR/pro.json" 2>/dev/null || echo http)
-fi
-URL=$(
-    if command -v python3 >/dev/null 2>&1 && [ -f "$PRO_DIR/pro.json" ]; then
-        python3 -c 'import json,sys
-try: c=json.load(open(sys.argv[1]))
-except Exception: raise SystemExit(1)
-print(c.get("url") or "")' "$PRO_DIR/pro.json" 2>/dev/null || true
     fi
-)
-[ -n "$URL" ] || URL="$SCHEME://localhost:$PORT"
+    if [ -n "$url" ]; then echo "$url"; else echo "$scheme://localhost:$(edge_port)"; fi
+}
+
+PORT=$(edge_port)
+URL=$(config_url)
 
 # ---------------------------------------------------------------------------
 # Is it ours, and is it alive
@@ -123,16 +125,45 @@ tenant_count() { tenant_pids | grep -c . || true; }
 
 # ---------------------------------------------------------------------------
 
-require_dir() {
-    if [ ! -d "$PRO_DIR" ]; then
-        echo "no deployment directory at $PRO_DIR"
-        echo "create it and write a config:  mkdir -p $PRO_DIR && (cd $PRO_DIR && $BIN setup)"
-        exit 1
+# ---------------------------------------------------------------------------
+# Bootstrap
+# ---------------------------------------------------------------------------
+#
+# The deployment directory holds only generated and runtime state — the
+# database, tenant site directories, certificates, backups, logs — so it is
+# not in the repository, the same way Ghost-rust's content/data and
+# content/images are not in its own. The difference that used to matter is
+# that Ghost-rust's `run.sh` works on a fresh clone because the server creates
+# what it is missing, while this one refused to start without a `pro.json`
+# nobody had written yet. So it writes one: a local-development config, for
+# the layout a clone actually lands in. `init` does it on request, `start`
+# does it on demand, and either is safe to run twice.
+init_dir() {
+    mkdir -p "$PRO_DIR"
+    if [ -f "$PRO_DIR/pro.json" ]; then
+        return 0
     fi
-    if [ ! -f "$PRO_DIR/pro.json" ]; then
-        echo "no pro.json in $PRO_DIR"
-        echo "write one:  (cd $PRO_DIR && $BIN setup)"
-        exit 1
+    require_bin
+    echo "no pro.json in $PRO_DIR — writing one for local development…"
+    # Local defaults, matching Ghost-rust's: a hostname that needs no DNS and
+    # no DNS entry, and plain HTTP. The paths to Ghost-rust are found by the
+    # setup command and written relative to this directory, so the config does
+    # not name this machine. Everything here is editable afterwards.
+    #
+    # </dev/null because setup prompts when it has a terminal, and a bootstrap
+    # that stops to ask questions is not a bootstrap.
+    (cd "$PRO_DIR" && "$BIN" setup \
+        --url "${PRO_URL:-http://pro.localhost:8080}" \
+        --subdomain-base "${PRO_SUBDOMAIN_BASE:-localhost}" \
+        </dev/null)
+}
+
+require_dir() {
+    if [ ! -d "$PRO_DIR" ] || [ ! -f "$PRO_DIR/pro.json" ]; then
+        init_dir
+        # The port and URL were read before this existed, so read them again.
+        PORT=$(edge_port)
+        URL=$(config_url)
     fi
 }
 
@@ -144,6 +175,18 @@ require_bin() {
 }
 
 case "${1:-start}" in
+# Make the deployment directory and its config, without starting anything.
+# What `start` does for itself, for an operator who wants to read the config
+# over before the platform runs with it.
+init)
+    if [ -f "$PRO_DIR/pro.json" ]; then
+        echo "already initialised: $PRO_DIR/pro.json"
+        echo "delete it to start over, or edit it in place."
+        exit 0
+    fi
+    init_dir
+    ;;
+
 start)
     require_dir
     if alive; then echo "already running (pid $(pid)) at $URL"; exit 0; fi
@@ -258,7 +301,7 @@ status)
     if [ ! -f "$PRO_DIR/pro.json" ]; then
         echo "no deployment at $PRO_DIR (no pro.json)"
         [ -d "$PRO_DIR" ] || echo "  the directory does not exist either"
-        echo "  write one:  mkdir -p $PRO_DIR && (cd $PRO_DIR && $BIN setup)"
+        echo "  create one:  ./run.sh init    (or just ./run.sh start)"
         exit 0
     fi
     if alive; then
@@ -376,7 +419,9 @@ staff)
     cat <<EOF
 usage: ./run.sh <command>
 
-  start      start the platform (adopts an instance already on the port)
+  init       create the deployment directory and its pro.json
+  start      start the platform (init first if needed; adopts an instance
+             already on the port)
   stop       stop it, and every tenant site with it
   restart    stop then start
   status     is it up, how many sites are awake, what it says about itself
@@ -390,8 +435,11 @@ usage: ./run.sh <command>
   test       cargo test --workspace
 
 environment:
-  PRO_DIR            deployment directory (default: ./run)
-  PRO_SERVER__PORT   override the edge port from pro.json
+  PRO_DIR               deployment directory (default: ./run)
+  PRO_SERVER__PORT      override the edge port from pro.json
+  PRO_URL               platform URL written by init
+                        (default: http://pro.localhost:8080)
+  PRO_SUBDOMAIN_BASE    tenant zone written by init (default: localhost)
 EOF
     exit 1
     ;;

@@ -609,13 +609,40 @@ impl Config {
         Ok(())
     }
 
-    pub fn data_dir(&self) -> PathBuf {
-        let p = Path::new(&self.paths.data_dir);
+    /// Resolve a configured path against the deployment directory.
+    ///
+    /// A relative path in `pro.json` is relative to the directory the config
+    /// lives in, not to whatever directory the process happened to be started
+    /// from. That is what makes a config portable between machines: the
+    /// binary and themes this platform needs belong to a *different* checkout
+    /// (Ghost-rust), and `../../Ghost-rust/target/release/ghost` names it
+    /// correctly wherever the pair is cloned, while an absolute path names it
+    /// on exactly one machine. A clone that had to be hand-edited before it
+    /// would start is the thing being avoided here.
+    pub fn resolve_path(&self, configured: &str) -> PathBuf {
+        let p = Path::new(configured);
         if p.is_absolute() {
             p.to_path_buf()
         } else {
             self.base_dir.join(p)
         }
+    }
+
+    pub fn data_dir(&self) -> PathBuf {
+        self.resolve_path(&self.paths.data_dir)
+    }
+
+    /// The `ghost` binary as a path, or `None` when it is a bare name that
+    /// should be looked up on `PATH` the way a shell would.
+    pub fn ghost_binary_path(&self) -> Option<PathBuf> {
+        let p = Path::new(&self.paths.ghost_binary);
+        (p.is_absolute() || p.components().count() > 1)
+            .then(|| self.resolve_path(&self.paths.ghost_binary))
+    }
+
+    /// The themes copied into every new tenant, if any are configured.
+    pub fn theme_source_path(&self) -> Option<PathBuf> {
+        self.paths.theme_source.as_deref().map(|p| self.resolve_path(p))
     }
 
     /// The control-plane database.

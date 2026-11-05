@@ -69,7 +69,7 @@ pub struct Supervisor {
 
 impl Supervisor {
     pub fn new(config: Arc<Config>) -> Result<Self> {
-        let ghost_binary = resolve_binary(&config.paths.ghost_binary)?;
+        let ghost_binary = resolve_binary(&config)?;
         tracing::info!("tenant processes will run {}", ghost_binary.display());
         Ok(Self { config, ghost_binary, slots: std::sync::Mutex::new(HashMap::new()) })
     }
@@ -389,14 +389,18 @@ impl Supervisor {
 
 /// Find the `ghost` binary, so a missing one fails at boot with a message
 /// naming what to fix.
-fn resolve_binary(configured: &str) -> Result<PathBuf> {
-    let p = PathBuf::from(configured);
-    if p.components().count() > 1 || p.is_absolute() {
+///
+/// A path — including a relative one, which is taken from the deployment
+/// directory — is used as given. A bare name is searched for on `PATH`.
+fn resolve_binary(config: &Config) -> Result<PathBuf> {
+    let configured = &config.paths.ghost_binary;
+    if let Some(p) = config.ghost_binary_path() {
         return if p.exists() {
             Ok(p)
         } else {
             Err(ProError::Config(format!(
-                "paths.ghostBinary points at {}, which does not exist",
+                "paths.ghostBinary points at {}, which does not exist. Build Ghost-rust \
+                 (cargo build --release in its checkout), or correct the path in pro.json.",
                 p.display()
             )))
         };
@@ -508,12 +512,45 @@ mod tests {
         assert!(err.to_string().contains("does not exist"), "got {err}");
     }
 
+    /// A config naming `binary`, deployed in `base_dir`.
+    fn with_binary(binary: &str, base_dir: &str) -> Config {
+        let mut c: Config = serde_json::from_value(serde_json::json!({
+            "url": "http://pro.localhost:8080",
+            "subdomainBase": "localhost",
+            "paths": { "ghostBinary": binary },
+        }))
+        .unwrap();
+        c.plans = pro_core::plans::default_plans();
+        c.base_dir = PathBuf::from(base_dir);
+        c
+    }
+
     #[test]
     fn resolves_a_bare_name_on_path() {
         // `sh` is on PATH everywhere this runs.
-        assert!(resolve_binary("sh").is_ok());
-        let err = resolve_binary("definitely-not-a-real-binary-xyz").unwrap_err();
+        assert!(resolve_binary(&with_binary("sh", "/tmp")).is_ok());
+        let err =
+            resolve_binary(&with_binary("definitely-not-a-real-binary-xyz", "/tmp")).unwrap_err();
         assert!(err.to_string().contains("on PATH"), "got {err}");
+    }
+
+    /// The point of relative paths: a `pro.json` that names the Ghost-rust
+    /// checkout beside it works on every machine the pair is cloned onto,
+    /// which an absolute path does not. Resolution is from the deployment
+    /// directory, not the process's working directory.
+    #[test]
+    fn resolves_a_relative_path_from_the_deployment_directory() {
+        // /bin/sh reached as ../bin/sh from /bin — a path that only resolves
+        // if base_dir is what it is joined to.
+        let resolved = resolve_binary(&with_binary("../bin/sh", "/bin")).unwrap();
+        assert!(resolved.exists(), "{} should exist", resolved.display());
+
+        let err = resolve_binary(&with_binary("../bin/no-such-ghost", "/bin")).unwrap_err();
+        assert!(err.to_string().contains("does not exist"), "got {err}");
+        // The message names the resolved path, not the relative fragment:
+        // "../bin/no-such-ghost does not exist" sends an operator looking in
+        // the wrong directory.
+        assert!(err.to_string().contains("/bin/../bin/no-such-ghost"), "got {err}");
     }
 
     /// Spawning must refuse a tenant that was never provisioned, rather than

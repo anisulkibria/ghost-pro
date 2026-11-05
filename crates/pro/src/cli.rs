@@ -110,9 +110,46 @@ EXAMPLES
     );
 }
 
+/// Find the Ghost-rust checkout this platform should run tenant sites from.
+///
+/// Returned relative to the deployment directory, deliberately: the whole
+/// point is a `pro.json` that survives being cloned onto another machine, and
+/// an absolute path baked in at setup time is the one thing that guarantees it
+/// will not. The usual layout is the two repositories side by side, with the
+/// deployment directory one level inside Ghost-pro (`Ghost-pro/run`), so that
+/// is the first place looked.
+///
+/// `None` when no checkout is found, which is not an error — an operator may
+/// be setting up before building Ghost-rust, and `doctor` says so later.
+fn discover_ghost_rust() -> Option<String> {
+    // Searched in order of how likely each is to be the intended one, so a
+    // machine with more than one checkout gets the nearest.
+    const PREFIXES: [&str; 3] = ["..", "../..", "../../.."];
+    const NAMES: [&str; 4] = ["Ghost-rust", "ghost-rust", "rust-ghost", "Ghost-Rust"];
+
+    let cwd = std::env::current_dir().ok()?;
+    for prefix in PREFIXES {
+        for name in NAMES {
+            let rel = format!("{prefix}/{name}");
+            let candidate = cwd.join(&rel);
+            // A directory with the right name is not enough; it has to look
+            // like the checkout. Either half is sufficient — the themes are
+            // committed so they are there straight after a clone, and the
+            // binary appears once it has been built.
+            let looks_right = candidate.join("content/themes").is_dir()
+                || candidate.join("target/release/ghost").is_file();
+            if looks_right {
+                return Some(rel);
+            }
+        }
+    }
+    None
+}
+
 /// Write a `pro.json`.
 pub async fn setup(args: Args) -> Result<()> {
     let interactive = std::io::stdin().is_terminal();
+    let discovered = discover_ghost_rust();
 
     let url = match args.get("url") {
         Some(u) => u.to_string(),
@@ -132,10 +169,19 @@ pub async fn setup(args: Args) -> Result<()> {
         None => return Err(ProError::Config("--subdomain-base is required".into())),
     };
 
+    // A discovered checkout supplies the default for both the binary and the
+    // themes, so the common case needs neither flag.
+    let binary_default = discovered
+        .as_deref()
+        .map(|d| format!("{d}/target/release/ghost"))
+        .unwrap_or_else(|| "ghost".to_string());
+
     let ghost_binary = match args.get("ghost-binary") {
         Some(p) => p.to_string(),
-        None if interactive => ask("Path to the Ghost-rust `ghost` binary", Some("ghost"))?,
-        None => "ghost".to_string(),
+        None if interactive => {
+            ask("Path to the Ghost-rust `ghost` binary", Some(&binary_default))?
+        }
+        None => binary_default,
     };
 
     // Checked now rather than at the first signup: a wrong path here is the
@@ -158,8 +204,16 @@ pub async fn setup(args: Args) -> Result<()> {
         "mail": { "transport": "log" },
     });
 
-    if let Some(themes) = args.get("theme-source") {
-        config["paths"]["themeSource"] = serde_json::json!(themes);
+    match args.get("theme-source") {
+        Some(themes) => config["paths"]["themeSource"] = serde_json::json!(themes),
+        // Left unset when there is no checkout to point at: an unset
+        // themeSource is a documented state (sites start bare), where one
+        // pointing at a directory that does not exist is just a broken config.
+        None => {
+            if let Some(d) = &discovered {
+                config["paths"]["themeSource"] = serde_json::json!(format!("{d}/content/themes"));
+            }
+        }
     }
     if ssl {
         if let Some(email) = args.get("email") {
@@ -187,6 +241,19 @@ pub async fn setup(args: Args) -> Result<()> {
 
     std::fs::write(&path, serde_json::to_string_pretty(&config)?)?;
     println!("\nWrote {}\n", path.display());
+    if args.get("ghost-binary").is_none() {
+        match &discovered {
+            Some(d) => println!(
+                "Found a Ghost-rust checkout at {d} (relative to this directory, so this \
+                 config stays valid on other machines).\n"
+            ),
+            None => println!(
+                "No Ghost-rust checkout found nearby, so paths.ghostBinary is the bare name \
+                 \"ghost\" and no themes are configured. Clone and build Ghost-rust, then set \
+                 paths.ghostBinary and paths.themeSource.\n"
+            ),
+        }
+    }
     println!("Next:");
     println!("  1. ghost-pro create-staff --email you@example.com --name \"Your Name\"");
     println!("  2. ghost-pro doctor");
@@ -231,15 +298,22 @@ pub async fn doctor() -> Result<()> {
     }
 
     // ---- themes ----------------------------------------------------------
-    match &config.paths.theme_source {
-        Some(path) if std::path::Path::new(path).exists() => {
-            let count = std::fs::read_dir(path)
+    match config.theme_source_path() {
+        Some(path) if path.exists() => {
+            let count = std::fs::read_dir(&path)
                 .map(|entries| entries.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()).count())
                 .unwrap_or(0);
-            check(true, "themes", &format!("{count} available in {path}"));
+            check(true, "themes", &format!("{count} available in {}", path.display()));
         }
         Some(path) => {
-            check(false, "themes", &format!("{path} does not exist"));
+            check(
+                false,
+                "themes",
+                &format!(
+                    "{} does not exist — check paths.themeSource in pro.json",
+                    path.display()
+                ),
+            );
             problems += 1;
         }
         None => check(

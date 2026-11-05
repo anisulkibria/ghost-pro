@@ -2,7 +2,11 @@
 /target/
 **/*.rs.bk
 
-# runtime content (regenerated on first boot — never commit)
+# The deployment directory: the control-plane database, one directory per
+# tenant site, certificates, backups, logs, and the local pro.json. All of it
+# is generated or runtime state and some of it is large, so none of it is
+# committed. `./run.sh init` (or just `./run.sh start`) recreates it on a
+# fresh clone — see INSTALL.md.
 /run/
 .DS_Store
 
