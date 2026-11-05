@@ -203,6 +203,33 @@ impl TenantStatus {
     }
 }
 
+/// Why the platform itself closed a site.
+///
+/// Kept as constants rather than written out at each call site because the
+/// payment paths have to recognise their *own* suspensions. A payment arriving
+/// must reopen a site that billing closed, and must not reopen one an operator
+/// shut for abuse — which means the reason has to be a value both halves agree
+/// on, not prose.
+pub mod suspension {
+    /// Created on a platform that takes payment first, and not yet paid for.
+    pub const AWAITING_PAYMENT: &str = "Awaiting payment";
+    /// A payment failed and the grace period ran out.
+    pub const PAYMENT_OUTSTANDING: &str = "Payment outstanding";
+    /// The subscription was cancelled, or ran to its end.
+    pub const SUBSCRIPTION_ENDED: &str = "Subscription ended";
+
+    /// Whether this reason is one of billing's own, and so one that a
+    /// successful payment may clear.
+    ///
+    /// An operator's reason never is. A site shut for abuse must not come back
+    /// because a card was charged, and that asymmetry is the whole point of
+    /// asking rather than only checking the status.
+    pub fn is_billing(reason: Option<&str>) -> bool {
+        matches!(reason, Some(r)
+            if r == AWAITING_PAYMENT || r == PAYMENT_OUTSTANDING || r == SUBSCRIPTION_ENDED)
+    }
+}
+
 /// One Ghost site.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tenant {
@@ -241,6 +268,16 @@ pub struct Tenant {
 }
 
 impl Tenant {
+    /// Whether this site is closed by billing, and so may be reopened by a
+    /// payment arriving.
+    ///
+    /// Checked instead of the bare status wherever a payment reopens a site:
+    /// an operator's suspension has to survive one.
+    pub fn is_suspended_for_billing(&self) -> bool {
+        self.status == TenantStatus::Suspended
+            && suspension::is_billing(self.suspended_reason.as_deref())
+    }
+
     /// The hostname the platform issued, which is always routable even after a
     /// custom domain is attached — so a tenant is never unreachable because
     /// its DNS broke.
@@ -413,4 +450,80 @@ pub struct AuditEvent {
     /// Whatever is worth keeping about this particular event.
     pub meta: serde_json::Value,
     pub created_at: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tenant(status: TenantStatus, reason: Option<&str>) -> Tenant {
+        Tenant {
+            id: "t1".into(),
+            slug: "a-site".into(),
+            name: "A Site".into(),
+            account_id: "a1".into(),
+            plan_slug: "starter".into(),
+            status,
+            port: 21_000,
+            period_start: crate::now_iso(),
+            created_at: crate::now_iso(),
+            updated_at: crate::now_iso(),
+            last_request_at: None,
+            suspended_at: reason.map(|_| crate::now_iso()),
+            suspended_reason: reason.map(str::to_string),
+            delete_after: None,
+            storage_bytes: 0,
+            notes: None,
+            platform_key_id: None,
+            platform_key_secret: None,
+        }
+    }
+
+    /// The asymmetry that matters: a payment reopens what billing closed, and
+    /// nothing else. An operator who shut a site for abuse has to be able to
+    /// rely on it staying shut while the customer keeps paying.
+    #[test]
+    fn only_billings_own_suspensions_are_cleared_by_a_payment() {
+        for reason in [
+            suspension::AWAITING_PAYMENT,
+            suspension::PAYMENT_OUTSTANDING,
+            suspension::SUBSCRIPTION_ENDED,
+        ] {
+            assert!(
+                tenant(TenantStatus::Suspended, Some(reason)).is_suspended_for_billing(),
+                "{reason} is billing's own"
+            );
+        }
+
+        for reason in ["Spam", "Abuse — phishing pages", "Operator hold", ""] {
+            assert!(
+                !tenant(TenantStatus::Suspended, Some(reason)).is_suspended_for_billing(),
+                "{reason:?} is an operator's, and a payment must not clear it"
+            );
+        }
+
+        // A suspension with no reason recorded is not assumed to be billing's.
+        assert!(!tenant(TenantStatus::Suspended, None).is_suspended_for_billing());
+        assert!(!suspension::is_billing(None));
+    }
+
+    /// Only a *suspended* site is suspended for billing. An active site whose
+    /// stale reason column still reads "Payment outstanding" is not, or an
+    /// unsuspend that forgot to clear the column would reopen it twice.
+    #[test]
+    fn the_status_has_to_agree_with_the_reason() {
+        for status in [
+            TenantStatus::Active,
+            TenantStatus::Provisioning,
+            TenantStatus::PendingDeletion,
+            TenantStatus::Deleted,
+            TenantStatus::Failed,
+        ] {
+            assert!(
+                !tenant(status, Some(suspension::PAYMENT_OUTSTANDING))
+                    .is_suspended_for_billing(),
+                "{status:?} is not suspended"
+            );
+        }
+    }
 }

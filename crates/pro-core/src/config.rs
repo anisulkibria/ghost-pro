@@ -262,9 +262,13 @@ pub struct BillingConfig {
     /// works; it just never asks for a card.
     #[serde(default = "default_provider")]
     pub provider: String,
-    /// Require payment before a site is created. Off means the trial runs
-    /// first and the card is asked for when it ends, which is how Ghost Pro
-    /// does it.
+    /// Require payment before a site opens to the public. On, a new site is
+    /// reserved and suspended, the customer goes straight to checkout, and the
+    /// payment webhook opens it. Off means the trial runs first and the card is
+    /// asked for when it ends, which is how Ghost Pro does it.
+    ///
+    /// Ignored when `provider` is `none`: a platform that does not charge
+    /// cannot take the payment this would wait for.
     #[serde(default)]
     pub require_payment_up_front: bool,
     /// Days of grace after a payment fails before the site is suspended.

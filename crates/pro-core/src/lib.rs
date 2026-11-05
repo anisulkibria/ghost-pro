@@ -41,8 +41,8 @@ pub mod settings;
 pub use config::Config;
 pub use error::{DbErrorExt, ProError, Result};
 pub use models::{
-    Account, AuditEvent, Domain, DomainKind, DomainStatus, Staff, StaffRole, Subscription, Tenant,
-    TenantStatus,
+    suspension, Account, AuditEvent, Domain, DomainKind, DomainStatus, Staff, StaffRole,
+    Subscription, Tenant, TenantStatus,
 };
 pub use plans::Plan;
 pub use settings::Effective;

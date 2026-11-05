@@ -45,6 +45,29 @@ struct Platform {
 
 /// A platform selling through Lemon Squeezy, with both plans priced.
 async fn platform() -> Platform {
+    build_platform(serde_json::json!({
+        "provider": "lemonsqueezy",
+        "dunningGraceDays": 14,
+        "lemonsqueezy": {
+            "apiKey": "ls_api_key",
+            "storeId": "4242",
+            "webhookSecret": SECRET,
+        },
+    }))
+    .await
+}
+
+/// A platform told to take payment before a site opens, whose provider is
+/// named but not configured — so no payment can actually be taken.
+async fn platform_requiring_payment() -> Platform {
+    build_platform(serde_json::json!({
+        "provider": "stripe",
+        "requirePaymentUpFront": true,
+    }))
+    .await
+}
+
+async fn build_platform(billing: serde_json::Value) -> Platform {
     let dir = tempdir::Dir::new();
     let mut config: Config = serde_json::from_value(serde_json::json!({
         "url": format!("http://{HOST}"),
@@ -52,15 +75,7 @@ async fn platform() -> Platform {
         "paths": { "ghostBinary": "/bin/sh", "dataDir": dir.path().to_str().unwrap() },
         "ssl": { "enabled": false },
         "mail": { "transport": "log" },
-        "billing": {
-            "provider": "lemonsqueezy",
-            "dunningGraceDays": 14,
-            "lemonsqueezy": {
-                "apiKey": "ls_api_key",
-                "storeId": "4242",
-                "webhookSecret": SECRET,
-            },
-        },
+        "billing": billing,
     }))
     .unwrap();
     config.plans = pro_core::plans::default_plans();
@@ -138,6 +153,54 @@ impl Platform {
         .unwrap();
 
         (account, pro_db::tenants::get(&state.db, &tenant.id).await.unwrap())
+    }
+
+    /// Sign the seeded customer in through the real form, for the tests that
+    /// go through the dashboard rather than a webhook.
+    async fn sign_in(&self) -> String {
+        let hash = pro_db::accounts::hash_password("a-long-enough-password").unwrap();
+        let account =
+            pro_db::accounts::create(&self.state.db, "buyer@example.com", "A Buyer", &hash)
+                .await
+                .unwrap();
+        pro_db::accounts::mark_verified(&self.state.db, &account.id).await.unwrap();
+
+        let (status, headers, _) = self
+            .form("/dashboard/signin", "", "email=buyer@example.com&password=a-long-enough-password")
+            .await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "a good password signs in");
+        headers
+            .get(header::SET_COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.split(';').next())
+            .expect("a sign-in must set a session cookie")
+            .to_string()
+    }
+
+    /// One form POST through the real router.
+    async fn form(
+        &self,
+        path: &str,
+        cookie: &str,
+        body: &str,
+    ) -> (StatusCode, axum::http::HeaderMap, String) {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header(header::HOST, HOST)
+            .header("origin", format!("http://{HOST}"))
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+        if !cookie.is_empty() {
+            builder = builder.header(header::COOKIE, cookie);
+        }
+        let response = pro_web::entry(self.state.clone())
+            .oneshot(builder.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+        (status, headers, String::from_utf8_lossy(&bytes).to_string())
     }
 
     /// Post a signed Lemon Squeezy event, as Lemon Squeezy would.
@@ -944,6 +1007,153 @@ async fn a_gumroad_ping_needs_its_token() {
     assert_eq!(stored.account_id, account.id);
     assert_eq!(stored.status, "active");
     assert_eq!(stored.plan_slug, "starter", "resolved from the product permalink");
+}
+
+// ---------------------------------------------------------------------------
+// Payment before the site opens
+// ---------------------------------------------------------------------------
+
+/// `billing.requirePaymentUpFront` promises the site does not open until it is
+/// paid for. It used to promise only that: the flag was read in three places
+/// to decide whether to grant a *trial*, and site creation never consulted it
+/// at all, so a customer got a working site and a bill that never came.
+///
+/// The site is reserved and suspended rather than deferred — the address has
+/// to be claimed when it is chosen — so what this asserts is that it is
+/// *closed*, and closed for a reason the payment pipeline recognises.
+#[tokio::test]
+async fn a_new_site_is_closed_until_the_payment_lands() {
+    let p = platform().await;
+    let (account, tenant) = p.seed().await;
+
+    // The state site creation leaves behind on a payment-first platform.
+    pro_provision::suspend_site(
+        &p.state.db,
+        &p.state.config,
+        &p.state.supervisor,
+        &tenant,
+        pro_core::suspension::AWAITING_PAYMENT,
+    )
+    .await
+    .unwrap();
+    let closed = p.tenant(&tenant.id).await;
+    assert_eq!(closed.status, TenantStatus::Suspended);
+    assert!(closed.is_suspended_for_billing(), "the payment pipeline must recognise it");
+
+    // The customer pays. Lemon Squeezy — like Stripe's
+    // `checkout.session.completed` — reports this as a subscription coming
+    // into existence, not as a payment, so the site has to open on *this*
+    // event. Opening only on a payment event would leave it closed until an
+    // invoice happened to follow.
+    let (status, body) = p
+        .post(&subscription_event(
+            "subscription_created",
+            "wh_1",
+            "778899",
+            STARTER_VARIANT,
+            serde_json::json!({}),
+            serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "got {body}");
+
+    let stored = p.subscription("778899").await.unwrap();
+    assert!(stored.is_entitled(), "the subscription entitles the site");
+
+    let open = p.tenant(&tenant.id).await;
+    assert_eq!(
+        open.status,
+        TenantStatus::Active,
+        "the payment landed, so the site opens"
+    );
+    assert_eq!(open.suspended_reason, None, "and the reason is cleared with it");
+}
+
+/// The other half of the same rule, and the one with teeth: a site an operator
+/// shut must not reopen because a card was charged. Before the suspension
+/// reason was consulted, any payment on any subscription reopened whatever
+/// suspended site it pointed at — so a customer suspended for hosting phishing
+/// pages could bring their site back by paying.
+#[tokio::test]
+async fn a_payment_does_not_reopen_a_site_an_operator_shut() {
+    let p = platform().await;
+    let (account, tenant) = p.seed().await;
+    let custom = serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id });
+
+    p.post(&subscription_event(
+        "subscription_created",
+        "wh_1",
+        "665544",
+        STARTER_VARIANT,
+        serde_json::json!({}),
+        custom.clone(),
+    ))
+    .await;
+
+    // An operator's own reason, not one of billing's.
+    let t = p.tenant(&tenant.id).await;
+    pro_provision::suspend_site(
+        &p.state.db,
+        &p.state.config,
+        &p.state.supervisor,
+        &t,
+        "Abuse — phishing pages",
+    )
+    .await
+    .unwrap();
+
+    // Every way a payment can arrive.
+    p.post(&payment_event("subscription_payment_success", "wh_2", 665544)).await;
+    p.post(&payment_event("subscription_payment_recovered", "wh_3", 665544)).await;
+    p.post(&subscription_event(
+        "subscription_updated",
+        "wh_4",
+        "665544",
+        STARTER_VARIANT,
+        serde_json::json!({ "status": "active" }),
+        custom,
+    ))
+    .await;
+
+    let still = p.tenant(&tenant.id).await;
+    assert_eq!(
+        still.status,
+        TenantStatus::Suspended,
+        "an operator's suspension is not something a customer can pay their way out of"
+    );
+    assert_eq!(still.suspended_reason.as_deref(), Some("Abuse — phishing pages"));
+}
+
+/// A platform told to take payment first, that cannot take a payment, must
+/// refuse to build the site rather than build one nobody can ever pay for.
+///
+/// The ordering is the assertion: the provider is resolved before the tenant
+/// row exists, so a misconfigured platform leaves nothing behind.
+#[tokio::test]
+async fn payment_first_without_a_usable_provider_builds_nothing() {
+    let p = platform_requiring_payment().await;
+    let cookie = p.sign_in().await;
+
+    let (status, _, _) = p
+        .form(
+            "/dashboard/new",
+            &cookie,
+            "title=Adas+Journal&slug=adas-journal&plan=starter\
+             &owner_name=Ada&owner_email=ada@example.com\
+             &owner_password=a-long-enough-password",
+        )
+        .await;
+    // An operator's mistake, not the customer's, so it is an error page rather
+    // than the form again with something they could usefully change.
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "refused");
+
+    assert!(
+        pro_db::tenants::find_by_slug(&p.state.db, "adas-journal")
+            .await
+            .unwrap()
+            .is_none(),
+        "nothing may be built when the payment it waits for cannot be taken"
+    );
 }
 
 /// A tiny temporary directory, so these tests leave nothing behind.

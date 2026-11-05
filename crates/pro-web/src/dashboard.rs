@@ -261,12 +261,33 @@ async fn new_site_form_inner(
     let suggested = pro_core::ids::slugify(&account.name);
     let zone = esc(state.config.subdomain_base.trim_matches('.'));
 
+    // On a platform that takes payment first, say so on the form rather than
+    // at the end of it: the next screen is the provider's, not the site's, and
+    // a customer who has typed a password expects to know that before the
+    // button moves them somewhere they have to put a card in.
+    let payment_first = live.require_payment_up_front() && live.billing_provider() != "none";
+    let (lede, action, note) = if payment_first {
+        (
+            "Payment first, then your site opens.",
+            "Continue to payment",
+            format!(
+                r#"<p class="hint" style="margin:0 0 16px">Your address is reserved as soon as you
+continue. The site stays closed to the public until the payment for
+<b>{price} / {interval}</b> is confirmed, which is usually immediate.</p>"#,
+                price = esc(&chosen.price_display()),
+                interval = esc(&chosen.interval),
+            ),
+        )
+    } else {
+        ("This takes a few seconds.", "Create site", String::new())
+    };
+
     let body = format!(
         r#"{head}
 <div class="card padded">{form}</div>
 <p class="footnote">Your site's own password is separate from your {platform} account
 password — it signs you in to the publication's admin.</p>"#,
-        head = view::page_head("New site", "This takes a few seconds.", ""),
+        head = view::page_head("New site", lede, ""),
         platform = esc(&state.platform_name()),
         form = view::form(
             "/dashboard/new",
@@ -281,7 +302,10 @@ domain afterwards.</p>
 {owner_name}
 {owner_email}
 {password}
-<button class="btn block" type="submit">{rocket} Create site</button>"#,
+{note}
+<button class="btn block" type="submit">{rocket} {action}</button>"#,
+                note = note,
+                action = action,
                 title = view::field("title", "Site title", "text", "", None, true),
                 slug = view::field_full(
                     "slug",
@@ -385,6 +409,16 @@ async fn create_site_inner(
         )));
     }
 
+    // Whether this site has to be paid for before it opens to the public.
+    //
+    // A platform on `provider = "none"` does not charge at all, so the setting
+    // cannot mean anything there — asking for a payment nobody can make would
+    // just stop sites being created. The provider is resolved *before* anything
+    // is built, so a platform that demands payment it cannot actually take
+    // fails here rather than leaving a site nobody can pay for.
+    let payment_first = live.require_payment_up_front() && live.billing_provider() != "none";
+    let provider = if payment_first { Some(pro_billing::require(&live)?) } else { None };
+
     let period_start = pro_core::now_iso();
     let tenant = pro_provision::create_site(
         &state.db,
@@ -407,11 +441,27 @@ async fn create_site_inner(
     // The edge caches hostname lookups, and this tenant's subdomain is new.
     state.hosts.invalidate_all();
 
+    pro_db::audit::record(
+        &state.db,
+        &format!("account:{}", account.id),
+        "tenant.created",
+        Some(&tenant.id),
+        Some(&account.id),
+        serde_json::json!({"slug": slug, "plan": plan.slug, "paid_first": payment_first}),
+    )
+    .await;
+
+    // Payment first: the site stays closed and the customer goes straight to
+    // the checkout, rather than getting a working site and a bill later.
+    if let Some(provider) = provider {
+        return start_paid_site(state, provider, &account, &plan, &tenant).await;
+    }
+
     // A trial subscription so the plan's periodic limits have a start date and
     // the billing screens have something to show. With no payment provider
     // configured this is simply a record that the site exists on a plan.
-    let provider = live.billing_provider();
-    if provider == "none" {
+    let provider_name = live.billing_provider();
+    if provider_name == "none" {
         let _ = pro_db::subscriptions::create_manual(
             &state.db,
             &account.id,
@@ -436,16 +486,6 @@ async fn create_site_inner(
         .await;
     }
 
-    pro_db::audit::record(
-        &state.db,
-        &format!("account:{}", account.id),
-        "tenant.created",
-        Some(&tenant.id),
-        Some(&account.id),
-        serde_json::json!({"slug": slug, "plan": plan.slug}),
-    )
-    .await;
-
     let site_url = state.config.tenant_url(&tenant.slug);
     let mailer = state.mailer();
     let _ = mailer
@@ -461,6 +501,143 @@ async fn create_site_inner(
         &format!("/dashboard/sites/{}", tenant.id),
         Flash::ok("Your site is ready."),
     ))
+}
+
+/// A site on a platform that takes payment before the site opens: built,
+/// closed, and handed to the provider's checkout.
+///
+/// The site is provisioned rather than deferred because the address has to be
+/// claimed the moment the customer picks it — a reservation that lived only
+/// until a webhook arrived would let two customers be sold the same subdomain.
+/// What it is *not* is open: it is suspended, which is the same state a lapsed
+/// site sits in, so the payment webhook that reopens one reopens this one too
+/// and no second lifecycle has to be invented. The public half is closed and
+/// the admin still answers, which is what lets the owner come back and pay.
+///
+/// No `site_ready` email goes out here. The site is not ready, and saying so
+/// is the provider's job once the money has moved.
+async fn start_paid_site(
+    state: &AppState,
+    provider: Box<dyn pro_billing::Provider>,
+    account: &Account,
+    plan: &pro_core::Plan,
+    tenant: &Tenant,
+) -> Result<Response> {
+    pro_provision::suspend_site(
+        &state.db,
+        &state.config,
+        &state.supervisor,
+        tenant,
+        pro_core::suspension::AWAITING_PAYMENT,
+    )
+    .await?;
+
+    to_checkout(state, provider.as_ref(), account, plan, tenant, "site creation").await
+}
+
+/// Hand the customer to the provider's checkout for this site's own plan.
+///
+/// Shared by the first payment and by resuming an abandoned one, because they
+/// differ only in what has already happened — the request to the provider is
+/// the same, and so is what has to be true afterwards.
+async fn to_checkout(
+    state: &AppState,
+    provider: &dyn pro_billing::Provider,
+    account: &Account,
+    plan: &pro_core::Plan,
+    tenant: &Tenant,
+    reason: &'static str,
+) -> Result<Response> {
+    let here = format!("/dashboard/sites/{}", tenant.id);
+    let success = state.url(&format!(
+        "{here}?ok={}",
+        view::urlencode("Thank you — your site opens as soon as the payment is confirmed.")
+    ));
+    let cancel = state.url(&here);
+
+    let checkout = provider
+        .create_checkout(pro_billing::CheckoutRequest {
+            account_id: &account.id,
+            account_email: &account.email,
+            tenant_id: Some(&tenant.id),
+            plan,
+            success_url: &success,
+            cancel_url: &cancel,
+            // No trial. Demanding payment before the site opens is the whole
+            // of what this setting means, and a trial is the opposite of it.
+            trial_days: 0,
+        })
+        .await;
+
+    pro_db::audit::record(
+        &state.db,
+        &format!("account:{}", account.id),
+        "checkout.started",
+        Some(&tenant.id),
+        Some(&account.id),
+        serde_json::json!({
+            "plan": plan.slug,
+            "provider": provider.name(),
+            "reason": reason,
+            "started": checkout.is_ok(),
+        }),
+    )
+    .await;
+
+    match checkout {
+        Ok(checkout) => Ok(reply::redirect(&checkout.url)),
+        // Recoverable, not fatal. The site exists and is closed, so the
+        // customer is shown it with the banner that offers the payment again.
+        // Failing the request outright would leave them a site they could
+        // neither see nor pay for.
+        Err(e) => {
+            tracing::error!(tenant = %tenant.slug, "could not start the checkout: {e}");
+            Ok(redirect_with(
+                &here,
+                Flash::err(
+                    "The checkout could not be started. Your site is reserved — \
+                     please try the payment again.",
+                ),
+            ))
+        }
+    }
+}
+
+/// Start the payment for a site that is closed waiting for one.
+///
+/// Its own route rather than the billing screen's plan change, because that
+/// one refuses a plan the site is already on — which is every site waiting for
+/// its first payment.
+pub async fn pay_site(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let chrome = state.chrome(&headers);
+    let back = format!("/dashboard/sites/{id}");
+    reply::or_redirect(&back, &chrome, pay_site_inner(&state, &headers, &id).await)
+}
+
+async fn pay_site_inner(state: &AppState, headers: &HeaderMap, id: &str) -> Result<Response> {
+    auth::require_same_origin(headers, &state.config.host())?;
+    let account = auth::account(state, headers).await?;
+    let tenant = auth::owned_tenant(state, &account, id).await?;
+    let live = state.live();
+
+    // Only a site billing has closed. An operator's suspension is not a thing
+    // a customer can pay their way out of.
+    if !tenant.is_suspended_for_billing() {
+        return Err(ProError::BadRequest(
+            "This site is not waiting for a payment.".into(),
+        ));
+    }
+
+    let provider = pro_billing::require(&live)?;
+    let plan = live
+        .plan(&tenant.plan_slug)
+        .ok_or_else(|| ProError::Config(format!("plan {:?} is gone", tenant.plan_slug)))?;
+
+    to_checkout(state, provider.as_ref(), &account, &plan, &tenant, "resumed").await
 }
 
 // ---------------------------------------------------------------------------
@@ -535,7 +712,26 @@ async fn site_inner(
         ),
     );
 
-    if tenant.status == TenantStatus::Suspended {
+    // A site that has never been paid for reads differently from one that
+    // lapsed: there is nothing yet to reassure the owner about, and the thing
+    // to do is finish the payment rather than go and inspect a subscription.
+    let awaiting_payment = tenant.suspended_reason.as_deref()
+        == Some(pro_core::suspension::AWAITING_PAYMENT);
+    if tenant.status == TenantStatus::Suspended && awaiting_payment {
+        body.push_str(&view::banner(
+            BannerKind::Warn,
+            &format!(
+                r#"<strong>Waiting for your payment.</strong> Your address is reserved and the admin
+is ready, but the site stays closed to the public until the payment is confirmed. {pay}"#,
+                pay = view::action_button(
+                    &format!("/dashboard/sites/{}/pay", tenant.id),
+                    "Complete payment",
+                    "small",
+                    None
+                ),
+            ),
+        ));
+    } else if tenant.status == TenantStatus::Suspended {
         body.push_str(&view::banner(
             BannerKind::Error,
             &format!(

@@ -74,6 +74,10 @@ fn platform_routes() -> Router<AppState> {
         .route("/dashboard/new", get(dashboard::new_site_form).post(dashboard::create_site))
         .route("/dashboard/sites/{id}", get(dashboard::site))
         .route("/dashboard/sites/{id}/restart", post(dashboard::restart_site))
+        // Starting (or restarting) the payment a closed site is waiting for.
+        // Not the billing screen's plan change, which refuses a plan the site
+        // is already on.
+        .route("/dashboard/sites/{id}/pay", post(dashboard::pay_site))
         .route("/dashboard/sites/{id}/backup", post(dashboard::backup_site))
         .route(
             "/dashboard/sites/{id}/backups/{backup_id}",

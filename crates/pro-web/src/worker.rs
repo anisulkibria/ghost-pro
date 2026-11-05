@@ -534,7 +534,7 @@ async fn housekeeping_pass(state: &AppState) -> Result<()> {
             &state.config,
             &state.supervisor,
             &tenant,
-            "Payment outstanding",
+            pro_core::suspension::PAYMENT_OUTSTANDING,
         )
         .await
         {

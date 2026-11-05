@@ -306,7 +306,12 @@ async fn apply(
             // just paid expects their site back now.
             if let Some(tenant_id) = &subscription.tenant_id {
                 if let Ok(tenant) = pro_db::tenants::get(&state.db, tenant_id).await {
-                    if tenant.status == pro_core::TenantStatus::Suspended {
+                    // Billing's own suspensions only — a site an operator shut
+                    // for abuse must not reopen because a card was charged.
+                    // This is also what opens a site created on a
+                    // payment-first platform: its suspension is
+                    // `AWAITING_PAYMENT`, and this is the payment.
+                    if tenant.is_suspended_for_billing() {
                         if let Some(plan) = live.plan(&tenant.plan_slug) {
                             pro_provision::unsuspend_site(
                                 &state.db,
@@ -449,13 +454,45 @@ async fn apply_subscription(
     )
     .await?;
 
-    // Apply the plan to the site, if the subscription names one and it differs.
     let mut summary = format!("subscription {}", stored.status);
-    if let (Some(tenant_id), Some(plan_slug)) = (&tenant_id, &incoming.plan_slug) {
+    if let Some(tenant_id) = &tenant_id {
         if let Ok(tenant) = pro_db::tenants::get(&state.db, tenant_id).await {
-            if &tenant.plan_slug != plan_slug && stored.is_entitled() {
-                if let Some(plan) = live.plan(plan_slug) {
-                    pro_provision::apply_plan(
+            // Apply the plan to the site, if the subscription names one and it
+            // differs.
+            if let Some(plan_slug) = &incoming.plan_slug {
+                if &tenant.plan_slug != plan_slug && stored.is_entitled() {
+                    if let Some(plan) = live.plan(plan_slug) {
+                        pro_provision::apply_plan(
+                            &state.db,
+                            &state.config,
+                            &state.supervisor,
+                            &tenant,
+                            &plan,
+                        )
+                        .await?;
+                        summary = format!("moved {} to {}", tenant.slug, plan.name);
+                    }
+                }
+            }
+
+            // An entitling subscription opens a site billing had closed: a
+            // lapsed one that has now been paid for, or — on a platform that
+            // takes payment before the site opens — one created suspended and
+            // waiting for its first payment. Billing's own suspensions only,
+            // so an operator's survives being paid for.
+            //
+            // This cannot wait for `PaymentSucceeded`. Stripe's
+            // `checkout.session.completed` arrives as a subscription change,
+            // not a payment, so a site that opened only on the payment event
+            // would sit closed until an invoice event happened to follow.
+            if stored.is_entitled() && tenant.is_suspended_for_billing() {
+                let was_awaiting = tenant.suspended_reason.as_deref()
+                    == Some(pro_core::suspension::AWAITING_PAYMENT);
+                // The plan this is paying for, which on a plan change is the
+                // incoming one rather than the row's.
+                let slug = incoming.plan_slug.as_deref().unwrap_or(&tenant.plan_slug);
+                if let Some(plan) = live.plan(slug) {
+                    pro_provision::unsuspend_site(
                         &state.db,
                         &state.config,
                         &state.supervisor,
@@ -463,7 +500,34 @@ async fn apply_subscription(
                         &plan,
                     )
                     .await?;
-                    summary = format!("moved {} to {}", tenant.slug, plan.name);
+                    summary = format!("opened {}", tenant.slug);
+                    pro_db::audit::record(
+                        &state.db,
+                        &format!("webhook:{}", provider.name()),
+                        "tenant.unsuspended",
+                        Some(&tenant.id),
+                        Some(&account_id),
+                        serde_json::json!({"reason": "subscription entitled"}),
+                    )
+                    .await;
+
+                    // The site creation deliberately sent no "ready" mail,
+                    // because it was not. This is the moment it is.
+                    if was_awaiting {
+                        if let Ok(account) =
+                            pro_db::accounts::get(&state.db, &account_id).await
+                        {
+                            let _ = state
+                                .mailer()
+                                .send(pro_mail::templates::site_ready(
+                                    &live.platform_name(),
+                                    &account.email,
+                                    &account.name,
+                                    &state.config.tenant_url(&tenant.slug),
+                                ))
+                                .await;
+                        }
+                    }
                 }
             }
 
@@ -477,7 +541,7 @@ async fn apply_subscription(
                     &state.config,
                     &state.supervisor,
                     &tenant,
-                    "Subscription ended",
+                    pro_core::suspension::SUBSCRIPTION_ENDED,
                 )
                 .await?;
                 summary = format!("suspended {}", tenant.slug);

@@ -115,9 +115,11 @@ pub static REGISTRY: &[SettingDef] = &[
     SettingDef {
         key: "billing.requirePaymentUpFront",
         group: "Billing",
-        label: "Require payment before the site is created",
+        label: "Require payment before the site opens",
         help: "Off gives the trial first and asks for a card when it ends, which is how \
-               Ghost Pro does it. On means no site exists until a payment succeeds.",
+               Ghost Pro does it. On sends the customer straight to checkout: the site is \
+               reserved but stays closed to the public, and opens when the payment lands. \
+               Needs a payment provider — a platform that does not charge ignores this.",
         kind: Kind::Bool,
         min_role: StaffRole::Owner,
         fallback: |c| Value::Bool(c.billing.require_payment_up_front),
