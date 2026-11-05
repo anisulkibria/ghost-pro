@@ -1,0 +1,18 @@
+[package]
+name = "pro-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+slug = { workspace = true }
+once_cell = { workspace = true }
+regex = { workspace = true }

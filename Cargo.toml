@@ -1,0 +1,84 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pro-core",
+    "crates/pro-db",
+    "crates/pro-supervisor",
+    "crates/pro-provision",
+    "crates/pro-proxy",
+    "crates/pro-billing",
+    "crates/pro-mail",
+    "crates/pro-web",
+    "crates/pro",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+pro-core = { path = "crates/pro-core" }
+pro-db = { path = "crates/pro-db" }
+pro-supervisor = { path = "crates/pro-supervisor" }
+pro-provision = { path = "crates/pro-provision" }
+pro-proxy = { path = "crates/pro-proxy" }
+pro-billing = { path = "crates/pro-billing" }
+pro-mail = { path = "crates/pro-mail" }
+pro-web = { path = "crates/pro-web" }
+
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["multipart", "macros", "query"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "trace", "compression-gzip"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate", "chrono", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+bcrypt = "0.17"
+rand = "0.9"
+sha2 = "0.10"
+hex = "0.4"
+regex = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+once_cell = "1"
+slug = "0.1"
+async-trait = "0.1"
+futures = "0.3"
+walkdir = "2"
+# Graceful shutdown of a tenant process needs SIGTERM; tokio only offers kill
+# (SIGKILL), which would skip SQLite's own clean close.
+libc = "0.2"
+percent-encoding = "2"
+form_urlencoded = "1"
+
+# The edge proxy terminates TLS for every tenant subdomain and every custom
+# domain a customer attaches, so it needs the same ACME stack Ghost-rust uses
+# for a single site — driven over a certificate set that changes while the
+# process runs.
+rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "logging", "std"] }
+rustls-acme = { version = "0.15", default-features = false, features = ["ring", "tls12", "webpki-roots", "tokio"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tokio-util = { version = "0.7", features = ["io"] }
+hmac = "0.12"
+base64 = "0.22"
+rustls-pemfile = "2"
+hyper = { version = "1", features = ["client", "server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "server", "server-auto", "http1", "http2", "tokio"] }
+http-body-util = "0.1"
+
+# Custom domains are only routable once their DNS actually points here, so the
+# platform resolves the records itself rather than taking the customer's word.
+hickory-resolver = { version = "0.26", default-features = false, features = ["system-config", "tokio"] }
+
+# Platform billing (the subscription the *customer* pays us) and transactional
+# mail. Stripe is reached over its REST API rather than through a crate, so the
+# surface stays small and visible.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "charset", "http2"] }
+lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "pool", "tokio1", "tokio1-rustls-tls", "ring", "webpki-roots"] }
+
+# Tenant snapshots: one tenant is one directory, so a backup is one archive.
+zip = { version = "2", default-features = false, features = ["deflate"] }

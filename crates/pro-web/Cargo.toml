@@ -1,0 +1,32 @@
+[package]
+name = "pro-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pro-core = { workspace = true }
+pro-db = { workspace = true }
+pro-supervisor = { workspace = true }
+pro-provision = { workspace = true }
+pro-billing = { workspace = true }
+pro-mail = { workspace = true }
+pro-proxy = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
+hex = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+sqlx = { workspace = true }
+form_urlencoded = { workspace = true }
+percent-encoding = { workspace = true }
+reqwest = { workspace = true }

@@ -1,0 +1,15 @@
+[package]
+name = "pro-supervisor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pro-core = { workspace = true }
+pro-db = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+libc = { workspace = true }

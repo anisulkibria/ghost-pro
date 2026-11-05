@@ -1,0 +1,23 @@
+[package]
+name = "pro-billing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pro-core = { workspace = true }
+pro-db = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+chrono = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+async-trait = { workspace = true }
+# Gumroad posts its pings form-encoded rather than as JSON, and its checkout
+# is a URL the platform builds rather than an object it creates — so both
+# directions need percent-encoding.
+form_urlencoded = { workspace = true }
+percent-encoding = { workspace = true }

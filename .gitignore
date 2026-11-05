@@ -1,0 +1,17 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# runtime content (regenerated on first boot — never commit)
+/run/
+.DS_Store
+
+# local config (contains your local db path / secrets)
+config.local*.json
+.env
+
+# editor
+.claude/
+.idea/
+.vscode/
+*.swp
