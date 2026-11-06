@@ -193,7 +193,7 @@ impl Theme {
 
     /// The class that goes on `<html>`. `light` needs none — it is the
     /// stylesheet's own `:root`.
-    fn html_class(self) -> &'static str {
+    pub(crate) fn html_class(self) -> &'static str {
         match self {
             Theme::Light => "",
             Theme::Dark => " class=\"dark\"",
@@ -2040,7 +2040,7 @@ mod tests {
     fn an_auth_page_is_centred_and_has_no_rail() {
         let html = auth_page(
             "Sign in",
-            "Ghost Pro",
+            "Vuuut",
             Theme::System,
             "Sign in",
             "Welcome back",

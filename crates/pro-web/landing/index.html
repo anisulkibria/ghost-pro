@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en"{{theme}}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vuuut — managed Ghost hosting for publications</title>
+<meta name="description" content="Managed Ghost hosting. Your publication on your own domain, with certificates, backups, upgrades and email delivery handled. One isolated process per site. From $9 a month.">
+<link rel="canonical" href="/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Vuuut — managed Ghost hosting for publications">
+<meta property="og:description" content="Everything but the writing. Your publication on your own domain, with certificates, backups, upgrades and delivery handled.">
+<meta name="theme-color" content="#FBF7F2">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 31 24' fill='none' stroke='%23FF1A75' stroke-width='2.6' stroke-linecap='round'%3E%3Cpath d='M3 7v5.5a3.6 3.6 0 0 0 7.2 0V7'/%3E%3Cpath d='M12.4 7v5.5a3.6 3.6 0 0 0 7.2 0V7'/%3E%3Cpath d='M21.8 7v5.5a3.6 3.6 0 0 0 7.2 0V7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,400..900,0..100,0..1;1,9..144,400..900,0..100,0..1&family=Outfit:wght@300..700&family=Roboto+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/landing.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- ─────────────────────────────────────────── masthead ─────── -->
+<header class="masthead" id="top">
+  <div class="shell masthead-in">
+    <a class="logo" href="/" aria-label="Vuuut, home">
+      <svg class="mark" viewBox="0 0 31 24" aria-hidden="true"><path d="M3 7v5.5a3.6 3.6 0 0 0 7.2 0V7"/><path d="M12.4 7v5.5a3.6 3.6 0 0 0 7.2 0V7"/><path d="M21.8 7v5.5a3.6 3.6 0 0 0 7.2 0V7"/></svg>
+      <span>Vuu<em>u</em>t</span>
+    </a>
+    <nav class="mast-nav" aria-label="Primary">
+      <a href="#what">What you get</a>
+      <a href="#isolation">Architecture</a>
+      <a href="#plans">Plans</a>
+    </nav>
+    <div class="mast-act">
+      <a class="lnk" href="/dashboard/signin">Sign in</a>
+      <a class="btn btn-ink" href="/signup">Get started</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ─────────────────────────────────────────── hero ─────── -->
+  <section class="hero">
+    <div class="shell hero-in">
+
+      <div class="hero-text">
+        <p class="eyebrow r1">Managed Ghost hosting <span class="tick"></span> Issue Nº1</p>
+        <h1 class="r2">
+          Everything<br>
+          but the <em>writing.</em>
+        </h1>
+        <p class="lede r3">
+          Your publication on your own domain — certificates, backups, upgrades
+          and uptime all handled, with no cap on your members. You open the editor
+          and start.
+        </p>
+        <div class="cta r4">
+          <a class="btn btn-spot" href="/signup">Create your publication<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h12M13 6l6 6-6 6"/></svg></a>
+          <a class="lnk lnk-u" href="#plans">See the plans</a>
+        </div>
+        <dl class="hero-meta r5">
+          <div><dt>From</dt><dd>$9 / month</dd></div>
+          <div><dt>Members</dt><dd>No ceiling</dd></div>
+          <div><dt>Setup</dt><dd>Under a minute</dd></div>
+        </dl>
+      </div>
+
+      <!-- The provisioning receipt: what actually happens when you sign up. -->
+      <aside class="receipt r3" aria-label="What happens when a site is created">
+        <div class="receipt-head">
+          <span class="mono">PROVISIONING</span>
+          <span class="mono dim">vuuut</span>
+        </div>
+        <ol class="steps">
+          <li><span class="st">account created</span><span class="ms mono">0.0s</span></li>
+          <li><span class="st">database migrated</span><span class="ms mono">0.4s</span></li>
+          <li><span class="st">theme copied</span><span class="ms mono">0.6s</span></li>
+          <li><span class="st">certificate issued</span><span class="ms mono">1.2s</span></li>
+          <li><span class="st">process started</span><span class="ms mono">1.8s</span></li>
+        </ol>
+        <p class="receipt-live">
+          <span class="dot" aria-hidden="true"></span>
+          <span class="mono">LIVE</span> yourpublication.com
+        </p>
+        <div class="perf" aria-hidden="true"></div>
+      </aside>
+
+    </div>
+    <div class="shell"><hr class="rule"></div>
+  </section>
+
+  <!-- ─────────────────────────────────────────── marquee ─────── -->
+  <div class="marquee" aria-hidden="true">
+    <div class="marquee-in">
+      <span>Automatic HTTPS</span><i>✦</i><span>Nightly backups</span><i>✦</i><span>Zero-downtime upgrades</span><i>✦</i>
+      <span>Stripe memberships</span><i>✦</i><span>Unlimited members</span><i>✦</i><span>Built-in analytics</span><i>✦</i>
+      <span>Custom themes</span><i>✦</i><span>Admin API</span><i>✦</i>
+      <span>Automatic HTTPS</span><i>✦</i><span>Nightly backups</span><i>✦</i><span>Zero-downtime upgrades</span><i>✦</i>
+      <span>Stripe memberships</span><i>✦</i><span>Unlimited members</span><i>✦</i><span>Built-in analytics</span><i>✦</i>
+      <span>Custom themes</span><i>✦</i><span>Admin API</span><i>✦</i>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────── 01 what ─────── -->
+  <section class="sec" id="what">
+    <div class="shell">
+      <div class="sec-head reveal">
+        <p class="num mono">01</p>
+        <h2>The parts you would<br>rather not run yourself.</h2>
+        <p class="sec-sub">A Ghost install is a server, a certificate, a mail route, a
+          backup job and an upgrade path. All of it is ours.</p>
+      </div>
+
+      <div class="grid">
+        <article class="cell reveal">
+          <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18"/></svg></span>
+          <h3>Your own domain</h3>
+          <p>Point a CNAME at us. The certificate is issued and renewed on its own,
+            and <code>www</code> and the apex both resolve.</p>
+        </article>
+        <article class="cell reveal">
+          <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span>
+          <h3>Backups you can take</h3>
+          <p>Taken on a schedule and kept off-box — and you can pull one yourself
+            from the dashboard, whenever you like.</p>
+        </article>
+        <article class="cell reveal">
+          <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19h16"/></svg></span>
+          <h3>Upgrades, handled</h3>
+          <p>New Ghost releases are rolled out for you. Your theme and your content
+            are untouched; nothing asks you to run a command.</p>
+        </article>
+        <article class="cell reveal">
+          <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span>
+          <h3>Bring your own Mailgun</h3>
+          <p>Newsletters send through your own Mailgun account, at Mailgun's prices.
+            No markup from us, no send quota, and the sending reputation is yours
+            to keep.</p>
+        </article>
+        <article class="cell reveal">
+          <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 20V9m5 11V4m5 16v-7m5 7V7"/></svg></span>
+          <h3>Members without a meter</h3>
+          <p>No ceiling on your list, on any plan — we do not charge per reader.
+            Paid tiers run through your own Stripe account, and the numbers that
+            matter are built in.</p>
+        </article>
+        <article class="cell reveal">
+          <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 18-6-6 6-6M15 6l6 6-6 6"/></svg></span>
+          <h3>Still your Ghost</h3>
+          <p>Custom themes, the Admin and Content APIs, webhooks and integrations.
+            Nothing is locked down, and your content exports whole.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────── 02 isolation ─────── -->
+  <section class="slab" id="isolation">
+    <div class="shell slab-in">
+      <div class="slab-text reveal">
+        <p class="num mono">02</p>
+        <h2>One process per<br><em>publication.</em></h2>
+        <p>
+          Most hosts put a hundred sites in one application and hope. Here, your
+          publication is its own operating-system process, with its own database
+          and its own memory, supervised on its own and restarted on its own.
+        </p>
+        <p>
+          A neighbour's traffic spike is a neighbour's problem. An upgrade is
+          rolled one site at a time. And because the edge proxy only routes, a
+          site that is asleep costs nothing and wakes on the first request.
+        </p>
+        <a class="lnk lnk-u light" href="/signup">Start a site and watch it come up</a>
+      </div>
+
+      <figure class="diagram reveal" aria-label="Diagram: one edge proxy routing to isolated site processes">
+        <div class="edge">
+          <span class="mono">EDGE PROXY</span>
+          <span class="edge-sub mono">:443 · TLS · routes by host</span>
+        </div>
+        <div class="fan" aria-hidden="true">
+          <svg viewBox="0 0 300 54" preserveAspectRatio="none">
+            <path d="M150 0 V18 H40 V54" /><path d="M150 0 V18 H113 V54" />
+            <path d="M150 0 V18 H187 V54" /><path d="M150 0 V18 H260 V54" />
+          </svg>
+        </div>
+        <div class="nodes">
+          <div class="node"><b>ghost</b><span class="mono">site-01</span></div>
+          <div class="node"><b>ghost</b><span class="mono">site-02</span></div>
+          <div class="node"><b>ghost</b><span class="mono">site-03</span></div>
+          <div class="node"><b>ghost</b><span class="mono">site-04</span></div>
+        </div>
+        <figcaption class="mono">isolated · supervised · independently upgraded</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────── 03 plans ─────── -->
+  <section class="sec" id="plans">
+    <div class="shell">
+      <div class="sec-head reveal">
+        <p class="num mono">03</p>
+        <h2>Plans</h2>
+        <p class="sec-sub">Every plan is the whole of Ghost, custom themes included. What
+          changes is the room you have and how many hands are on it. Cancel whenever.</p>
+      </div>
+
+      <!-- The billing switch is two radios and a sibling selector: no script,
+           so it works before landing.js loads and under a policy that allows
+           no inline styles. Mirrors pro_core::plans::default_plans(), where
+           each tier is sold as a monthly and a yearly plan. -->
+      <div class="billing reveal">
+        <input class="sr-only" type="radio" name="billing" id="bill-monthly" checked>
+        <input class="sr-only" type="radio" name="billing" id="bill-yearly">
+        <div class="billing-tabs" role="group" aria-label="Billing period">
+          <label for="bill-monthly">Monthly</label>
+          <label for="bill-yearly">Yearly<span class="save">Save up to 32%</span></label>
+        </div>
+
+        <div class="plans">
+          <article class="plan">
+            <header><h3>Starter</h3><p class="plan-desc">A publication for one person, on your own domain.</p></header>
+            <p class="price p-month"><span class="cur">$</span>9<span class="per">/month</span></p>
+            <p class="price p-year"><span class="cur">$</span>79<span class="per">/year</span></p>
+            <p class="price-note p-month">$108 a year, billed monthly</p>
+            <p class="price-note p-year">$6.58 a month · you keep $29</p>
+            <ul class="feat">
+              <li>5 GB storage</li>
+              <li>Unlimited members</li>
+              <li>1 staff user</li>
+              <li>Custom domain</li>
+              <li><strong>Custom themes</strong></li>
+              <li>Paid memberships via Stripe</li>
+              <li>Analytics</li>
+            </ul>
+            <p class="trial mono">Cancel anytime</p>
+            <a class="btn btn-ghost p-month" href="/signup?plan=starter">Choose Starter</a>
+            <a class="btn btn-ghost p-year" href="/signup?plan=starter-yearly">Choose Starter</a>
+          </article>
+
+          <article class="plan feature">
+            <span class="flag mono">Most chosen</span>
+            <header><h3>Creator</h3><p class="plan-desc">Custom integrations and a small team behind it.</p></header>
+            <p class="price p-month"><span class="cur">$</span>15<span class="per">/month</span></p>
+            <p class="price p-year"><span class="cur">$</span>129<span class="per">/year</span></p>
+            <p class="price-note p-month">$180 a year, billed monthly</p>
+            <p class="price-note p-year">$10.75 a month · you keep $51</p>
+            <ul class="feat">
+              <li>15 GB storage</li>
+              <li>Unlimited members</li>
+              <li>3 staff users</li>
+              <li>2 custom domains</li>
+              <li>Custom themes</li>
+              <li><strong>Custom integrations &amp; API access</strong></li>
+              <li>Social web &amp; custom fields</li>
+              <li>Paid memberships via Stripe</li>
+              <li>Analytics</li>
+            </ul>
+            <p class="trial mono">Cancel anytime</p>
+            <a class="btn btn-spot p-month" href="/signup?plan=creator">Choose Creator</a>
+            <a class="btn btn-spot p-year" href="/signup?plan=creator-yearly">Choose Creator</a>
+          </article>
+
+          <article class="plan">
+            <header><h3>Business</h3><p class="plan-desc">Unlimited hands, every feature, priority support.</p></header>
+            <p class="price p-month"><span class="cur">$</span>49<span class="per">/month</span></p>
+            <p class="price p-year"><span class="cur">$</span>399<span class="per">/year</span></p>
+            <p class="price-note p-month">$588 a year, billed monthly</p>
+            <p class="price-note p-year">$33.25 a month · you keep $189</p>
+            <ul class="feat">
+              <li>50 GB storage</li>
+              <li>Unlimited members</li>
+              <li>Unlimited staff users</li>
+              <li>10 custom domains</li>
+              <li>Custom themes</li>
+              <li>Custom integrations &amp; API access</li>
+              <li>Social web &amp; custom fields</li>
+              <li>Paid memberships via Stripe</li>
+              <li><strong>Priority support</strong></li>
+            </ul>
+            <p class="trial mono">Cancel anytime</p>
+            <a class="btn btn-ghost p-month" href="/signup?plan=business">Choose Business</a>
+            <a class="btn btn-ghost p-year" href="/signup?plan=business-yearly">Choose Business</a>
+          </article>
+        </div>
+      </div>
+
+      <p class="plans-foot reveal">
+        Prices in USD. Memberships are billed through <strong>your</strong> Stripe
+        account — we never take a cut of what your readers pay you.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────── close ─────── -->
+  <section class="close">
+    <div class="shell close-in reveal">
+      <p class="eyebrow">Ready when you are</p>
+      <h2>Start writing<br>this afternoon.</h2>
+      <a class="btn btn-spot big" href="/signup">Create your publication<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h12M13 6l6 6-6 6"/></svg></a>
+      <p class="close-note mono">Cancel anytime · your Stripe, your revenue · export anytime</p>
+    </div>
+  </section>
+
+</main>
+
+<!-- ─────────────────────────────────────────── footer ─────── -->
+<footer class="foot">
+  <div class="shell foot-in">
+    <div class="foot-brand">
+      <a class="logo" href="/" aria-label="Vuuut, home">
+        <svg class="mark" viewBox="0 0 31 24" aria-hidden="true"><path d="M3 7v5.5a3.6 3.6 0 0 0 7.2 0V7"/><path d="M12.4 7v5.5a3.6 3.6 0 0 0 7.2 0V7"/><path d="M21.8 7v5.5a3.6 3.6 0 0 0 7.2 0V7"/></svg>
+        <span>Vuu<em>u</em>t</span>
+      </a>
+      <p>Managed Ghost hosting. Your publication, on your own domain.</p>
+    </div>
+    <nav aria-label="Footer">
+      <div><h4>Platform</h4>
+        <a href="#what">What you get</a><a href="#isolation">Architecture</a><a href="/pricing">Pricing</a></div>
+      <div><h4>Account</h4>
+        <a href="/signup">Create a site</a><a href="/dashboard/signin">Sign in</a><a href="/forgot">Reset password</a></div>
+    </nav>
+  </div>
+  <div class="shell foot-end">
+    <p class="mono">© <span id="yr">2026</span> Vuuut · vuuut.com</p>
+    <p class="mono dim">Built on Ghost</p>
+  </div>
+</footer>
+
+<script src="/assets/landing.js" defer></script>
+</body>
+</html>

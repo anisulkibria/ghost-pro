@@ -356,7 +356,7 @@ pub static REGISTRY: &[SettingDef] = &[
         help: "Shown in the dashboard and in the emails the platform sends.",
         kind: Kind::Text,
         min_role: StaffRole::Admin,
-        fallback: |_| Value::String("Ghost Pro".into()),
+        fallback: |_| Value::String("Vuuut".into()),
     },
     SettingDef {
         key: "platform.supportEmail",
@@ -887,7 +887,7 @@ impl Effective {
     pub fn platform_name(&self) -> String {
         let n = self.string("platform.name");
         if n.trim().is_empty() {
-            "Ghost Pro".into()
+            "Vuuut".into()
         } else {
             n
         }

@@ -376,7 +376,7 @@ mod tests {
         assert!(store.current().is_overridden("platform.name"));
 
         store.save(&pool, &[("platform.name".into(), None)], StaffRole::Admin, "s").await.unwrap();
-        assert_eq!(store.current().platform_name(), "Ghost Pro", "back to the default");
+        assert_eq!(store.current().platform_name(), "Vuuut", "back to the default");
         assert!(!store.current().is_overridden("platform.name"));
     }
 
@@ -421,7 +421,7 @@ mod tests {
             .await
             .unwrap();
         store.refresh(&pool).await.unwrap();
-        assert_eq!(store.current().platform_name(), "Ghost Pro", "fell back to the default");
+        assert_eq!(store.current().platform_name(), "Vuuut", "fell back to the default");
     }
 
     /// The console's form model: secrets write-only, locked fields visible.

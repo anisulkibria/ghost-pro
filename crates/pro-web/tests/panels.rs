@@ -599,10 +599,15 @@ async fn the_two_panels_do_not_share_sessions() {
 // Public pages, appearance and the host gate
 // ---------------------------------------------------------------------------
 
+/// `/` is deliberately absent from these lists. It is the marketing landing
+/// page now, a hand-authored static document rather than something
+/// `view` builds, so it has its own palette, its own stylesheet and one
+/// script — none of which these assertions should hold for. What *should*
+/// hold for it is in `the_landing_page_is_served_at_the_root` below.
 #[tokio::test]
 async fn every_public_page_renders() {
     let (state, _dir) = platform().await;
-    for path in ["/", "/pricing", "/signup", "/dashboard/signin", "/forgot", "/reset"] {
+    for path in ["/pricing", "/signup", "/dashboard/signin", "/forgot", "/reset"] {
         let (status, body) = get(&state, path, None).await;
         assert_eq!(status, StatusCode::OK, "{path} did not render");
         assert!(body.contains("--primary: #984059"), "{path}: no tonal palette");
@@ -620,6 +625,77 @@ async fn every_public_page_renders() {
     let (_, signin) = get(&state, "/dashboard/signin", None).await;
     assert!(signin.contains(r#"<div class="auth">"#));
     assert!(!signin.contains(r#"<aside class="rail">"#));
+}
+
+/// The landing page, and the things that are true of it instead.
+///
+/// It is the first thing anybody sees on the domain, and it is the one page
+/// here that is allowed a script — so the two properties worth pinning are
+/// that it actually is the root, and that its own stylesheet and script are
+/// reachable. The `style=` check is the load-bearing one: the page's policy
+/// deliberately omits `'unsafe-inline'`, so a stray inline style attribute
+/// would be silently dropped by the browser and the stagger would go with it.
+#[tokio::test]
+async fn the_landing_page_is_served_at_the_root() {
+    let (state, _dir) = platform().await;
+
+    let (status, body) = get(&state, "/", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("Everything"), "the landing headline is missing");
+    assert!(body.contains(r#"href="/assets/landing.css""#), "no stylesheet link");
+    assert!(body.contains(r#"href="/signup""#), "the landing page has to sell something");
+    assert!(
+        !body.contains("style=\""),
+        "an inline style attribute: the landing CSP has no 'unsafe-inline' for styles, \
+         so this would not apply — put it in landing.css"
+    );
+
+    // Both assets are served, and as themselves rather than as HTML.
+    for (path, kind, needle) in [
+        ("/assets/landing.css", "text/css", "--paper:"),
+        ("/assets/landing.js", "text/javascript", "IntersectionObserver"),
+    ] {
+        let (status, headers, body) = send(&state, "GET", path, None, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        let ct = headers.get(header::CONTENT_TYPE).unwrap().to_str().unwrap();
+        assert!(ct.starts_with(kind), "{path} served as {ct}");
+        assert!(body.contains(needle), "{path} is not the file it should be");
+    }
+
+    // The price list stays where people who came to compare will look.
+    let (status, _) = get(&state, "/pricing", None).await;
+    assert_eq!(status, StatusCode::OK, "/pricing still serves the catalogue");
+}
+
+/// Being a customer does not take the front page away from you.
+///
+/// The root used to redirect anybody with a session to `/dashboard`, so the
+/// homepage was unreachable for the people most likely to send somebody a
+/// link to it. It is served to everybody now, and the redirect moved to the
+/// two doors that only make sense signed out — which is what keeps the
+/// landing page's single "Start free trial" button correct for both visitors
+/// and customers.
+#[tokio::test]
+async fn a_signed_in_customer_still_gets_the_landing_page() {
+    let (state, _dir) = platform().await;
+    let (_account, cookie) = as_customer(&state).await;
+
+    let (status, body) = get(&state, "/", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK, "the homepage redirected a signed-in customer away");
+    assert!(body.contains("Everything"), "signed in, but not the landing page");
+
+    // Signup and sign-in send them on to their sites instead.
+    for path in ["/signup", "/dashboard/signin"] {
+        let (status, headers, _) = send(&state, "GET", path, Some(&cookie), None).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{path} did not redirect a signed-in customer");
+        assert_eq!(headers.get(header::LOCATION).unwrap(), "/dashboard", "{path}");
+    }
+
+    // Signed out, both still render their forms.
+    for path in ["/signup", "/dashboard/signin"] {
+        let (status, _) = get(&state, path, None).await;
+        assert_eq!(status, StatusCode::OK, "{path} broke for a signed-out visitor");
+    }
 }
 
 /// A colour scheme has to be rendered into `<html>` server-side, because there
@@ -768,7 +844,7 @@ async fn appearance_from(
 async fn a_signed_out_visitor_can_reach_the_switcher_everywhere() {
     let (state, _dir) = platform().await;
 
-    for path in ["/", "/pricing", "/signup", "/dashboard/signin", "/console/signin", "/forgot"] {
+    for path in ["/pricing", "/signup", "/dashboard/signin", "/console/signin", "/forgot"] {
         let (status, body) = get(&state, path, None).await;
         assert_eq!(status, StatusCode::OK, "{path}");
         assert!(

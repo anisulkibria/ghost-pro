@@ -183,7 +183,10 @@ mod tests {
 
         assert!(cfg["hostSettings"].is_object());
         assert!(cfg["hostSettings"]["limits"].is_object());
-        assert!(cfg["hostSettings"]["limits"]["members"]["max"].is_i64());
+        // Staff rather than members: members are uncapped on every shipped
+        // plan now, and this needs a ceiling that is actually present to
+        // prove the numbers survived as numbers.
+        assert!(cfg["hostSettings"]["limits"]["staff"]["max"].is_i64());
         assert_eq!(cfg["hostSettings"]["subscription"]["start"], "2026-01-01T00:00:00Z");
         assert_eq!(cfg["hostSettings"]["billing"]["url"], "https://b/billing");
     }

@@ -220,7 +220,7 @@ mod tests {
     use super::*;
 
     fn log_mailer() -> Mailer {
-        Mailer::new(MailConfig::default(), "Ghost Pro".into())
+        Mailer::new(MailConfig::default(), "Vuuut".into())
     }
 
     fn smtp_config() -> MailConfig {
@@ -288,14 +288,14 @@ mod tests {
             from_name: None,
             ..smtp_config()
         };
-        let mailer = Mailer::new(cfg, "Ghost Pro".into());
+        let mailer = Mailer::new(cfg, "Vuuut".into());
         assert_eq!(mailer.not_live_reason(), None, "a usable Gmail setup must read as live");
         assert!(mailer.is_live());
         // And it is what the message is actually sent from, with the platform
         // name standing in for the unset from-name.
         assert_eq!(
             mailer.from().unwrap().to_string(),
-            "Ghost Pro <du.shaheen@gmail.com>"
+            "Vuuut <du.shaheen@gmail.com>"
         );
     }
 
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn builds_a_from_header() {
-        let m = Mailer::new(smtp_config(), "Ghost Pro".into());
+        let m = Mailer::new(smtp_config(), "Vuuut".into());
         let from = m.from().unwrap();
         assert_eq!(from.email.to_string(), "hello@example.com");
         assert_eq!(from.name.as_deref(), Some("Example Hosting"));

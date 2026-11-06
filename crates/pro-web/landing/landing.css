@@ -1,0 +1,669 @@
+/* ===========================================================================
+   Vuuut — landing page
+   ---------------------------------------------------------------------------
+   Direction: editorial letterpress. The product hosts publications, so the
+   page is typeset like one — uncoated-paper ground, deep warm ink, hairline
+   rules, a numbered contents structure, and the Ghost brand pink used the way
+   a press uses a spot colour: rarely, and only where it must be seen.
+
+   Type is the platform's own stack, so this page and the dashboard read as
+   one product: Fraunces for display (variable, with the optical-size and
+   WONK axes actually driven), Outfit for text, Roboto Mono for labels.
+   =========================================================================== */
+
+:root {
+  /* Paper and ink. Not white — a warm bone, like uncoated stock. */
+  --paper:      #FBF7F2;
+  --paper-2:    #F4EDE4;
+  --paper-3:    #EDE4D8;
+  --ink:        #1A1416;
+  --ink-2:      #574A4E;
+  --ink-3:      #8A7B7F;
+  --rule:       #DED2C4;
+  --rule-soft:  #E8DFD3;
+
+  /* The spot colour. `--spot` is the brand pink and is for large type, fills
+     and rules; `--spot-deep` is its accessible sibling for small text on
+     paper, where the pink alone sits at about 3.9:1. */
+  --spot:       #FF1A75;
+  --spot-deep:  #A3003F;
+  --spot-wash:  #FFE8F0;
+
+  /* The dark slab. */
+  --slab:       #15100F;
+  --slab-2:     #221919;
+  --slab-ink:   #F6EFE6;
+  --slab-ink-2: #A99C96;
+
+  --display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+  --sans:    'Outfit', system-ui, -apple-system, sans-serif;
+  --mono:    'Roboto Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --shell: 1240px;
+  --gut: clamp(20px, 5vw, 64px);
+  --ease: cubic-bezier(.22, 1, .36, 1);
+
+  /* The handful of values that are not already a palette token, pulled out
+     so the dark scheme below is nothing but a list of variables. */
+  --ink-hover:    #2E2427;
+  --plan-shadow:  rgba(26, 20, 22, .45);
+  --grain-blend:  multiply;
+  --grain-op:     .5;
+  --ok:           #0B7A46;   /* the LIVE marker */
+  --ok-dot:       #11A15C;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.6;
+  font-weight: 350;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* Paper tooth. A turbulence tile multiplied over everything at very low
+   opacity — enough to kill the flatness of a solid fill, not enough to read
+   as a texture. Fixed, so it does not swim while the page scrolls. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: var(--grain-op);
+  mix-blend-mode: var(--grain-blend);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E");
+}
+
+::selection { background: var(--spot); color: #fff; }
+
+a { color: inherit; text-decoration: none; }
+h1, h2, h3, h4 { margin: 0; font-family: var(--display); font-weight: 600; }
+p { margin: 0; }
+ul, ol { margin: 0; padding: 0; list-style: none; }
+code { font-family: var(--mono); font-size: .88em; }
+
+.shell { width: 100%; max-width: var(--shell); margin-inline: auto; padding-inline: var(--gut); }
+.mono { font-family: var(--mono); font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; }
+.dim { color: var(--ink-3); }
+
+/* Visually hidden but still focusable and still announced — the billing
+   radios are operated through their labels but must stay reachable by
+   keyboard and by a screen reader. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.skip {
+  position: absolute; left: -9999px; top: 10px; z-index: 10000;
+  background: var(--ink); color: var(--paper); padding: 10px 18px; border-radius: 2px;
+}
+.skip:focus { left: 16px; }
+
+:where(a, button):focus-visible {
+  outline: 2px solid var(--spot-deep); outline-offset: 3px; border-radius: 2px;
+}
+
+/* ---------------------------------------------------------------- buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--sans); font-weight: 500; font-size: 15px; letter-spacing: -.01em;
+  padding: 13px 22px; border-radius: 2px; border: 1px solid transparent;
+  transition: transform .18s var(--ease), background .18s var(--ease),
+              color .18s var(--ease), box-shadow .18s var(--ease);
+  will-change: transform;
+}
+.btn svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform .22s var(--ease); }
+.btn:hover svg { transform: translateX(4px); }
+
+.btn-spot { background: var(--spot); color: #fff; box-shadow: 0 1px 0 var(--spot-deep); }
+.btn-spot:hover { background: #ED0062; transform: translateY(-2px); box-shadow: 0 6px 18px -6px rgba(255,26,117,.6), 0 1px 0 var(--spot-deep); }
+.btn-spot:active { transform: translateY(0); }
+
+.btn-ink { background: var(--ink); color: var(--paper); }
+.btn-ink:hover { background: var(--ink-hover); transform: translateY(-2px); }
+
+.btn-ghost { background: transparent; color: var(--ink); border-color: var(--rule); }
+.btn-ghost:hover { border-color: var(--ink); background: var(--ink); color: var(--paper); transform: translateY(-2px); }
+
+.btn.big { font-size: 17px; padding: 17px 30px; }
+
+.lnk { font-size: 15px; font-weight: 450; }
+.lnk-u {
+  position: relative; padding-bottom: 3px;
+  background-image: linear-gradient(var(--spot), var(--spot));
+  background-size: 100% 1.5px; background-repeat: no-repeat; background-position: 0 100%;
+  transition: background-size .3s var(--ease), color .2s var(--ease);
+}
+.lnk-u:hover { background-size: 0% 1.5px; background-position: 100% 100%; color: var(--spot-deep); }
+.lnk-u.light:hover { color: var(--spot); }
+
+hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 0; }
+
+/* -------------------------------------------------------------- masthead */
+.masthead {
+  position: sticky; top: 0; z-index: 100;
+  background: color-mix(in srgb, var(--paper) 86%, transparent);
+  backdrop-filter: saturate(1.4) blur(12px);
+  -webkit-backdrop-filter: saturate(1.4) blur(12px);
+  border-bottom: 1px solid transparent;
+  transition: border-color .25s var(--ease), background .25s var(--ease);
+}
+.masthead.stuck { border-bottom-color: var(--rule); }
+.masthead-in { display: flex; align-items: center; gap: 28px; height: 70px; }
+
+.logo { display: inline-flex; align-items: center; gap: 9px; font-family: var(--display); font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+/* Three arcs for the three u's in the name, stroked rather than filled —
+   the wordmark's own rhythm, pulled out as a mark. */
+.logo .mark { width: 32px; height: 25px; fill: none; stroke: var(--spot);
+  stroke-width: 2.6; stroke-linecap: round; }
+.logo em { font-style: italic; font-weight: 500; color: var(--spot);
+  font-variation-settings: 'WONK' 1; }
+
+.mast-nav { display: flex; gap: 26px; margin-left: auto; font-size: 14.5px; font-weight: 450; color: var(--ink-2); }
+.mast-nav a { position: relative; padding: 4px 0; transition: color .2s var(--ease); }
+.mast-nav a::after {
+  content: ''; position: absolute; left: 0; right: 100%; bottom: 0; height: 1.5px;
+  background: var(--spot); transition: right .28s var(--ease);
+}
+.mast-nav a:hover { color: var(--ink); }
+.mast-nav a:hover::after { right: 0; }
+
+.mast-act { display: flex; align-items: center; gap: 18px; }
+
+/* ------------------------------------------------------------------ hero */
+.hero { padding-top: clamp(48px, 9vw, 104px); }
+.hero-in {
+  display: grid; gap: clamp(36px, 5vw, 72px);
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, .75fr);
+  align-items: start;
+  padding-bottom: clamp(56px, 8vw, 104px);
+}
+
+.eyebrow {
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--spot-deep); display: flex; align-items: center; gap: 12px; margin-bottom: 26px;
+}
+.eyebrow .tick { width: 26px; height: 1px; background: var(--rule); display: inline-block; }
+
+h1 {
+  font-size: clamp(3.4rem, 9.2vw, 7.4rem);
+  line-height: .88;
+  letter-spacing: -.035em;
+  font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 0;
+  margin-bottom: 30px;
+}
+h1 em {
+  font-style: italic; color: var(--spot);
+  font-variation-settings: 'opsz' 144, 'SOFT' 40, 'WONK' 1;
+  /* The one place the pink is allowed to be loud. */
+}
+
+.lede { font-size: clamp(17px, 1.5vw, 20px); line-height: 1.55; color: var(--ink-2); max-width: 46ch; }
+
+.cta { display: flex; align-items: center; gap: 26px; flex-wrap: wrap; margin-top: 34px; }
+
+.hero-meta {
+  display: flex; gap: 40px; flex-wrap: wrap; margin: 46px 0 0;
+  padding-top: 24px; border-top: 1px solid var(--rule-soft);
+}
+.hero-meta dt { font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px; }
+.hero-meta dd { margin: 0; font-family: var(--display); font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
+
+/* -- the provisioning receipt ------------------------------------------- */
+.receipt {
+  position: relative;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 22px 24px 20px;
+  box-shadow: 14px 16px 0 -1px var(--paper-3), 14px 16px 0 0 var(--rule);
+  transform: rotate(-1.1deg);
+  margin-top: 14px;
+}
+.receipt-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px dashed var(--rule);
+}
+.receipt-head .mono { color: var(--spot-deep); }
+
+.steps { padding: 6px 0; }
+.steps li {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 7px 0; font-size: 15px; color: var(--ink-2);
+  opacity: 0;
+  animation: step-in .5s var(--ease) forwards;
+  animation-delay: var(--d);
+}
+.steps li .st { position: relative; padding-left: 20px; }
+.steps li .st::before {
+  content: ''; position: absolute; left: 0; top: .42em;
+  width: 9px; height: 9px; border-radius: 50%;
+  border: 1.5px solid var(--spot); background: var(--spot);
+}
+/* Durations are lowercase: `.mono` upper-cases by default, which turned
+   0.4s into 0.4S. */
+.steps li .ms { margin-left: auto; color: var(--ink-3); text-transform: none; letter-spacing: .04em; }
+
+@keyframes step-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.receipt-live {
+  display: flex; align-items: center; gap: 9px;
+  margin-top: 12px; padding-top: 14px; border-top: 1px dashed var(--rule);
+  font-size: 15px; font-weight: 500;
+  opacity: 0; animation: step-in .5s var(--ease) forwards; animation-delay: var(--d);
+}
+.receipt-live .mono { color: var(--ok); letter-spacing: .12em; }
+.receipt-live .dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--ok-dot); flex: none;
+  box-shadow: 0 0 0 0 rgba(17,161,92,.55); animation: pulse 2.2s infinite;
+}
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(17,161,92,.5); }
+  70%  { box-shadow: 0 0 0 9px rgba(17,161,92,0); }
+  100% { box-shadow: 0 0 0 0 rgba(17,161,92,0); }
+}
+
+/* Perforated bottom edge, like a tear-off docket. */
+.perf {
+  position: absolute; left: 0; right: 0; bottom: -7px; height: 7px;
+  background: radial-gradient(circle at 5px 0, transparent 0 5px, var(--paper) 5.5px) repeat-x;
+  background-size: 12px 7px;
+  filter: drop-shadow(0 1px 0 var(--rule));
+}
+
+/* --------------------------------------------------------------- marquee */
+.marquee {
+  border-block: 1px solid var(--rule);
+  background: var(--paper-2);
+  overflow: hidden;
+  padding: 13px 0;
+  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+}
+.marquee-in {
+  display: flex; align-items: center; gap: 26px; width: max-content;
+  animation: slide 46s linear infinite;
+}
+.marquee span { font-family: var(--mono); font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); white-space: nowrap; }
+.marquee i { color: var(--spot); font-style: normal; font-size: 10px; }
+@keyframes slide { to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .marquee-in { animation: none; } }
+
+/* -------------------------------------------------------------- sections */
+.sec { padding: clamp(72px, 11vw, 136px) 0; }
+
+.sec-head { max-width: 760px; margin-bottom: clamp(44px, 6vw, 72px); }
+.num {
+  color: var(--spot-deep); margin-bottom: 18px;
+  display: flex; align-items: center; gap: 12px;
+}
+.num::after { content: ''; flex: 1; max-width: 72px; height: 1px; background: var(--rule); }
+
+.sec h2 {
+  font-size: clamp(2.3rem, 5vw, 3.9rem); line-height: 1.02; letter-spacing: -.03em;
+  font-variation-settings: 'opsz' 96;
+}
+.sec-sub { margin-top: 20px; font-size: 18px; color: var(--ink-2); max-width: 54ch; }
+
+/* The feature grid: hairline-ruled cells, like a table in a printed spec. */
+.grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--rule); border-left: 1px solid var(--rule);
+}
+.cell {
+  border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+  padding: 34px 30px 36px;
+  position: relative;
+  transition: background .3s var(--ease);
+}
+.cell::after {
+  /* A spot rule that draws itself in on hover, left to right. */
+  content: ''; position: absolute; left: 0; top: -1px; height: 2px; width: 0;
+  background: var(--spot); transition: width .4s var(--ease);
+}
+.cell:hover { background: var(--paper-2); }
+.cell:hover::after { width: 100%; }
+
+.cell .ic { display: block; margin-bottom: 20px; color: var(--spot-deep); }
+.cell .ic svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.cell h3 { font-size: 21px; letter-spacing: -.015em; margin-bottom: 10px; font-variation-settings: 'opsz' 36; }
+.cell p { font-size: 15.5px; color: var(--ink-2); line-height: 1.6; }
+.cell code { background: var(--paper-3); padding: 1px 5px; border-radius: 2px; }
+
+/* ------------------------------------------------------------- dark slab */
+.slab {
+  background: var(--slab); color: var(--slab-ink);
+  padding: clamp(72px, 11vw, 132px) 0;
+  position: relative; overflow: hidden;
+}
+.slab::before {
+  /* A soft pink bloom, off-centre, so the slab is not a flat rectangle. */
+  content: ''; position: absolute; width: 760px; height: 760px;
+  right: -200px; top: -320px; pointer-events: none;
+  background: radial-gradient(circle, rgba(255,26,117,.22), transparent 66%);
+}
+.slab-in {
+  position: relative;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .92fr);
+  gap: clamp(40px, 6vw, 88px); align-items: center;
+}
+.slab .num { color: var(--spot); }
+.slab .num::after { background: rgba(255,255,255,.18); }
+.slab h2 {
+  font-size: clamp(2.3rem, 5vw, 3.9rem); line-height: 1.02; letter-spacing: -.03em;
+  font-variation-settings: 'opsz' 96; margin-bottom: 24px;
+}
+.slab h2 em { font-style: italic; color: var(--spot); font-variation-settings: 'opsz' 96, 'WONK' 1; }
+.slab-text p { color: var(--slab-ink-2); font-size: 17px; margin-bottom: 18px; max-width: 48ch; }
+.slab-text .lnk-u { display: inline-block; margin-top: 10px; color: var(--slab-ink); }
+
+/* -- the architecture diagram ------------------------------------------- */
+.diagram { margin: 0; text-align: center; }
+.edge {
+  display: inline-flex; flex-direction: column; gap: 4px; align-items: center;
+  border: 1px solid rgba(255,255,255,.22); border-radius: 3px;
+  padding: 14px 26px; background: var(--slab-2);
+}
+.edge .mono { color: var(--spot); }
+.edge-sub { color: var(--slab-ink-2); letter-spacing: .07em; font-size: 10.5px; }
+
+.fan { height: 54px; }
+.fan svg { width: 100%; height: 54px; }
+.fan path {
+  fill: none; stroke: rgba(255,255,255,.22); stroke-width: 1;
+  stroke-dasharray: 3 4;
+  animation: flow 1.4s linear infinite;
+}
+@keyframes flow { to { stroke-dashoffset: -14; } }
+@media (prefers-reduced-motion: reduce) { .fan path { animation: none; } }
+
+.nodes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.node {
+  border: 1px solid rgba(255,255,255,.16); border-radius: 3px;
+  background: var(--slab-2); padding: 14px 6px;
+  display: flex; flex-direction: column; gap: 3px; align-items: center;
+  animation: breathe 3.4s var(--ease) infinite; animation-delay: var(--d);
+}
+.node b { font-family: var(--display); font-size: 15px; font-weight: 600; }
+.node .mono { color: var(--slab-ink-2); font-size: 9.5px; }
+@keyframes breathe { 0%, 100% { border-color: rgba(255,255,255,.16); } 50% { border-color: rgba(255,26,117,.42); } }
+@media (prefers-reduced-motion: reduce) { .node { animation: none; } }
+
+.diagram figcaption { margin-top: 18px; color: var(--slab-ink-2); letter-spacing: .1em; }
+
+
+/* ------------------------------------------------------- billing switch
+   Two radios ahead of the cards and a sibling selector to pick which price
+   face shows. No script: the control works before landing.js has loaded, and
+   nothing here needs an inline style, which is what lets this page keep a
+   policy with no 'unsafe-inline'. */
+.billing { position: relative; }
+.billing-tabs {
+  display: inline-flex; gap: 4px; margin: 0 auto 34px; padding: 4px;
+  border: 1px solid var(--rule); border-radius: 999px; background: var(--paper-2);
+  position: relative; left: 50%; transform: translateX(-50%);
+}
+.billing-tabs label {
+  display: inline-flex; align-items: center; gap: 9px; cursor: pointer;
+  padding: 9px 20px; border-radius: 999px; font-size: 14.5px; font-weight: 500;
+  color: var(--ink-2); white-space: nowrap;
+  transition: background .22s var(--ease), color .22s var(--ease);
+}
+.billing-tabs label:hover { color: var(--ink); }
+.billing-tabs .save {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+  background: var(--spot); color: #fff; padding: 3px 7px 2px; border-radius: 999px;
+}
+#bill-monthly:checked ~ .billing-tabs label[for="bill-monthly"],
+#bill-yearly:checked  ~ .billing-tabs label[for="bill-yearly"] {
+  background: var(--ink); color: var(--paper);
+}
+/* The radios are visually hidden, so the focus ring has to be drawn on the
+   label the keyboard is actually on. */
+#bill-monthly:focus-visible ~ .billing-tabs label[for="bill-monthly"],
+#bill-yearly:focus-visible  ~ .billing-tabs label[for="bill-yearly"] {
+  outline: 2px solid var(--spot-deep); outline-offset: 2px;
+}
+
+/* One card carries both prices and both buttons; the switch decides which
+   pair is in the flow. `.p-year` starts hidden so the monthly face is what a
+   browser with no `:checked` support would show. */
+/* Scoped to `.plan` on purpose: `.price` sets `display: flex` further down
+   with the same weight, so a bare `.p-year` loses on source order and both
+   prices show at once. */
+.plan .p-year { display: none; }
+#bill-yearly:checked ~ .plans .plan .p-month { display: none; }
+#bill-yearly:checked ~ .plans .plan .price.p-year { display: flex; }
+#bill-yearly:checked ~ .plans .plan .price-note.p-year { display: block; }
+#bill-yearly:checked ~ .plans .plan .btn.p-year { display: inline-flex; }
+
+.price-note {
+  font-size: 12.5px; color: var(--ink-3); margin: -14px 0 20px;
+  font-variant-numeric: tabular-nums;
+}
+.feat li strong { font-weight: 600; color: var(--ink); }
+
+/* ----------------------------------------------------------------- plans */
+.plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: stretch; }
+
+.plan {
+  display: flex; flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--rule); border-radius: 3px;
+  padding: 30px 26px 28px;
+  position: relative;
+  transition: transform .3s var(--ease), box-shadow .3s var(--ease), border-color .3s var(--ease);
+}
+.plan:hover { transform: translateY(-5px); border-color: var(--ink-3); box-shadow: 0 18px 38px -22px var(--plan-shadow); }
+
+.plan.feature { border-color: var(--ink); box-shadow: 8px 9px 0 -1px var(--spot-wash), 8px 9px 0 0 var(--spot); }
+.plan.feature:hover { transform: translateY(-5px); box-shadow: 8px 14px 0 -1px var(--spot-wash), 8px 14px 0 0 var(--spot); }
+
+.flag {
+  position: absolute; top: -1px; right: 18px;
+  background: var(--spot); color: #fff; padding: 5px 11px 4px;
+  border-radius: 0 0 3px 3px; font-size: 10px; letter-spacing: .12em;
+}
+
+.plan h3 { font-size: 25px; letter-spacing: -.02em; font-variation-settings: 'opsz' 48; }
+.plan-desc { font-size: 14.5px; color: var(--ink-2); margin-top: 7px; min-height: 42px; line-height: 1.45; }
+
+.price {
+  font-family: var(--display); font-size: 52px; font-weight: 600; letter-spacing: -.045em;
+  line-height: 1; margin: 22px 0 24px; font-variation-settings: 'opsz' 100;
+  display: flex; align-items: baseline;
+}
+.price .cur { font-size: 25px; margin-right: 2px; color: var(--ink-2); }
+.price .per { font-family: var(--sans); font-size: 14px; font-weight: 400; letter-spacing: 0; color: var(--ink-3); margin-left: 7px; }
+
+.feat { border-top: 1px solid var(--rule-soft); padding-top: 18px; display: grid; gap: 9px; }
+.feat li { font-size: 14.5px; color: var(--ink-2); padding-left: 21px; position: relative; line-height: 1.45; }
+.feat li::before {
+  content: ''; position: absolute; left: 0; top: .48em;
+  width: 9px; height: 5px; border-left: 1.6px solid var(--spot); border-bottom: 1.6px solid var(--spot);
+  transform: rotate(-45deg);
+}
+
+/* The trial line and the button are one block, pushed to the foot of the
+   card — so the buttons line up across four plans whose feature lists are
+   different lengths, instead of each floating under its own list. */
+.trial { margin: 22px 0 14px; color: var(--spot-deep); letter-spacing: .1em; margin-top: auto; padding-top: 22px; }
+.trial.dim { color: var(--ink-3); }
+.plan .btn { justify-content: center; }
+
+.plans-foot { margin-top: 34px; font-size: 15px; color: var(--ink-2); text-align: center; }
+.plans-foot strong { font-weight: 600; color: var(--ink); }
+
+/* ----------------------------------------------------------------- close */
+.close { padding: clamp(80px, 12vw, 150px) 0; border-top: 1px solid var(--rule); text-align: center; }
+.close .eyebrow { justify-content: center; }
+.close h2 {
+  font-size: clamp(2.6rem, 7vw, 5.4rem); line-height: .96; letter-spacing: -.035em;
+  font-variation-settings: 'opsz' 144; margin-bottom: 38px;
+}
+.close-note { margin-top: 22px; color: var(--ink-3); }
+
+/* ---------------------------------------------------------------- footer */
+.foot { background: var(--slab); color: var(--slab-ink); padding: 64px 0 26px; }
+.foot-in { display: flex; gap: 56px; flex-wrap: wrap; justify-content: space-between; padding-bottom: 44px; }
+.foot .logo .mark { stroke: var(--spot); }
+.foot-brand p { margin-top: 12px; color: var(--slab-ink-2); font-size: 15px; max-width: 30ch; }
+.foot nav { display: flex; gap: 64px; flex-wrap: wrap; }
+.foot nav div { display: flex; flex-direction: column; gap: 10px; }
+.foot h4 { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--spot); font-weight: 500; margin-bottom: 4px; }
+.foot nav a { font-size: 15px; color: var(--slab-ink-2); transition: color .2s var(--ease); width: fit-content; }
+.foot nav a:hover { color: var(--slab-ink); }
+.foot-end { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.1); color: var(--slab-ink-2); }
+
+/* ------------------------------------------------------------- staggers
+   Held here rather than as `style="--d:…"` in the markup, so that the page's
+   Content-Security-Policy needs no `'unsafe-inline'` for styles. The console
+   next door ships a policy with no inline anything; this page should not be
+   the reason that bar drops. */
+.steps li:nth-child(1) { --d: .15s } .steps li:nth-child(2) { --d: .55s }
+.steps li:nth-child(3) { --d: .95s } .steps li:nth-child(4) { --d: 1.35s }
+.steps li:nth-child(5) { --d: 1.75s }
+.receipt-live { --d: 2.2s }
+
+.cell:nth-child(1) { --d: 0s }    .cell:nth-child(2) { --d: .06s }
+.cell:nth-child(3) { --d: .12s }  .cell:nth-child(4) { --d: .18s }
+.cell:nth-child(5) { --d: .24s }  .cell:nth-child(6) { --d: .3s }
+
+.node:nth-child(1) { --d: 0s }  .node:nth-child(2) { --d: .1s }
+.node:nth-child(3) { --d: .2s } .node:nth-child(4) { --d: .3s }
+
+.plan:nth-child(1) { --d: 0s }   .plan:nth-child(2) { --d: .07s }
+.plan:nth-child(3) { --d: .14s } .plan:nth-child(4) { --d: .21s }
+
+/* ------------------------------------------------------- reveal on scroll */
+.reveal { opacity: 0; transform: translateY(18px); }
+.reveal.in {
+  opacity: 1; transform: none;
+  transition: opacity .7s var(--ease) var(--d, 0s), transform .7s var(--ease) var(--d, 0s);
+}
+
+/* The hero reveals on load rather than on scroll — it is already in view. */
+.r1, .r2, .r3, .r4, .r5 { opacity: 0; animation: rise .85s var(--ease) forwards; }
+.r1 { animation-delay: .05s } .r2 { animation-delay: .14s } .r3 { animation-delay: .26s }
+.r4 { animation-delay: .38s } .r5 { animation-delay: .48s }
+@keyframes rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
+.receipt.r3 { animation-name: rise-tilt; }
+@keyframes rise-tilt { from { opacity: 0; transform: translateY(22px) rotate(-1.1deg); } to { opacity: 1; transform: rotate(-1.1deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .r1, .r2, .r3, .r4, .r5, .steps li, .receipt-live {
+    opacity: 1 !important; transform: none !important; animation: none !important; transition: none !important;
+  }
+  .receipt.r3 { transform: rotate(-1.1deg) !important; }
+}
+
+/* ------------------------------------------------------------ dark paper
+   Two ways in, because the platform has two sources of truth for this.
+
+   The console's appearance switcher writes a cookie, and the server renders
+   the choice onto `<html>` as `class="dark"`, `class="system"` or nothing at
+   all for light — the same attributes `view::document` writes, so a visitor
+   who picked dark in the dashboard gets dark here. `system` then defers to
+   the operating system. There is no script involved in either, which is why
+   the class has to come from the server rather than be worked out here.
+
+   Not an inversion: the metaphor moves from uncoated paper to ink, the
+   hairlines warm rather than grey, and the spot pink lightens so it keeps
+   its contrast on a dark ground. The slab and the footer sink below the page
+   instead of rising above it, so they still read as separate plates.
+
+   The declarations are written twice on purpose. They are all custom
+   properties, and there is no way to share one block between a class
+   selector and a media query without a preprocessor — which this page does
+   not have, and should not need. Keep the two lists in step. */
+:root.dark {
+  color-scheme: dark;
+  --paper:      #14100F;
+  --paper-2:    #1C1615;
+  --paper-3:    #271F1F;
+  --ink:        #F4EDE4;
+  --ink-2:      #B3A69F;
+  --ink-3:      #857872;
+  --rule:       #342B2A;
+  --rule-soft:  #2A2221;
+  /* On a dark ground the deep pink is the unreadable one, so the two swap
+     roles: the light tint carries small text, the brand pink keeps the fills
+     and the display type. */
+  --spot-deep:  #FF6BA1;
+  --spot-wash:  #3A0A1E;
+  --slab:       #0C0909;
+  --slab-2:     #171111;
+  --ink-hover:  #FFFFFF;
+  --plan-shadow: #000000;
+  /* Multiplying a noise tile into ink only makes mud; on a dark ground the
+     grain has to add light rather than take it away. */
+  --grain-blend: soft-light;
+  --grain-op:    .35;
+  --ok:          #4ADE8B;
+  --ok-dot:      #34D27A;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root.system {
+    color-scheme: dark;
+    --paper:      #14100F;
+    --paper-2:    #1C1615;
+    --paper-3:    #271F1F;
+    --ink:        #F4EDE4;
+    --ink-2:      #B3A69F;
+    --ink-3:      #857872;
+    --rule:       #342B2A;
+    --rule-soft:  #2A2221;
+    --spot-deep:  #FF6BA1;
+    --spot-wash:  #3A0A1E;
+    --slab:       #0C0909;
+    --slab-2:     #171111;
+    --ink-hover:  #FFFFFF;
+    --plan-shadow: #000000;
+    --grain-blend: soft-light;
+    --grain-op:    .35;
+    --ok:          #4ADE8B;
+    --ok-dot:      #34D27A;
+  }
+}
+
+/* ------------------------------------------------------------ responsive */
+@media (max-width: 1080px) {
+  .grid { grid-template-columns: repeat(2, 1fr); }
+}
+/* Three cards go straight to one column: two-up would leave an orphan, and
+   at this width three are already as narrow as the feature lists allow. */
+@media (max-width: 900px) {
+  .plans { grid-template-columns: 1fr; max-width: 460px; margin-inline: auto; }
+}
+@media (max-width: 920px) {
+  .hero-in { grid-template-columns: 1fr; }
+  .receipt { max-width: 440px; transform: rotate(-.8deg); }
+  .slab-in { grid-template-columns: 1fr; }
+  .mast-nav { display: none; }
+}
+@media (max-width: 700px) {
+  body { font-size: 16px; }
+  .masthead-in { height: 62px; gap: 14px; }
+  .mast-act { margin-left: auto; gap: 12px; }
+  .mast-act .lnk { display: none; }
+  .grid { grid-template-columns: 1fr; }
+  .plan-desc { min-height: 0; }
+  .hero-meta { gap: 26px; }
+  .nodes { grid-template-columns: repeat(2, 1fr); }
+  .fan { display: none; }
+  .foot-in { flex-direction: column; gap: 36px; }
+  .foot nav { gap: 40px; }
+}

@@ -321,7 +321,12 @@ async fn create_platform_integration(
         .header(reqwest::header::COOKIE, &cookie)
         .json(&serde_json::json!({
             "integrations": [{
-                "name": "Ghost Pro platform",
+                // A literal, like the name it replaced. It should really
+                // follow `platform.name`, so an operator who rebrands does
+                // not leave our name inside their customers' sites — but
+                // `NewSite` does not carry the setting, and only newly
+                // provisioned sites would pick it up anyway.
+                "name": "Vuuut platform",
                 "description": "Managed hosting. Usage figures and health checks. \
 Deleting this revokes the platform's access to this site.",
             }]

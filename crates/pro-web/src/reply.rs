@@ -67,6 +67,73 @@ fn harden(headers: &mut HeaderMap) {
     headers.insert("referrer-policy", HeaderValue::from_static("strict-origin-when-cross-origin"));
 }
 
+/// The marketing landing page, and the two files it asks for.
+///
+/// Served apart from [`html`] because it is the one page here that is not
+/// built by [`crate::view`]: it is a hand-authored static document under
+/// `landing/`, with its own stylesheet and a small progressive-enhancement
+/// script, so [`harden`]'s policy — which forbids scripts outright and
+/// allows only inline styles — would block both.
+///
+/// The answer is a second policy rather than a looser shared one. Everything
+/// behind a login keeps the strict version; this page, which has no session
+/// and no form but a search, gets exactly the two extra sources it needs,
+/// both `'self'`:
+///
+/// * `script-src 'self'` — `landing.js` only reveals sections on scroll. The
+///   page is complete without it.
+/// * `style-src 'self'` **without** `'unsafe-inline'`, which is strictly
+///   tighter than the console's own policy. The markup carries no `style`
+///   attribute; the animation stagger lives in the stylesheet so it does not
+///   have to.
+fn harden_landing(headers: &mut HeaderMap) {
+    headers.insert(
+        "content-security-policy",
+        HeaderValue::from_static(
+            "default-src 'none'; \
+             script-src 'self'; \
+             style-src 'self' https://fonts.googleapis.com; \
+             font-src https://fonts.gstatic.com; \
+             img-src 'self' data:; \
+             form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+        ),
+    );
+    headers.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    headers.insert("referrer-policy", HeaderValue::from_static("strict-origin-when-cross-origin"));
+}
+
+/// The landing document.
+pub fn landing(body: String) -> Response {
+    let mut response = (StatusCode::OK, body).into_response();
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
+    harden_landing(response.headers_mut());
+    response
+}
+
+/// One of the landing page's static assets.
+///
+/// Compiled in rather than read from disk, so the binary serves the same page
+/// wherever it is started from and a deployment is still one file.
+///
+/// `no-cache` means *revalidate*, not "do not store" — and it is the right
+/// answer while these live at a stable path with no digest in it. A
+/// `max-age` here buys a few kilobytes and costs a stale homepage for the
+/// length of it, on every browser that saw the old one, with no way to push
+/// the new one out. The two files are about 25 KB together; that is not a
+/// trade worth making. Put a digest in the path and this becomes
+/// `immutable`.
+pub fn landing_asset(body: &'static str, content_type: &'static str) -> Response {
+    let mut response = (StatusCode::OK, body).into_response();
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    response
+}
+
 /// A redirect, as a `303 See Other`.
 ///
 /// `303` rather than `302`, because every redirect here follows a POST: it
@@ -87,7 +154,7 @@ pub fn redirect(path: &str) -> Response {
         Err(e) => {
             tracing::error!("cannot redirect to {path:?}: {e}");
             return error_page(
-                &Chrome::plain("Ghost Pro"),
+                &Chrome::plain("Vuuut"),
                 &pro_core::ProError::internal(format!("invalid redirect target: {e}")),
             );
         }
@@ -268,7 +335,7 @@ mod tests {
     use super::*;
 
     fn chrome() -> Chrome {
-        Chrome::plain("Ghost Pro")
+        Chrome::plain("Vuuut")
     }
 
     #[test]

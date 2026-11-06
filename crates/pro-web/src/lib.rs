@@ -56,6 +56,11 @@ fn platform_routes() -> Router<AppState> {
     Router::new()
         // ---- public ------------------------------------------------------
         .route("/", get(public::home))
+        // The landing page's two static files. Named paths rather than a
+        // directory service: there are exactly two, they are compiled in, and
+        // a served directory is a wider door than this needs.
+        .route("/assets/landing.css", get(public::landing_css))
+        .route("/assets/landing.js", get(public::landing_js))
         .route("/pricing", get(public::pricing))
         .route("/signup", get(public::signup_form).post(public::signup))
         .route("/verify", get(public::verify))

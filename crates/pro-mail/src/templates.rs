@@ -233,13 +233,13 @@ mod tests {
     #[test]
     fn every_message_has_text_and_a_subject() {
         let all = vec![
-            verify_email("Ghost Pro", "a@b.co", "A", "https://pro/verify?t=1"),
-            site_ready("Ghost Pro", "a@b.co", "A", "https://alice.sites.example.com"),
-            reset_password("Ghost Pro", "a@b.co", "A", "https://pro/reset?t=1"),
-            domain_live("Ghost Pro", "a@b.co", "A", "blog.example.com"),
-            payment_failed("Ghost Pro", "a@b.co", "A", "https://pro/billing", 14),
-            site_suspended("Ghost Pro", "a@b.co", "A", "https://pro/billing"),
-            trial_ending("Ghost Pro", "a@b.co", "A", "https://pro/billing", 3),
+            verify_email("Vuuut", "a@b.co", "A", "https://pro/verify?t=1"),
+            site_ready("Vuuut", "a@b.co", "A", "https://alice.sites.example.com"),
+            reset_password("Vuuut", "a@b.co", "A", "https://pro/reset?t=1"),
+            domain_live("Vuuut", "a@b.co", "A", "blog.example.com"),
+            payment_failed("Vuuut", "a@b.co", "A", "https://pro/billing", 14),
+            site_suspended("Vuuut", "a@b.co", "A", "https://pro/billing"),
+            trial_ending("Vuuut", "a@b.co", "A", "https://pro/billing", 3),
         ];
         for m in &all {
             assert!(!m.subject.trim().is_empty());
@@ -253,7 +253,7 @@ mod tests {
     /// for anybody reading the plain part.
     #[test]
     fn links_appear_in_both_parts() {
-        let m = verify_email("Ghost Pro", "a@b.co", "A", "https://pro.example/verify?t=abc");
+        let m = verify_email("Vuuut", "a@b.co", "A", "https://pro.example/verify?t=abc");
         assert!(m.text.contains("https://pro.example/verify?t=abc"));
         assert!(m.html.as_ref().unwrap().contains("https://pro.example/verify?t=abc"));
     }
@@ -287,8 +287,8 @@ mod tests {
     /// stops a confused support ticket.
     #[test]
     fn site_ready_explains_the_two_passwords() {
-        let m = site_ready("Ghost Pro", "a@b.co", "A", "https://a.example.com");
-        assert!(m.text.contains("separate from your Ghost Pro account"));
+        let m = site_ready("Vuuut", "a@b.co", "A", "https://a.example.com");
+        assert!(m.text.contains("separate from your Vuuut account"));
     }
 
     /// The dunning messages have to be unambiguous that nothing is lost —

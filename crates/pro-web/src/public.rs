@@ -134,18 +134,46 @@ pub async fn appearance(
 
 /// The front page.
 ///
-/// Doubles as the pricing page, because a hosting platform's landing page and
-/// its pricing page want to say the same thing.
-pub async fn home(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
-) -> Response {
-    // Somebody already signed in wants their sites, not the sales page.
-    if auth::account(&state, &headers).await.is_ok() {
-        return reply::redirect("/dashboard");
-    }
-    pricing(State(state), headers, Query(query)).await
+/// The marketing landing page.
+///
+/// This used to be the pricing page under another name, on the reasoning that
+/// a hosting platform's landing page and its pricing page want to say the
+/// same thing. They do not: a price list answers "which one", and somebody
+/// arriving at the domain for the first time is still asking "what is this
+/// and why you". `/pricing` still serves the list for people who came to
+/// compare.
+///
+/// The document itself is authored as a static page under `landing/`, not
+/// built by [`crate::view`], so it can be lifted into a Ghost theme later
+/// with the markup intact.
+/// Served to everybody, signed in or not. The root used to bounce a signed-in
+/// visitor straight to `/dashboard`, which made the domain's homepage
+/// unreachable for the very people most likely to link to it. Signing in is
+/// not a reason to be unable to read the front page. The two doors that only
+/// make sense signed out — `/signup` and the sign-in form — do the bouncing
+/// instead, so a customer who clicks either still lands on their sites.
+pub async fn home(headers: HeaderMap) -> Response {
+    // The appearance choice is a cookie with no script to read it, so the
+    // scheme has to be rendered onto `<html>` here exactly as
+    // `view::document` does it for every other page — otherwise somebody who
+    // picked dark in the dashboard gets a white sheet at the front door.
+    let theme = auth::theme(&headers);
+    reply::landing(LANDING_HTML.replace(
+        "{{theme}}",
+        &format!("{} data-theme=\"{}\"", theme.html_class(), theme.as_str()),
+    ))
+}
+
+const LANDING_HTML: &str = include_str!("../landing/index.html");
+const LANDING_CSS: &str = include_str!("../landing/landing.css");
+const LANDING_JS: &str = include_str!("../landing/landing.js");
+
+pub async fn landing_css() -> Response {
+    reply::landing_asset(LANDING_CSS, "text/css; charset=utf-8")
+}
+
+pub async fn landing_js() -> Response {
+    reply::landing_asset(LANDING_JS, "text/javascript; charset=utf-8")
 }
 
 pub async fn pricing(
@@ -232,6 +260,12 @@ pub async fn signup_form(
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
+    // Already signed in: the landing page's "Start free trial" is the same
+    // button for everyone, so this is the point where a customer gets sent to
+    // their own sites rather than asked to create a second account.
+    if auth::account(&state, &headers).await.is_ok() {
+        return reply::redirect("/dashboard");
+    }
     let live = state.live();
     let theme = auth::theme(&headers);
 
@@ -447,6 +481,10 @@ pub async fn signin_form(
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
+    // Signing in again when you already are is a no-op worth skipping.
+    if auth::account(&state, &headers).await.is_ok() {
+        return reply::redirect("/dashboard");
+    }
     let card = view::form(
         "/dashboard/signin",
         &format!(
