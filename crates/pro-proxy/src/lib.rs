@@ -12,7 +12,7 @@
 //! sites than it has memory to run at once.
 //!
 //! TLS and certificate issuance live in the `pro` binary alongside the rest of
-//! the serving setup, for the same reason Ghost-rust keeps them in its own
+//! the serving setup, for the same reason Vuuut keeps them in its own
 //! `serve` module: it is the one place that has to own the listener.
 pub mod dns;
 pub mod forward;

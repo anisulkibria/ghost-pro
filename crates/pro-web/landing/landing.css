@@ -220,6 +220,7 @@ h1 em {
 }
 .hero-meta dt { font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px; }
 .hero-meta dd { margin: 0; font-family: var(--display); font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
+.hero-meta .billing-note { display: block; margin-top: 4px; font-family: var(--sans); font-size: 12px; font-weight: 400; color: var(--ink-3); letter-spacing: 0; }
 
 /* -- the provisioning receipt ------------------------------------------- */
 .receipt {
@@ -448,6 +449,7 @@ h1 em {
 #bill-yearly:checked ~ .plans .plan .price.p-year { display: flex; }
 #bill-yearly:checked ~ .plans .plan .price-note.p-year { display: block; }
 #bill-yearly:checked ~ .plans .plan .btn.p-year { display: inline-flex; }
+#bill-yearly:checked ~ .plans .plan .feat .p-year { display: list-item; }
 
 .price-note {
   font-size: 12.5px; color: var(--ink-3); margin: -14px 0 20px;

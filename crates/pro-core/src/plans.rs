@@ -1,6 +1,6 @@
 //! Plans, and the `hostSettings` block each one compiles into.
 //!
-//! This is the whole contract between the platform and a tenant. Ghost-rust
+//! This is the whole contract between the platform and a tenant. Vuuut
 //! already enforces host limits — `ghost_db::limits::Limits::load` reads
 //! `hostSettings.limits` out of the site's config and every create path checks
 //! against it. So the platform does not need to police tenants at the edge: it
@@ -74,7 +74,7 @@ pub struct Plan {
     /// Ceiling on active automations.
     #[serde(default)]
     pub max_automations: Option<i64>,
-    /// Emails per billing period, counted from the subscription's start date.
+    /// Emails per monthly anniversary, also on yearly subscriptions.
     #[serde(default)]
     pub max_emails_per_period: Option<i64>,
     /// Largest single upload, in bytes.
@@ -149,6 +149,15 @@ fn yes() -> bool {
 }
 
 impl Plan {
+    /// Old catalogues with an unset allowance adopt the tier default.
+    pub fn email_allowance(&self) -> i64 {
+        self.max_emails_per_period.unwrap_or_else(|| {
+            if self.slug.starts_with("business") { 100_000 }
+            else if self.slug.starts_with("creator") { 25_000 }
+            else { 5_000 }
+        }).max(0)
+    }
+
     /// Compile this plan into the `hostSettings` object a tenant's
     /// `config.production.json` carries.
     ///
@@ -226,7 +235,8 @@ impl Plan {
         // The one periodic limit. Dated from the subscription anniversary, so
         // a tenant's email allowance resets on their own billing day rather
         // than on the first of the month.
-        if let Some(max) = self.max_emails_per_period {
+        {
+            let max = self.email_allowance();
             limits.insert(
                 "emails".into(),
                 json!({
@@ -293,6 +303,7 @@ impl Plan {
             "billing": { "enabled": true, "url": billing_url },
             "subscription": { "start": subscription_start },
             "limits": Value::Object(limits),
+            "emailQuota": {"autoStop":true},
             // Named so an operator reading a tenant's config can see which
             // plan produced these numbers without consulting the database.
             "plan": { "slug": self.slug, "name": self.name },
@@ -339,7 +350,8 @@ impl Plan {
             Some(n) => format!("{n} staff users"),
             None => "Unlimited staff users".into(),
         });
-        if let Some(n) = self.max_emails_per_period {
+        {
+            let n = self.email_allowance();
             out.push(format!("{} emails / month", thousands(n)));
         }
         out.push(match self.max_custom_domains {
@@ -358,6 +370,16 @@ impl Plan {
         }
         if self.custom_integrations {
             out.push("Custom integrations & API access".into());
+        }
+        if self.social_web && self.custom_fields {
+            out.push("Social web & custom fields".into());
+        } else {
+            if self.social_web {
+                out.push("Social web".into());
+            }
+            if self.custom_fields {
+                out.push("Custom fields".into());
+            }
         }
         if self.analytics {
             out.push("Analytics".into());
@@ -411,16 +433,8 @@ pub fn bytes_display(bytes: i64) -> String {
 /// beside the slug to stay unambiguous. Two rows cost nothing and the rest of
 /// the platform already treats them as ordinary plans.
 ///
-/// Two ceilings are `None` everywhere **for now**. The platform does not
-/// send email yet: a tenant connects their own Mailgun in their site's
-/// settings and is billed by Mailgun, so there is no send quota to enforce
-/// and no cost to recover — and with nothing mailing a member list, a member
-/// ceiling would be charging for rows in somebody's database.
-///
-/// Both are expected back when the platform starts sending. The fields,
-/// `host_settings`' periodic-limit handling and the test that pins it are
-/// all left in place for that: turning metering on again is a matter of
-/// setting numbers here, not of rebuilding the machinery.
+/// Member lists are unlimited. Each tier has a monthly email allowance shared
+/// by newsletter and transactional sends, including on yearly subscriptions.
 pub fn default_plans() -> Vec<Plan> {
     vec![
         Plan {
@@ -431,24 +445,19 @@ pub fn default_plans() -> Vec<Plan> {
             interval: "month".into(),
             currency: "USD".into(),
             price_ids: BTreeMap::new(),
-            // Not metered while the platform sends no email; see the
-            // note on `default_plans`.
             max_members: None,
-            max_staff: Some(1),
+            max_staff: Some(3),
             max_newsletters: Some(1),
             max_automations: Some(3),
-            // Bring-your-own Mailgun for now, so there is no quota of ours
-            // to announce. Ghost draws a usage bar for every limit it is
-            // handed, and a bar for a ceiling nobody enforces is a lie.
-            max_emails_per_period: None,
+            max_emails_per_period: Some(5000),
             max_upload_bytes: Some(10 << 20),
             custom_themes: true,
             theme_allowlist: vec![],
-            custom_integrations: false,
+            custom_integrations: true,
             paid_memberships: true,
             analytics: true,
-            social_web: false,
-            custom_fields: false,
+            social_web: true,
+            custom_fields: true,
             public_site_access: true,
             max_custom_domains: 1,
             max_storage_bytes: Some(5 << 30),
@@ -459,21 +468,16 @@ pub fn default_plans() -> Vec<Plan> {
         Plan {
             slug: "creator".into(),
             name: "Creator".into(),
-            description: "Custom integrations and a small team behind it.".into(),
+            description: "A growing publication with a small team behind it.".into(),
             price_cents: 1500,
             interval: "month".into(),
             currency: "USD".into(),
             price_ids: BTreeMap::new(),
-            // Not metered while the platform sends no email; see the
-            // note on `default_plans`.
             max_members: None,
-            max_staff: Some(3),
+            max_staff: Some(7),
             max_newsletters: Some(3),
             max_automations: Some(10),
-            // Bring-your-own Mailgun for now, so there is no quota of ours
-            // to announce. Ghost draws a usage bar for every limit it is
-            // handed, and a bar for a ceiling nobody enforces is a lie.
-            max_emails_per_period: None,
+            max_emails_per_period: Some(25000),
             max_upload_bytes: Some(50 << 20),
             custom_themes: true,
             theme_allowlist: vec![],
@@ -497,16 +501,11 @@ pub fn default_plans() -> Vec<Plan> {
             interval: "month".into(),
             currency: "USD".into(),
             price_ids: BTreeMap::new(),
-            // Not metered while the platform sends no email; see the
-            // note on `default_plans`.
             max_members: None,
             max_staff: None,
             max_newsletters: None,
             max_automations: None,
-            // Bring-your-own Mailgun for now, so there is no quota of ours
-            // to announce. Ghost draws a usage bar for every limit it is
-            // handed, and a bar for a ceiling nobody enforces is a lie.
-            max_emails_per_period: None,
+            max_emails_per_period: Some(100000),
             max_upload_bytes: Some(100 << 20),
             custom_themes: true,
             theme_allowlist: vec![],
@@ -526,28 +525,23 @@ pub fn default_plans() -> Vec<Plan> {
             slug: "starter-yearly".into(),
             name: "Starter".into(),
             description: "A publication for one person, on your own domain.".into(),
-            price_cents: 7900,
+            price_cents: 8400,
             interval: "year".into(),
             currency: "USD".into(),
             price_ids: BTreeMap::new(),
-            // Not metered while the platform sends no email; see the
-            // note on `default_plans`.
             max_members: None,
-            max_staff: Some(1),
+            max_staff: Some(3),
             max_newsletters: Some(1),
             max_automations: Some(3),
-            // Bring-your-own Mailgun for now, so there is no quota of ours
-            // to announce. Ghost draws a usage bar for every limit it is
-            // handed, and a bar for a ceiling nobody enforces is a lie.
-            max_emails_per_period: None,
+            max_emails_per_period: Some(5000),
             max_upload_bytes: Some(10 << 20),
             custom_themes: true,
             theme_allowlist: vec![],
-            custom_integrations: false,
+            custom_integrations: true,
             paid_memberships: true,
             analytics: true,
-            social_web: false,
-            custom_fields: false,
+            social_web: true,
+            custom_fields: true,
             public_site_access: true,
             max_custom_domains: 1,
             max_storage_bytes: Some(5 << 30),
@@ -558,21 +552,16 @@ pub fn default_plans() -> Vec<Plan> {
         Plan {
             slug: "creator-yearly".into(),
             name: "Creator".into(),
-            description: "Custom integrations and a small team behind it.".into(),
-            price_cents: 12900,
+            description: "A growing publication with a small team behind it.".into(),
+            price_cents: 13200,
             interval: "year".into(),
             currency: "USD".into(),
             price_ids: BTreeMap::new(),
-            // Not metered while the platform sends no email; see the
-            // note on `default_plans`.
             max_members: None,
-            max_staff: Some(3),
+            max_staff: Some(7),
             max_newsletters: Some(3),
             max_automations: Some(10),
-            // Bring-your-own Mailgun for now, so there is no quota of ours
-            // to announce. Ghost draws a usage bar for every limit it is
-            // handed, and a bar for a ceiling nobody enforces is a lie.
-            max_emails_per_period: None,
+            max_emails_per_period: Some(25000),
             max_upload_bytes: Some(50 << 20),
             custom_themes: true,
             theme_allowlist: vec![],
@@ -592,20 +581,15 @@ pub fn default_plans() -> Vec<Plan> {
             slug: "business-yearly".into(),
             name: "Business".into(),
             description: "Unlimited hands, every feature, priority support.".into(),
-            price_cents: 39900,
+            price_cents: 39600,
             interval: "year".into(),
             currency: "USD".into(),
             price_ids: BTreeMap::new(),
-            // Not metered while the platform sends no email; see the
-            // note on `default_plans`.
             max_members: None,
             max_staff: None,
             max_newsletters: None,
             max_automations: None,
-            // Bring-your-own Mailgun for now, so there is no quota of ours
-            // to announce. Ghost draws a usage bar for every limit it is
-            // handed, and a bar for a ceiling nobody enforces is a lie.
-            max_emails_per_period: None,
+            max_emails_per_period: Some(100000),
             max_upload_bytes: Some(100 << 20),
             custom_themes: true,
             theme_allowlist: vec![],
@@ -712,20 +696,13 @@ mod tests {
         assert_eq!(hs["subscription"]["start"], "2026-03-04T00:00:00Z");
     }
 
-    /// While the platform sends no email, no shipped plan may announce an
-    /// email or member ceiling: Ghost draws a usage bar for every limit it is
-    /// handed, and a bar for a limit nobody enforces is a lie to the
-    /// customer.
-    ///
-    /// This is a guard on today's catalogue, not a rule forever — when
-    /// sending ships, set the numbers in `default_plans` and delete this.
     #[test]
-    fn nothing_shipped_meters_email_or_members() {
+    fn every_shipped_plan_has_a_monthly_email_allowance() {
         for plan in default_plans() {
-            let hs = plan.host_settings("2026-01-01T00:00:00Z", "https://pro.example/billing");
-            let limits = hs["limits"].as_object().unwrap();
-            assert!(!limits.contains_key("emails"), "{} meters email", plan.slug);
-            assert!(!limits.contains_key("members"), "{} caps members", plan.slug);
+            assert!(plan.email_allowance() > 0);
+            let host = plan.host_settings("2026-01-01T00:00:00Z", "https://pro.example/billing");
+            assert_eq!(host["limits"]["emails"]["maxPeriodic"], plan.email_allowance());
+            assert!(!host["limits"].as_object().unwrap().contains_key("members"));
         }
     }
 
@@ -750,6 +727,8 @@ mod tests {
             assert_eq!(monthly.name, yearly.name, "{slug}: shown under one name");
             assert_eq!(monthly.max_storage_bytes, yearly.max_storage_bytes, "{slug}: storage");
             assert_eq!(monthly.max_staff, yearly.max_staff, "{slug}: staff");
+            let staff = match slug { "starter" => Some(3), "creator" => Some(7), _ => None };
+            assert_eq!(monthly.max_staff, staff, "{slug}: staff allowance");
             assert_eq!(monthly.custom_themes, yearly.custom_themes, "{slug}: themes");
 
             // Paying for a year costs less than paying twelve times.
@@ -782,15 +761,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn all_public_plans_include_integrations_social_payments_and_analytics() {
+        for plan in default_plans() {
+            let host = plan.host_settings("2026-01-01T00:00:00Z", "https://pro.example/billing");
+            for name in ["customIntegrations", "limitSocialWeb", "limitCustomFields", "limitStripeConnect", "limitAnalytics"] {
+                assert!(host["limits"][name].is_null(), "{} restricts {name}", plan.slug);
+            }
+            let features = plan.features();
+            for feature in ["Custom integrations & API access", "Social web & custom fields", "Paid memberships via Stripe", "Analytics"] {
+                assert!(features.iter().any(|f| f == feature), "{} is missing {feature}", plan.slug);
+            }
+        }
+    }
+
     /// A feature a plan does not grant has to be sent as a disabled flag, not
     /// left out — absent means "allowed" to the site.
     ///
-    /// Starter is the subject because it is the one tier that withholds
-    /// anything. It does now ship custom themes, so the pair tested here is
-    /// the social web and custom integrations.
+    /// Explicit restrictions on a custom catalogue must still work even
+    /// though every shipped tier includes these features.
     #[test]
     fn withheld_features_are_disabled() {
-        let starter = default_plans().into_iter().find(|p| p.slug == "starter").unwrap();
+        let mut starter = default_plans().into_iter().find(|p| p.slug == "starter").unwrap();
+        starter.social_web = false;
+        starter.custom_integrations = false;
         let hs = starter.host_settings("2026-01-01T00:00:00Z", "https://pro.example/billing");
         assert_eq!(hs["limits"]["limitSocialWeb"]["disabled"], true);
         assert_eq!(hs["limits"]["customIntegrations"]["disabled"], true);

@@ -1,9 +1,8 @@
 //! `pro-mail` — the transactional mail the *platform* sends.
 //!
 //! Confirm your address, your site is ready, your card was declined. Nothing
-//! to do with the newsletters a tenant sends: those go through that tenant's
-//! own Ghost mail configuration, deliberately separate so one customer's
-//! sending reputation cannot be spent by another's.
+//! to do with rendering tenant newsletters: each CMS handles that itself,
+//! using its own credentials or the platform-managed SES/Mailgun policy.
 //!
 //! The `log` transport is the default, and is what development should use. It
 //! writes the whole message — including any link — to the platform log, so a
@@ -44,7 +43,13 @@ fn present(value: &Option<String>) -> Option<&str> {
 }
 
 impl Mailer {
-    pub fn new(config: MailConfig, platform_name: String) -> Self {
+    pub fn new(mut config: MailConfig, platform_name: String) -> Self {
+        if config.transport == "ses" {
+            config.host = config.ses_smtp_host();
+            config.port = Some(587);
+            config.user = config.ses.user.clone();
+            config.pass = config.ses.pass.clone();
+        }
         Self { config, platform_name }
     }
 
@@ -90,7 +95,7 @@ impl Mailer {
     /// [`Self::from`] *after* the customer has been told to check their
     /// inbox, which is the same broken promise arriving by a longer route.
     pub fn not_live_reason(&self) -> Option<String> {
-        if self.config.transport != "smtp" {
+        if !matches!(self.config.transport.as_str(), "smtp" | "ses") {
             return Some(format!(
                 "mail.transport is {:?}, so messages are written to the platform log \
                  instead of being sent",
@@ -99,6 +104,11 @@ impl Mailer {
         }
 
         let mut missing: Vec<&str> = Vec::new();
+        if self.config.transport == "ses" {
+            if self.config.ses_smtp_host().is_none() { missing.push("mail.ses.region or mail.ses.endpoint"); }
+            if blank(&self.config.user) { missing.push("mail.ses.user"); }
+            if blank(&self.config.pass) { missing.push("mail.ses.pass"); }
+        }
         if blank(&self.config.host) {
             missing.push("mail.host");
         }
@@ -109,8 +119,9 @@ impl Mailer {
             return None;
         }
         Some(format!(
-            "mail.transport is \"smtp\" but {} {} not set, so messages are written to \
+            "mail.transport is {:?} but {} {} not set, so messages are written to \
              the platform log instead of being sent",
+            self.config.transport,
             missing.join(" and "),
             if missing.len() == 1 { "is" } else { "are" },
         ))
@@ -233,6 +244,7 @@ mod tests {
             from_address: Some("hello@example.com".into()),
             from_name: Some("Example Hosting".into()),
             reply_to: Some("help@example.com".into()),
+            ..MailConfig::default()
         }
     }
 
@@ -390,4 +402,23 @@ mod tests {
         let cfg = MailConfig { from_address: Some("not an address".into()), ..smtp_config() };
         assert!(Mailer::new(cfg, "P".into()).from().is_err());
     }
+
+    #[test]
+    fn ses_requires_its_own_regional_smtp_credentials() {
+        let mut cfg = smtp_config();
+        cfg.transport = "ses".into();
+        cfg.ses = pro_core::config::SesConfig { endpoint: None, max_send_rate: None, region: Some("eu-west-1".into()), user: Some("ses-user".into()), pass: Some("ses-password".into()) };
+        let mailer = Mailer::new(cfg.clone(), "Vuuut".into());
+        assert!(mailer.is_live());
+        assert_eq!(mailer.config.host.as_deref(), Some("email-smtp.eu-west-1.amazonaws.com"));
+        assert_eq!(mailer.config.port, Some(587));
+        assert_eq!(mailer.config.user.as_deref(), Some("ses-user"));
+        cfg.ses.endpoint = Some("example.fips.region.mail-manager-smtp.amazonaws.com".into());
+        let mailer = Mailer::new(cfg.clone(), "Vuuut".into());
+        assert_eq!(mailer.config.host.as_deref(), cfg.ses.endpoint.as_deref());
+        assert!(mailer.is_live());
+        cfg.ses.pass = None;
+        assert!(Mailer::new(cfg, "Vuuut".into()).not_live_reason().unwrap().contains("mail.ses.pass"));
+    }
+
 }

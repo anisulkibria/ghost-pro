@@ -27,6 +27,10 @@ pub async fn run_jobs(state: AppState) {
         tracing::error!("could not recover interrupted jobs: {e}");
     }
 
+    // Reconcile existing sites with file/console settings after deployment or a restart.
+    if let Err(e) = pro_db::jobs::enqueue_unique(&state.db, "sync_tenant_mail", None, serde_json::json!({})).await {
+        tracing::error!("could not queue tenant mail reconciliation: {e}");
+    }
     loop {
         match pro_db::jobs::claim(&state.db).await {
             Ok(Some(job)) => {
@@ -63,6 +67,8 @@ pub async fn run_jobs(state: AppState) {
 
 async fn run_job(state: &AppState, job: &pro_db::jobs::Job) -> Result<()> {
     match job.kind.as_str() {
+        "sync_tenant_mail" => sync_tenant_mail_job(state, job).await,
+        "apply_tenant_mail" => apply_tenant_mail_job(state, job).await,
         "verify_domain" => verify_domain_job(state, job).await,
         "backup_tenant" => backup_job(state, job).await,
         "restore_tenant" => restore_job(state, job).await,
@@ -75,6 +81,54 @@ async fn run_job(state: &AppState, job: &pro_db::jobs::Job) -> Result<()> {
             Ok(())
         }
     }
+}
+
+async fn sync_tenant_mail_job(state: &AppState, _job: &pro_db::jobs::Job) -> Result<()> {
+    let mut offset = 0;
+    loop {
+        let tenants = pro_db::tenants::list(&state.db, None, None, 100, offset).await?;
+        if tenants.is_empty() { break; }
+        offset += tenants.len() as i64;
+        for tenant in tenants {
+            if matches!(tenant.status, TenantStatus::Deleted | TenantStatus::Failed) { continue; }
+            // Individual durable jobs let one damaged site retry without holding
+            // back credentials or credential revocation for every other tenant.
+            pro_db::jobs::enqueue(&state.db, "apply_tenant_mail", Some(&tenant.id), serde_json::json!({})).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn apply_tenant_mail_job(state: &AppState, job: &pro_db::jobs::Job) -> Result<()> {
+    let id = job.tenant_id.as_deref().ok_or_else(|| pro_core::ProError::BadRequest("mail job has no tenant".into()))?;
+    let tenant = pro_db::tenants::get(&state.db, id).await?;
+    if matches!(tenant.status, TenantStatus::Deleted | TenantStatus::Failed) { return Ok(()); }
+    if tenant.status == TenantStatus::Provisioning {
+        return Err(pro_core::ProError::Unavailable("Tenant is still provisioning; retry mail settings when it is ready".into()));
+    }
+    let live = state.live();
+    let mut mail = live.mail();
+    mail.auto_stop_at_limit = pro_db::email_usage::policy(&state.db, &tenant.id).await?.unwrap_or(mail.auto_stop_at_limit);
+    mail.validate_managed()?;
+    let allowance = if tenant.status == TenantStatus::Suspended { 0 } else { live.plan(&tenant.plan_slug).map(|p|p.email_allowance()).unwrap_or(0) };
+    let feature_plan = if tenant.status == TenantStatus::Suspended {
+        Some(pro_core::plans::suspended_plan())
+    } else {
+        live.plan(&tenant.plan_slug)
+    };
+    let dir = state.config.tenant_dir(&tenant.id);
+    let changed = pro_provision::config_file::update(&dir, &state.config.tenants.env, |body| {
+        pro_provision::config_file::apply_managed_mail(body, &mail);
+        pro_provision::config_file::apply_email_allowance(body, allowance);
+        if let Some(plan) = &feature_plan {
+            pro_provision::config_file::apply_plan_access(body, plan);
+        }
+    }).await?;
+    // Retry a failed restart even if the previous attempt already wrote the file.
+    if (changed || job.attempts > 1) && state.supervisor.is_running(&tenant.id) {
+        state.supervisor.restart(&tenant).await?;
+    }
+    Ok(())
 }
 
 async fn verify_domain_job(state: &AppState, job: &pro_db::jobs::Job) -> Result<()> {
@@ -264,6 +318,13 @@ async fn restore_job(state: &AppState, job: &pro_db::jobs::Job) -> Result<()> {
     )
     .await?;
 
+    // Backups omit operator credentials. Reapply the current policy before
+    // making the restored site available, including a rotation since the backup.
+    let dir = state.config.tenant_dir(&tenant.id);
+    pro_provision::config_file::update(&dir, &state.config.tenants.env, |body| {
+        pro_provision::config_file::apply_managed_mail(body, &state.live().mail());
+    }).await?;
+
     // A restored site comes back active: whatever scheduled its deletion or
     // suspension is a fact about the lost directory, not about this one.
     pro_db::tenants::clear_deletion(&state.db, &tenant.id).await?;
@@ -331,6 +392,7 @@ async fn sample_usage_job(state: &AppState, job: &pro_db::jobs::Job) -> Result<(
         }
         _ => None,
     };
+    if let Some(counts) = &counts { pro_db::email_usage::record(&state.db, &tenant.id, &counts.email_report).await?; }
     let previous = pro_db::usage::latest(&state.db, &tenant.id).await?;
     pro_db::usage::record(
         &state.db,
@@ -349,6 +411,7 @@ struct TenantCounts {
     members: i64,
     posts: i64,
     emails: i64,
+    email_report: serde_json::Value,
 }
 
 /// Ask a running tenant how much it holds, over its own Admin API.
@@ -362,7 +425,7 @@ async fn tenant_usage(
     port: u16,
     key_id: &str,
     key_secret: &str,
-    period_start: &str,
+    _period_start: &str,
 ) -> Option<TenantCounts> {
     let token = mint_admin_token(key_id, key_secret)?;
 
@@ -409,31 +472,11 @@ async fn tenant_usage(
         body["meta"]["pagination"]["total"].as_i64().unwrap_or(0)
     };
 
-    // Emails: recipients since the billing period began, which is the same
-    // window the plan's email ceiling is enforced over — so the meter shows
-    // what the limit actually counts.
-    let emails: i64 = {
-        let from = period_start.get(..10).unwrap_or(period_start);
-        let to = pro_core::now_iso();
-        let to = to.get(..10).unwrap_or("");
-        let body: serde_json::Value = client
-            .get(format!("{base}/stats/newsletter-stats/?date_from={from}&date_to={to}"))
-            .header("Authorization", &auth)
-            .send()
-            .await
-            .ok()?
-            .error_for_status()
-            .ok()?
-            .json()
-            .await
-            .ok()?;
-        body["stats"]
-            .as_array()
-            .map(|rows| rows.iter().map(|r| r["sent"].as_i64().unwrap_or(0)).sum())
-            .unwrap_or(0)
-    };
+    let email_report: serde_json::Value = client.get(format!("{base}/email_usage/"))
+        .header("Authorization", &auth).send().await.ok()?.error_for_status().ok()?.json::<serde_json::Value>().await.ok()?["email_usage"].clone();
+    let emails = email_report["sent"].as_i64()?;
 
-    Some(TenantCounts { members, posts, emails })
+    Some(TenantCounts { members, posts, emails, email_report })
 }
 
 /// Mint the short-lived token the Admin API expects, in Ghost's own shape.
@@ -442,7 +485,7 @@ async fn tenant_usage(
 /// signing the hex text would produce a token every Ghost client rejects —
 /// and `aud` names the API being called, which is what stops a Content API
 /// token being replayed here.
-fn mint_admin_token(key_id: &str, key_secret: &str) -> Option<String> {
+pub(crate) fn mint_admin_token(key_id: &str, key_secret: &str) -> Option<String> {
     use base64::Engine;
     use hmac::{Hmac, Mac};
     use sha2::Sha256;

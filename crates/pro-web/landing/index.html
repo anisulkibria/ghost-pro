@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Vuuut — managed Ghost hosting for publications</title>
-<meta name="description" content="Managed Ghost hosting. Your publication on your own domain, with certificates, backups, upgrades and email delivery handled. One isolated process per site. From $9 a month.">
+<meta name="description" content="Managed Ghost hosting. Your publication on your own domain, with certificates, backups, upgrades and email delivery handled. One isolated process per site. From $7 a month, billed yearly.">
 <link rel="canonical" href="/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Vuuut — managed Ghost hosting for publications">
@@ -56,11 +56,11 @@
           and start.
         </p>
         <div class="cta r4">
-          <a class="btn btn-spot" href="/signup">Create your publication<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h12M13 6l6 6-6 6"/></svg></a>
+          <a class="btn btn-spot" href="/signup?plan=starter-yearly">Create your publication<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h12M13 6l6 6-6 6"/></svg></a>
           <a class="lnk lnk-u" href="#plans">See the plans</a>
         </div>
         <dl class="hero-meta r5">
-          <div><dt>From</dt><dd>$9 / month</dd></div>
+          <div><dt>From</dt><dd>$7 / month<span class="billing-note">Billed yearly</span></dd></div>
           <div><dt>Members</dt><dd>No ceiling</dd></div>
           <div><dt>Setup</dt><dd>Under a minute</dd></div>
         </dl>
@@ -133,10 +133,10 @@
         </article>
         <article class="cell reveal">
           <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span>
-          <h3>Bring your own Mailgun</h3>
-          <p>Newsletters send through your own Mailgun account, at Mailgun's prices.
-            No markup from us, no send quota, and the sending reputation is yours
-            to keep.</p>
+          <h3>Email sending included</h3>
+          <p>Newsletters and everyday email run through Amazon SES or Mailgun.
+            Every plan includes a monthly sending allowance, clear usage tracking,
+            and protection against unexpected sends beyond your volume.</p>
         </article>
         <article class="cell reveal">
           <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 20V9m5 11V4m5 16v-7m5 7V7"/></svg></span>
@@ -203,7 +203,7 @@
         <p class="num mono">03</p>
         <h2>Plans</h2>
         <p class="sec-sub">Every plan is the whole of Ghost, custom themes included. What
-          changes is the room you have and how many hands are on it. Cancel whenever.</p>
+          changes is your storage, team size, and monthly email allowance. Cancel whenever.</p>
       </div>
 
       <!-- The billing switch is two radios and a sibling selector: no script,
@@ -211,26 +211,30 @@
            no inline styles. Mirrors pro_core::plans::default_plans(), where
            each tier is sold as a monthly and a yearly plan. -->
       <div class="billing reveal">
-        <input class="sr-only" type="radio" name="billing" id="bill-monthly" checked>
-        <input class="sr-only" type="radio" name="billing" id="bill-yearly">
+        <input class="sr-only" type="radio" name="billing" id="bill-monthly">
+        <input class="sr-only" type="radio" name="billing" id="bill-yearly" checked>
         <div class="billing-tabs" role="group" aria-label="Billing period">
           <label for="bill-monthly">Monthly</label>
-          <label for="bill-yearly">Yearly<span class="save">Save up to 32%</span></label>
+          <label for="bill-yearly">Yearly<span class="save">Save up to 33%</span></label>
         </div>
 
         <div class="plans">
           <article class="plan">
             <header><h3>Starter</h3><p class="plan-desc">A publication for one person, on your own domain.</p></header>
             <p class="price p-month"><span class="cur">$</span>9<span class="per">/month</span></p>
-            <p class="price p-year"><span class="cur">$</span>79<span class="per">/year</span></p>
+            <p class="price p-year"><span class="cur">$</span>7<span class="per">/month</span></p>
             <p class="price-note p-month">$108 a year, billed monthly</p>
-            <p class="price-note p-year">$6.58 a month · you keep $29</p>
+            <p class="price-note p-year">$84 billed yearly · you keep $24</p>
             <ul class="feat">
               <li>5 GB storage</li>
               <li>Unlimited members</li>
-              <li>1 staff user</li>
+              <li class="p-month"><strong>{{email_starter}} emails / month</strong></li>
+              <li class="p-year"><strong>{{email_starter-yearly}} emails / month</strong></li>
+              <li>3 staff users</li>
               <li>Custom domain</li>
               <li><strong>Custom themes</strong></li>
+              <li><strong>Custom integrations &amp; API access</strong></li>
+              <li>Social web &amp; custom fields</li>
               <li>Paid memberships via Stripe</li>
               <li>Analytics</li>
             </ul>
@@ -241,15 +245,17 @@
 
           <article class="plan feature">
             <span class="flag mono">Most chosen</span>
-            <header><h3>Creator</h3><p class="plan-desc">Custom integrations and a small team behind it.</p></header>
+            <header><h3>Creator</h3><p class="plan-desc">A growing publication with a small team behind it.</p></header>
             <p class="price p-month"><span class="cur">$</span>15<span class="per">/month</span></p>
-            <p class="price p-year"><span class="cur">$</span>129<span class="per">/year</span></p>
+            <p class="price p-year"><span class="cur">$</span>11<span class="per">/month</span></p>
             <p class="price-note p-month">$180 a year, billed monthly</p>
-            <p class="price-note p-year">$10.75 a month · you keep $51</p>
+            <p class="price-note p-year">$132 billed yearly · you keep $48</p>
             <ul class="feat">
               <li>15 GB storage</li>
               <li>Unlimited members</li>
-              <li>3 staff users</li>
+              <li class="p-month"><strong>{{email_creator}} emails / month</strong></li>
+              <li class="p-year"><strong>{{email_creator-yearly}} emails / month</strong></li>
+              <li>7 staff users</li>
               <li>2 custom domains</li>
               <li>Custom themes</li>
               <li><strong>Custom integrations &amp; API access</strong></li>
@@ -265,18 +271,21 @@
           <article class="plan">
             <header><h3>Business</h3><p class="plan-desc">Unlimited hands, every feature, priority support.</p></header>
             <p class="price p-month"><span class="cur">$</span>49<span class="per">/month</span></p>
-            <p class="price p-year"><span class="cur">$</span>399<span class="per">/year</span></p>
+            <p class="price p-year"><span class="cur">$</span>33<span class="per">/month</span></p>
             <p class="price-note p-month">$588 a year, billed monthly</p>
-            <p class="price-note p-year">$33.25 a month · you keep $189</p>
+            <p class="price-note p-year">$396 billed yearly · you keep $192</p>
             <ul class="feat">
               <li>50 GB storage</li>
               <li>Unlimited members</li>
+              <li class="p-month"><strong>{{email_business}} emails / month</strong></li>
+              <li class="p-year"><strong>{{email_business-yearly}} emails / month</strong></li>
               <li>Unlimited staff users</li>
               <li>10 custom domains</li>
               <li>Custom themes</li>
-              <li>Custom integrations &amp; API access</li>
+              <li><strong>Custom integrations &amp; API access</strong></li>
               <li>Social web &amp; custom fields</li>
               <li>Paid memberships via Stripe</li>
+              <li>Analytics</li>
               <li><strong>Priority support</strong></li>
             </ul>
             <p class="trial mono">Cancel anytime</p>
@@ -289,6 +298,8 @@
       <p class="plans-foot reveal">
         Prices in USD. Memberships are billed through <strong>your</strong> Stripe
         account — we never take a cut of what your readers pay you.
+        Email allowances reset monthly, including on yearly plans. Each newsletter
+        recipient and transactional message counts as one email. Upgrade for more volume.
       </p>
     </div>
   </section>

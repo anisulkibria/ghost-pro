@@ -59,6 +59,7 @@ pub mod tenants;
 pub mod tokens;
 pub mod unique;
 pub mod usage;
+pub mod email_usage;
 
 pub use pool::{open, open_in_memory, Db};
 pub use settings::SettingsStore;

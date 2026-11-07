@@ -23,6 +23,7 @@ impl SettingsStore {
     pub async fn load(pool: &Db, config: Arc<Config>) -> Result<Self> {
         let overrides = read_all(pool).await?;
         let effective = Arc::new(Effective::new(config.clone(), overrides));
+        effective.mail().validate_managed()?;
         Ok(Self { config, current: RwLock::new(effective) })
     }
 
@@ -77,6 +78,22 @@ impl SettingsStore {
             self.check_provider_switch(provider, changes)?;
         }
 
+        if changes.iter().any(|(key, _)| key.starts_with("mail.")) {
+            let mut merged = self.current().overrides().clone();
+            for (key, value) in changes {
+                match value { Some(value) => { merged.insert(key.clone(), value.clone()); }, None => { merged.remove(key); } }
+            }
+            Effective::new(self.config.clone(), merged).mail().validate_managed()?;
+        }
+
+        if let Some(Some(limits)) = changes.iter().find(|(key,_)| key == "billing.emailLimits").map(|(_,value)| value) {
+            let object = limits.as_object().ok_or_else(|| ProError::BadRequest("Email allowances must be a plan map".into()))?;
+            for (slug, value) in object {
+                if self.config.plan(slug).is_none() || !value.as_i64().is_some_and(|n| (0..=1_000_000_000).contains(&n)) {
+                    return Err(ProError::BadRequest("Email allowances require a known plan and a whole number from 0 to 1000000000".into()));
+                }
+            }
+        }
         let now = pro_core::now_iso();
         let mut tx = pool.begin().await.db_err()?;
         for (key, value) in changes {
@@ -450,4 +467,39 @@ mod tests {
         // Every setting is still listed for an admin, just locked.
         assert_eq!(admin_view.len(), owner_view.len());
     }
+
+    #[tokio::test]
+    async fn managed_email_requires_complete_credentials_and_allows_switching_back() {
+        let (pool, store) = fixture().await;
+        let incomplete = [("mail.tenantProvider".into(), Some(json!("ses")))];
+        assert!(store.save(&pool, &incomplete, StaffRole::Admin, "staff:admin").await.is_err());
+        assert_eq!(store.current().mail().tenant_provider, "tenant");
+        let changes = [
+            ("mail.tenantProvider".into(), Some(json!("ses"))),
+            ("mail.ses.region".into(), Some(json!("us-east-1"))),
+            ("mail.ses.user".into(), Some(json!("ses-user"))),
+            ("mail.ses.pass".into(), Some(json!("ses-password"))),
+            ("mail.fromAddress".into(), Some(json!("verified@example.test"))),
+        ];
+        store.save(&pool, &changes, StaffRole::Admin, "staff:admin").await.unwrap();
+        let mail = store.current().mail();
+        assert_eq!(mail.managed_mail().unwrap()["newsletter_transport"], "ses");
+        let broken = [("mail.ses.region".into(), Some(json!("")))];
+        assert!(store.save(&pool, &broken, StaffRole::Admin, "staff:admin").await.is_err());
+        assert_eq!(store.current().mail().ses.region.as_deref(), Some("us-east-1"));
+        for item in view_for(&store.current(), StaffRole::Admin) {
+            assert_ne!(item.value, "ses-password");
+            assert_ne!(item.value, "ses-user");
+        }
+        let changes = [
+            ("mail.tenantProvider".into(), Some(json!("mailgun"))),
+            ("mail.mailgun.apiKey".into(), Some(json!("sending-key"))),
+            ("mail.mailgun.domain".into(), Some(json!("mg.example.test"))),
+        ];
+        store.save(&pool, &changes, StaffRole::Admin, "staff:admin").await.unwrap();
+        assert_eq!(store.current().mail().managed_mail().unwrap()["newsletter_transport"], "mailgun");
+        store.save(&pool, &[("mail.tenantProvider".into(), Some(json!("tenant")))], StaffRole::Admin, "staff:admin").await.unwrap();
+        assert!(store.current().mail().managed_mail().is_none());
+    }
+
 }

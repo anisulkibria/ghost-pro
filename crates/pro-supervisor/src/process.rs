@@ -399,7 +399,7 @@ fn resolve_binary(config: &Config) -> Result<PathBuf> {
             Ok(p)
         } else {
             Err(ProError::Config(format!(
-                "paths.ghostBinary points at {}, which does not exist. Build Ghost-rust \
+                "paths.ghostBinary points at {}, which does not exist. Build Vuuut \
                  (cargo build --release in its checkout), or correct the path in pro.json.",
                 p.display()
             )))
@@ -414,7 +414,7 @@ fn resolve_binary(config: &Config) -> Result<PathBuf> {
         }
     }
     Err(ProError::Config(format!(
-        "could not find the “{configured}” binary on PATH. Build Ghost-rust and set \
+        "could not find the “{configured}” binary on PATH. Build Vuuut and set \
          paths.ghostBinary to its target/release/ghost."
     )))
 }
@@ -534,7 +534,7 @@ mod tests {
         assert!(err.to_string().contains("on PATH"), "got {err}");
     }
 
-    /// The point of relative paths: a `pro.json` that names the Ghost-rust
+    /// The point of relative paths: a `pro.json` that names the Vuuut
     /// checkout beside it works on every machine the pair is cloned onto,
     /// which an absolute path does not. Resolution is from the deployment
     /// directory, not the process's working directory.

@@ -95,7 +95,16 @@ fn pack_blocking(tenant_dir: &Path, dest: &Path, db_snapshot: Option<&Path>) -> 
                 continue;
             }
             zip.start_file(&name, options).zip_err()?;
-            let bytes = std::fs::read(entry.path())?;
+            let mut bytes = std::fs::read(entry.path())?;
+            if rel.components().count() == 1 && name.starts_with("config.") && name.ends_with(".json") {
+                let mut config: serde_json::Value = serde_json::from_slice(&bytes)?;
+                let managed = config.get_mut("hostSettings").and_then(serde_json::Value::as_object_mut)
+                    .and_then(|host| host.remove("managedMail")).is_some();
+                // This block is inherited from the platform too; tenant-owned mail
+                // lives in the tenant DB, never in this generated config.
+                let inherited = config.as_object_mut().and_then(|c| c.remove("mail")).is_some();
+                if managed || inherited { bytes = serde_json::to_vec_pretty(&config)?; }
+            }
             zip.write_all(&bytes)?;
         }
         // Symlinks are skipped rather than followed, so an archive cannot
@@ -399,4 +408,25 @@ mod tests {
         assert_eq!(err.status(), 400);
         tokio::fs::remove_dir_all(&base).await.unwrap();
     }
+
+    #[tokio::test]
+    async fn downloadable_backups_omit_platform_mail_credentials() {
+        let dir = sample_tenant().await;
+        let config = serde_json::json!({"url":"https://a.example", "mail":{"options":{"auth":{"pass":"inherited-secret"}}}, "hostSettings":{"limits":{"staff":{"max":2}}, "managedMail":{"ses_smtp_pass":"platform-secret", "mailgun_api_key":"platform-key"}}});
+        tokio::fs::write(dir.join("config.production.json"), config.to_string()).await.unwrap();
+        let archive = dir.with_extension("zip");
+        pack(&dir, &archive, None).await.unwrap();
+        let restored = dir.with_extension("restored");
+        unpack(&archive, &restored).await.unwrap();
+        let raw = tokio::fs::read_to_string(restored.join("config.production.json")).await.unwrap();
+        assert!(!raw.contains("platform-secret"));
+        assert!(!raw.contains("platform-key"));
+        assert!(!raw.contains("inherited-secret"));
+        let config: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(config["hostSettings"]["limits"]["staff"]["max"], 2);
+        tokio::fs::remove_dir_all(dir).await.unwrap();
+        tokio::fs::remove_dir_all(restored).await.unwrap();
+        tokio::fs::remove_file(archive).await.unwrap();
+    }
+
 }

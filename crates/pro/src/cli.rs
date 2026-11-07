@@ -2,7 +2,7 @@
 //!
 //! These exist so that standing the platform up is a short, checkable
 //! sequence rather than a research project — the same reasoning as
-//! Ghost-rust's own CLI. `setup` writes a config, `doctor` says whether this
+//! Vuuut's own CLI. `setup` writes a config, `doctor` says whether this
 //! machine can actually serve it, and `create-staff` is the only way to make
 //! the first operator login, because a platform with no staff cannot be
 //! administered through its own console.
@@ -89,8 +89,8 @@ COMMANDS
 SETUP OPTIONS
     --url <url>           Where the platform is reached, e.g. https://pro.example.com
     --subdomain-base <d>  Zone for tenant sites, e.g. sites.example.com
-    --ghost-binary <path> Path to the Ghost-rust `ghost` binary
-    --theme-source <path> Ghost-rust content/themes to copy into new sites
+    --ghost-binary <path> Path to the Vuuut `ghost` binary
+    --theme-source <path> Vuuut content/themes to copy into new sites
     --data-dir <path>     Where tenant sites and the database live (default: data)
     --ssl                 Get certificates from Let's Encrypt
     --email <address>     Contact address for certificate expiry warnings
@@ -132,22 +132,22 @@ EXAMPLES
     );
 }
 
-/// Find the Ghost-rust checkout this platform should run tenant sites from.
+/// Find the Vuuut checkout this platform should run tenant sites from.
 ///
 /// Returned relative to the deployment directory, deliberately: the whole
 /// point is a `pro.json` that survives being cloned onto another machine, and
 /// an absolute path baked in at setup time is the one thing that guarantees it
 /// will not. The usual layout is the two repositories side by side, with the
-/// deployment directory one level inside Ghost-pro (`Ghost-pro/run`), so that
+/// deployment directory one level inside Vuuut-pro (`Vuuut-pro/run`), so that
 /// is the first place looked.
 ///
 /// `None` when no checkout is found, which is not an error — an operator may
-/// be setting up before building Ghost-rust, and `doctor` says so later.
+/// be setting up before building Vuuut, and `doctor` says so later.
 fn discover_ghost_rust() -> Option<String> {
     // Searched in order of how likely each is to be the intended one, so a
     // machine with more than one checkout gets the nearest.
     const PREFIXES: [&str; 3] = ["..", "../..", "../../.."];
-    const NAMES: [&str; 4] = ["Ghost-rust", "ghost-rust", "rust-ghost", "Ghost-Rust"];
+    const NAMES: [&str; 6] = ["Vuuut", "vuuut", "Ghost-rust", "ghost-rust", "rust-ghost", "Ghost-Rust"];
 
     let cwd = std::env::current_dir().ok()?;
     for prefix in PREFIXES {
@@ -201,7 +201,7 @@ pub async fn setup(args: Args) -> Result<()> {
     let ghost_binary = match args.get("ghost-binary") {
         Some(p) => p.to_string(),
         None if interactive => {
-            ask("Path to the Ghost-rust `ghost` binary", Some(&binary_default))?
+            ask("Path to the Vuuut `ghost` binary", Some(&binary_default))?
         }
         None => binary_default,
     };
@@ -210,7 +210,7 @@ pub async fn setup(args: Args) -> Result<()> {
     // commonest setup mistake, and the failure it causes otherwise appears as
     // a customer's site failing to provision.
     if ghost_binary.contains('/') && !std::path::Path::new(&ghost_binary).exists() {
-        tracing::warn!("{ghost_binary} does not exist yet — build Ghost-rust before serving");
+        tracing::warn!("{ghost_binary} does not exist yet — build Vuuut before serving");
     }
 
     let ssl = args.flag("ssl");
@@ -266,12 +266,12 @@ pub async fn setup(args: Args) -> Result<()> {
     if args.get("ghost-binary").is_none() {
         match &discovered {
             Some(d) => println!(
-                "Found a Ghost-rust checkout at {d} (relative to this directory, so this \
+                "Found a Vuuut checkout at {d} (relative to this directory, so this \
                  config stays valid on other machines).\n"
             ),
             None => println!(
-                "No Ghost-rust checkout found nearby, so paths.ghostBinary is the bare name \
-                 \"ghost\" and no themes are configured. Clone and build Ghost-rust, then set \
+                "No Vuuut checkout found nearby, so paths.ghostBinary is the bare name \
+                 \"ghost\" and no themes are configured. Clone and build Vuuut, then set \
                  paths.ghostBinary and paths.themeSource.\n"
             ),
         }

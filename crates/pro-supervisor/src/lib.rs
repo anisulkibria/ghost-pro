@@ -4,13 +4,13 @@
 //! its own SQLite database and its own config file. The CMS is used exactly as
 //! it ships: nothing here patches it, links against it, or reaches into its
 //! internals. That is the single most important property of this design —
-//! Ghost-rust can be rebuilt and dropped in, and the platform keeps working.
+//! Vuuut can be rebuilt and dropped in, and the platform keeps working.
 //!
 //! ## Why a process each
 //!
 //! The alternative is one process serving every tenant, resolving the right
 //! database per request. That would use less memory, and it would mean
-//! rewriting the CMS: Ghost-rust builds its `AppState` once at boot — one
+//! rewriting the CMS: Vuuut builds its `AppState` once at boot — one
 //! pool, one settings cache, one theme engine, one set of host limits — and
 //! threading a tenant through all of it is a deep change with a
 //! cross-tenant-leak bug behind every missed call site. A process boundary

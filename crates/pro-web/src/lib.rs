@@ -35,6 +35,7 @@ pub mod state;
 pub mod view;
 pub mod webhooks;
 pub mod worker;
+mod email_usage;
 
 pub use state::AppState;
 
@@ -130,6 +131,8 @@ fn platform_routes() -> Router<AppState> {
         .route("/console/sites", get(console::sites))
         .route("/console/sites/{id}", get(console::site))
         .route("/console/sites/{id}/plan", post(console::set_plan))
+        .route("/console/sites/{id}/email-policy", post(console::save_email_policy))
+        .route("/console/sites/{id}/email-usage", post(console::refresh_email_usage))
         .route("/console/sites/{id}/suspend", post(console::suspend))
         .route("/console/sites/{id}/unsuspend", post(console::unsuspend))
         .route("/console/sites/{id}/restart", post(console::restart))
@@ -156,6 +159,7 @@ fn platform_routes() -> Router<AppState> {
         .route("/console/customers/{id}/toggle", post(console::toggle_customer))
         .route("/console/plans", get(console::plans_page).post(console::save_plans))
         .route("/console/settings", get(console::settings).post(console::save_settings))
+        .route("/console/settings/{section}", get(console::settings_group).post(console::save_settings_group))
         .route("/console/staff", get(console::staff_page).post(console::create_staff))
         .route("/console/staff/{id}/role", post(console::set_staff_role))
         .route("/console/staff/{id}/toggle", post(console::toggle_staff))

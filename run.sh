@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Ghost-pro control script
+# Vuuut-pro control script
 #   ./run.sh start|stop|restart|status|build|rebuild|test|log|doctor|tenants|staff|reap
 #
-# Deliberately shaped like Ghost-rust's own run.sh, so moving between the two
+# Deliberately shaped like Vuuut's own run.sh, so moving between the two
 # projects needs no second vocabulary. Two things differ, and both come from
 # what this process *is*:
 #
@@ -131,9 +131,9 @@ tenant_count() { tenant_pids | grep -c . || true; }
 #
 # The deployment directory holds only generated and runtime state — the
 # database, tenant site directories, certificates, backups, logs — so it is
-# not in the repository, the same way Ghost-rust's content/data and
+# not in the repository, the same way Vuuut's content/data and
 # content/images are not in its own. The difference that used to matter is
-# that Ghost-rust's `run.sh` works on a fresh clone because the server creates
+# that Vuuut's `run.sh` works on a fresh clone because the server creates
 # what it is missing, while this one refused to start without a `pro.json`
 # nobody had written yet. So it writes one: a local-development config, for
 # the layout a clone actually lands in. `init` does it on request, `start`
@@ -145,8 +145,8 @@ init_dir() {
     fi
     require_bin
     echo "no pro.json in $PRO_DIR — writing one for local development…"
-    # Local defaults, matching Ghost-rust's: a hostname that needs no DNS and
-    # no DNS entry, and plain HTTP. The paths to Ghost-rust are found by the
+    # Local defaults, matching Vuuut's: a hostname that needs no DNS and
+    # no DNS entry, and plain HTTP. The paths to Vuuut are found by the
     # setup command and written relative to this directory, so the config does
     # not name this machine. Everything here is editable afterwards.
     #
@@ -171,6 +171,71 @@ require_bin() {
     if [ ! -x "$BIN" ]; then
         echo "no binary — building first…"
         cargo build --release
+    fi
+}
+
+# Build the tenant executable too when its configured path names a local CMS
+# checkout. Resolve the same file/environment layers as the platform first.
+require_tenant_bin() {
+    command -v python3 >/dev/null 2>&1 || return 0
+    local tenant_bin checkout
+    tenant_bin=$(python3 - "$PRO_DIR" <<'PYTHON'
+import json, os, pathlib, shutil, sys
+base = pathlib.Path(sys.argv[1]).resolve()
+env = os.environ.get("PRO_ENV", os.environ.get("NODE_ENV", "development"))
+config = {"paths": {"ghostBinary": "ghost"}}
+def merge(dst, src):
+    if isinstance(dst, dict) and isinstance(src, dict):
+        for key, value in src.items():
+            dst[key] = merge(dst.get(key), value)
+        return dst
+    return src
+try:
+    for filename in ("pro.json", "pro." + env + ".json"):
+        path = base / filename
+        if path.exists():
+            config = merge(config, json.loads(path.read_text()))
+    for key, value in os.environ.items():
+        if not key.startswith("PRO_") or key == "PRO_ENV":
+            continue
+        def camel(part):
+            first, *rest = part.lower().split("_")
+            return first + "".join(word.capitalize() for word in rest)
+        parts = [camel(part) for part in key[4:].split("__")]
+        if not all(parts):
+            continue
+        current = config
+        for part in parts[:-1]:
+            if not isinstance(current.get(part), dict):
+                current[part] = {}
+            current = current[part]
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            parsed = value
+        current[parts[-1]] = parsed
+    binary = config["paths"]["ghostBinary"]
+    if not isinstance(binary, str) or not binary:
+        raise ValueError("paths.ghostBinary must be a nonempty string")
+    print((base / binary).resolve() if "/" in binary else (shutil.which(binary) or binary))
+except (OSError, ValueError, TypeError, KeyError) as error:
+    print("cannot resolve tenant binary: " + str(error), file=sys.stderr)
+    sys.exit(1)
+PYTHON
+    )
+    if [ -x "$tenant_bin" ] && [ -f "$tenant_bin" ]; then return 0; fi
+    if [[ "$tenant_bin" = */target/release/ghost ]]; then
+        checkout=${tenant_bin%/target/release/ghost}
+        if [ -f "$checkout/Cargo.toml" ] && [ -f "$checkout/crates/ghost/Cargo.toml" ]; then
+            echo "no tenant CMS binary — building Vuuut in ${checkout}…"
+            cargo build --release --manifest-path "$checkout/Cargo.toml" \
+                --target-dir "$checkout/target" --bin ghost
+        fi
+    fi
+    if [ ! -f "$tenant_bin" ] || [ ! -x "$tenant_bin" ]; then
+        echo "tenant CMS binary is missing or not executable: $tenant_bin" >&2
+        echo "build Vuuut with cargo build --release, or correct paths.ghostBinary in $PRO_DIR/pro.json." >&2
+        return 1
     fi
 }
 
@@ -209,9 +274,26 @@ start)
     fi
 
     require_bin
+    require_tenant_bin
+    log_start=1
+    if [ -f "$LOG" ]; then log_start=$(( $(wc -c <"$LOG") + 1 )); fi
     cd "$PRO_DIR"
-    nohup "$BIN" serve >>"$LOG" 2>&1 &
-    started=$!
+    if command -v python3 >/dev/null 2>&1; then
+        # A new session also survives a launching automation's process group
+        # ending; nohup alone only ignores SIGHUP.
+        started=$(python3 - "$BIN" "$LOG" <<'PYTHON'
+import subprocess, sys
+with open(sys.argv[2], "ab", buffering=0) as log:
+    child = subprocess.Popen([sys.argv[1], "serve"], stdin=subprocess.DEVNULL,
+                             stdout=log, stderr=subprocess.STDOUT,
+                             start_new_session=True, close_fds=True)
+print(child.pid)
+PYTHON
+        )
+    else
+        nohup "$BIN" serve </dev/null >>"$LOG" 2>&1 &
+        started=$!
+    fi
     echo "$started" >"$PIDFILE"
     cd "$ROOT"
 
@@ -221,8 +303,8 @@ start)
     for _ in $(seq 1 100); do
         if ! kill -0 "$started" 2>/dev/null; then
             rm -f "$PIDFILE"
-            echo "failed to start — last lines of $LOG:"
-            tail -n 20 "$LOG" | sed 's/^/  /'
+            echo "failed to start — output from this launch ($LOG):"
+            tail -c +"$log_start" "$LOG" | tail -n 20 | sed 's/^/  /'
             exit 1
         fi
         [ "$(listener)" = "$started" ] && break

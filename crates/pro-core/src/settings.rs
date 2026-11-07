@@ -93,6 +93,18 @@ pub struct SettingDef {
 ///
 /// Ordered as the console displays them.
 pub static REGISTRY: &[SettingDef] = &[
+    SettingDef {
+        key: "billing.emailLimits", group: "Billing", label: "Monthly email allowances",
+        help: "Newsletter and transactional email allowances, edited in Plans.",
+        kind: Kind::Managed, min_role: StaffRole::Owner,
+        fallback: |_| Value::Object(Default::default()),
+    },
+    SettingDef {
+        key: "mail.autoStopAtLimit", group: "Mail", label: "Stop sending at the email allowance",
+        help: "Stop tenant newsletter and transactional sends at their monthly plan allowance. Counts continue when this is off. Individual sites can override this in site details.",
+        kind: Kind::Bool, min_role: StaffRole::Admin,
+        fallback: |c| Value::Bool(c.mail.auto_stop_at_limit),
+    },
     // ---- Billing ---------------------------------------------------------
     SettingDef {
         key: "billing.provider",
@@ -389,6 +401,57 @@ pub static REGISTRY: &[SettingDef] = &[
         min_role: StaffRole::Admin,
         fallback: |c| Value::from(c.tenants.max_running as i64),
     },
+    SettingDef {
+        key: "mail.tenantProvider", group: "Mail", label: "Tenant email provider",
+        help: "Amazon SES or Mailgun applies to all existing and new sites and locks tenant delivery settings. Saving queues configuration updates and restarts running sites.", kind: Kind::Select(&[("tenant", "Tenant configures their own"), ("ses", "Platform Amazon SES"), ("mailgun", "Platform Mailgun")]), min_role: StaffRole::Admin,
+        fallback: |c| Value::String(c.mail.tenant_provider.clone()),
+    },
+    SettingDef {
+        key: "mail.ses.region", group: "Amazon SES", label: "AWS region",
+        help: "For example us-east-1. Used to derive the standard endpoint when no explicit SMTP endpoint is set.", kind: Kind::Text, min_role: StaffRole::Admin,
+        fallback: |c| opt(&c.mail.ses.region),
+    },
+    SettingDef {
+        key: "mail.ses.endpoint", group: "Amazon SES", label: "SES SMTP endpoint",
+        help: "Paste the SMTP Endpoint from your AWS CSV, including Mail Manager endpoints. Leave blank to use the region's standard SES endpoint. STARTTLS on port 587.", kind: Kind::Text, min_role: StaffRole::Admin,
+        fallback: |c| opt(&c.mail.ses.endpoint),
+    },
+    SettingDef {
+        key: "mail.ses.user", group: "Amazon SES", label: "SES SMTP username",
+        help: "Use the Username column from your AWS SMTP credentials CSV, not its Base64 column.", kind: Kind::Secret, min_role: StaffRole::Admin,
+        fallback: |c| opt(&c.mail.ses.user),
+    },
+    SettingDef {
+        key: "mail.ses.pass", group: "Amazon SES", label: "SES SMTP password",
+        help: "Use the Password column from your AWS SMTP credentials CSV, not its Base64 column or an AWS API secret access key.", kind: Kind::Secret, min_role: StaffRole::Admin,
+        fallback: |c| opt(&c.mail.ses.pass),
+    },
+    SettingDef {
+        key: "mail.mailgun.apiKey", group: "Mailgun", label: "Sending API key",
+        help: "", kind: Kind::Secret, min_role: StaffRole::Admin,
+        fallback: |c| opt(&c.mail.mailgun.api_key),
+    },
+    SettingDef {
+        key: "mail.mailgun.domain", group: "Mailgun", label: "Sending domain",
+        help: "", kind: Kind::Text, min_role: StaffRole::Admin,
+        fallback: |c| opt(&c.mail.mailgun.domain),
+    },
+    SettingDef {
+        key: "mail.mailgun.baseUrl", group: "Mailgun", label: "Mailgun region",
+        help: "", kind: Kind::Select(&[("https://api.mailgun.net/v3", "US"), ("https://api.eu.mailgun.net/v3", "EU")]), min_role: StaffRole::Admin,
+        fallback: |c| Value::String(c.mail.mailgun.base_url.clone().unwrap_or_else(|| "https://api.mailgun.net/v3".into())),
+    },
+    SettingDef {
+        key: "mail.mailgun.webhookSigningKey", group: "Mailgun", label: "Webhook signing key",
+        help: "", kind: Kind::Secret, min_role: StaffRole::Admin,
+        fallback: |c| opt(&c.mail.mailgun.webhook_signing_key),
+    },
+    SettingDef {
+        key: "mail.ses.maxSendRate", group: "Amazon SES", label: "Newsletter messages per second",
+        help: "Per newsletter send; default 1. Allocate your SES account quota across concurrently sending sites and leave capacity for transactional mail.",
+        kind: Kind::Int { min: 1, max: 10_000 }, min_role: StaffRole::Admin,
+        fallback: |c| Value::from(c.mail.ses.max_send_rate.unwrap_or(1)),
+    },
     // ---- Mail ------------------------------------------------------------
     SettingDef {
         key: "mail.transport",
@@ -396,7 +459,7 @@ pub static REGISTRY: &[SettingDef] = &[
         label: "Transport",
         help: "“Log” writes messages to the platform log instead of sending them, which \
                is what development should use.",
-        kind: Kind::Select(&[("smtp", "SMTP"), ("log", "Log only")]),
+        kind: Kind::Select(&[("smtp", "SMTP"), ("ses", "Amazon SES (SMTP)"), ("log", "Log only")]),
         min_role: StaffRole::Admin,
         fallback: |c| Value::String(c.mail.transport.clone()),
     },
@@ -690,6 +753,10 @@ impl Effective {
             .plans
             .iter()
             .map(|plan| {
+                let mut normalized = plan.clone();
+                normalized.max_emails_per_period = Some(self.overrides.get("billing.emailLimits")
+                    .and_then(|v| v.get(&plan.slug)).and_then(Value::as_i64).unwrap_or_else(|| plan.email_allowance()));
+                let plan = &normalized;
                 let Some(for_plan) = overrides
                     .and_then(|o| o.get(&plan.slug))
                     .and_then(Value::as_object)
@@ -931,6 +998,21 @@ impl Effective {
             from_address: self.opt_string("mail.fromAddress"),
             from_name: self.opt_string("mail.fromName"),
             reply_to: self.opt_string("platform.supportEmail"),
+            tenant_provider: self.string("mail.tenantProvider"),
+            auto_stop_at_limit: self.bool("mail.autoStopAtLimit"),
+            ses: crate::config::SesConfig {
+                endpoint: self.opt_string("mail.ses.endpoint"),
+                max_send_rate: Some(self.int("mail.ses.maxSendRate").clamp(1, 10_000) as u32),
+                region: self.opt_string("mail.ses.region"),
+                user: self.opt_string("mail.ses.user"),
+                pass: self.opt_string("mail.ses.pass"),
+            },
+            mailgun: crate::config::MailgunConfig {
+                api_key: self.opt_string("mail.mailgun.apiKey"),
+                domain: self.opt_string("mail.mailgun.domain"),
+                base_url: self.opt_string("mail.mailgun.baseUrl"),
+                webhook_signing_key: self.opt_string("mail.mailgun.webhookSigningKey"),
+            },
         }
     }
 }

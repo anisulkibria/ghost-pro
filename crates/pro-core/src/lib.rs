@@ -7,7 +7,7 @@
 //!
 //! ## How this platform relates to the CMS
 //!
-//! Ghost-rust is a single-site server: one process, one SQLite database, one
+//! Vuuut is a single-site server: one process, one SQLite database, one
 //! `url`. It already knows how to be hosted — `ghost_db::limits` reads a
 //! `hostSettings` block out of its config and enforces plan ceilings from the
 //! inside, exactly as Ghost does on Ghost Pro.

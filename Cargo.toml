@@ -57,7 +57,7 @@ percent-encoding = "2"
 form_urlencoded = "1"
 
 # The edge proxy terminates TLS for every tenant subdomain and every custom
-# domain a customer attaches, so it needs the same ACME stack Ghost-rust uses
+# domain a customer attaches, so it needs the same ACME stack Vuuut uses
 # for a single site — driven over a certificate set that changes while the
 # process runs.
 rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "logging", "std"] }

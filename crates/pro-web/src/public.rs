@@ -152,16 +152,19 @@ pub async fn appearance(
 /// not a reason to be unable to read the front page. The two doors that only
 /// make sense signed out — `/signup` and the sign-in form — do the bouncing
 /// instead, so a customer who clicks either still lands on their sites.
-pub async fn home(headers: HeaderMap) -> Response {
+pub async fn home(State(state): State<AppState>, headers: HeaderMap) -> Response {
     // The appearance choice is a cookie with no script to read it, so the
     // scheme has to be rendered onto `<html>` here exactly as
     // `view::document` does it for every other page — otherwise somebody who
     // picked dark in the dashboard gets a white sheet at the front door.
     let theme = auth::theme(&headers);
-    reply::landing(LANDING_HTML.replace(
-        "{{theme}}",
-        &format!("{} data-theme=\"{}\"", theme.html_class(), theme.as_str()),
-    ))
+    let live = state.live();
+    let mut html = LANDING_HTML.replace("{{theme}}", &format!("{} data-theme=\"{}\"", theme.html_class(), theme.as_str()));
+    for slug in ["starter","creator","business","starter-yearly","creator-yearly","business-yearly"] {
+        let allowance = live.plan(slug).map(|p|p.email_allowance()).unwrap_or(0);
+        html = html.replace(&format!("{{{{email_{slug}}}}}"),&view::number(allowance));
+    }
+    reply::landing(html)
 }
 
 const LANDING_HTML: &str = include_str!("../landing/index.html");
@@ -183,9 +186,20 @@ pub async fn pricing(
 ) -> Response {
     let live = state.live();
     let plans = live.purchasable_plans();
+    let interval = match query.get("billing").map(String::as_str) {
+        Some("month") => "month",
+        Some("year") => "year",
+        _ if plans.iter().any(|p| p.interval == "year") => "year",
+        _ => "month",
+    };
+    let billing_tabs = view::seg_bar(&[
+        ("/pricing?billing=month".into(), "Monthly billing".into(), None, interval == "month"),
+        ("/pricing?billing=year".into(), "Yearly billing".into(), None, interval == "year"),
+    ]);
 
     let cards: String = plans
         .iter()
+        .filter(|plan| plan.interval == interval)
         .enumerate()
         .map(|(i, plan)| {
             let features: String =
@@ -195,10 +209,18 @@ pub async fn pricing(
             } else {
                 String::new()
             };
+            let mut display_plan = plan.clone();
+            let billing_note = if plan.interval == "year" {
+                display_plan.price_cents = plan.price_cents.saturating_add(6) / 12;
+                format!("{} billed yearly", plan.price_display())
+            } else {
+                "Billed monthly".into()
+            };
             format!(
                 r#"<div class="plan rise" style="--i:{i}">
 <h3>{name}</h3>
-<div class="price">{price}<span> / {interval}</span></div>
+<div class="price">{price}<span> / month</span></div>
+<p class="hint">{billing_note}</p>
 <p class="desc">{description}</p>
 <ul>{features}</ul>
 <div class="spacer"></div>
@@ -206,8 +228,8 @@ pub async fn pricing(
 <a class="btn" href="/signup?plan={slug}">Get started</a></div>"#,
                 i = i,
                 name = esc(&plan.name),
-                price = esc(&plan.price_display()),
-                interval = esc(&plan.interval),
+                price = esc(&display_plan.price_display()),
+                billing_note = esc(&billing_note),
                 description = esc(&plan.description),
                 features = features,
                 trial = trial,
@@ -222,6 +244,7 @@ pub async fn pricing(
 <p>A publication on your own domain, with HTTPS, backups and updates handled.
 Installed in seconds.</p>
 </div>
+{billing_tabs}
 <div class="plans">{cards}</div>
 <div class="feature-grid">
 <div class="feature"><span class="ic tint-blue">{globe}</span><div>

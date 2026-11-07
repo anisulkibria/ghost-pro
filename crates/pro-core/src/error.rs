@@ -9,7 +9,7 @@
 //!
 //! `Db` holds a string rather than a `sqlx::Error`, which is what keeps this
 //! crate below the database stack instead of beside it — the same trade
-//! Ghost-rust's own `GhostError` makes. Nothing in the control plane branches
+//! Vuuut's own `GhostError` makes. Nothing in the control plane branches
 //! on a sqlx variant; it logs the text and returns a 500.
 use std::fmt;
 

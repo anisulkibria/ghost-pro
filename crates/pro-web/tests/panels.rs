@@ -321,41 +321,102 @@ async fn every_console_page_renders() {
     }
 }
 
-/// The settings screen is rendered from the registry, so it has to show every
-/// group — and a secret must never be echoed back into the form.
+/// Every registered field belongs to a focused page; the directory only links to them.
 #[tokio::test]
-async fn the_settings_screen_renders_the_whole_registry() {
+async fn settings_directory_and_pages_cover_the_registry() {
     let (state, _dir) = platform().await;
     let cookie = as_operator(&state, StaffRole::Owner).await;
-
-    let (status, body) = get(&state, "/console/settings", Some(&cookie)).await;
+    let (status, directory) = get(&state, "/console/settings", Some(&cookie)).await;
     assert_eq!(status, StatusCode::OK);
-    for group in pro_core::settings::groups() {
-        assert!(body.contains(group), "the {group} group is missing");
-    }
-    for def in pro_core::settings::REGISTRY {
-        if matches!(def.kind, pro_core::settings::Kind::Managed) {
-            // A map, edited on its own screen. It must *not* be a field here —
-            // a text box containing JSON is how a whole catalogue gets wiped
-            // by one stray keystroke.
-            assert!(
-                !body.contains(&format!(r#"name="{}""#, def.key)),
-                "{} is managed and must not be a form field",
-                def.key
-            );
-            continue;
+    assert!(directory.contains("Search all settings"));
+    assert!(directory.contains(r#"href="/console/staff""#));
+    assert!(directory.contains(r#"href="/console/plans""#));
+    let mut preview = Vec::new();
+    for (slug, group) in [
+        ("general", "Platform"), ("signup", "Signup"), ("billing", "Billing"),
+        ("stripe", "Stripe"), ("paddle", "Paddle"), ("lemon-squeezy", "Lemon Squeezy"),
+        ("gumroad", "Gumroad"), ("email", "Mail"), ("ses", "Amazon SES"), ("mailgun", "Mailgun"),
+    ] {
+        let path = format!("/console/settings/{slug}");
+        assert!(directory.contains(&format!(r#"href="{path}""#)));
+        let (status, page) = get(&state, &path, Some(&cookie)).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert!(page.contains(&format!(r#"action="{path}""#)));
+        assert!(page.contains("Back to settings"));
+        assert!(page.contains(r#"form="settings-form""#));
+        for def in pro_core::settings::REGISTRY {
+            let field = format!(r#"name="{}""#, def.key);
+            assert!(!directory.contains(&field), "the directory must not contain editable fields");
+            let belongs = def.group == group && !matches!(def.kind, pro_core::settings::Kind::Managed);
+            assert_eq!(page.contains(&field), belongs, "{} is on the wrong page: {slug}", def.key);
         }
-        assert!(
-            body.contains(&format!(r#"name="{}""#, def.key)),
-            "{} is not on the form",
-            def.key
-        );
+        preview.push((slug.to_string(), page));
     }
-    // Booleans are M3 switches, each with its presence companion.
-    assert!(body.contains(r#"class="switch""#));
-    assert!(body.contains("__present."));
-    // And the managed setting is still reachable, or it would be invisible.
-    assert!(body.contains(r#"href="/console/plans""#), "no way to reach the Plans screen");
+    // Optional local artifacts contain fixture data only and no real account sessions.
+    if let Some(dir) = std::env::var_os("VUUUT_SETTINGS_PREVIEW_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("settings.html"), directory).unwrap();
+        for (slug, html) in preview { std::fs::write(dir.join(format!("{slug}.html")), html).unwrap(); }
+    }
+}
+
+#[tokio::test]
+async fn settings_search_finds_fields_and_escapes_the_query() {
+    let (state, _dir) = platform().await;
+    let cookie = as_operator(&state, StaffRole::Owner).await;
+    let (status, body) = get(&state, "/console/settings?q=SMTP%20password", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("/console/settings/ses#setting-mail_ses_pass"));
+    assert!(body.contains("/console/settings/email#setting-mail_pass"));
+    assert!(!body.contains("/console/settings/stripe#"));
+    let (_, body) = get(&state, "/console/settings?q=%3Cscript%3E", Some(&cookie)).await;
+    assert!(body.contains("Nothing matches"));
+    assert!(body.contains("&lt;script&gt;"));
+    assert!(!body.contains("<script>"));
+}
+
+#[tokio::test]
+async fn section_saves_stay_on_the_page_and_cannot_write_other_sections() {
+    let (state, _dir) = platform().await;
+    let cookie = as_operator(&state, StaffRole::Owner).await;
+    let (status, headers, _) = send(&state, "POST", "/console/settings/general", Some(&cookie), Some("platform.name=Acme")).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(headers["location"].to_str().unwrap().starts_with("/console/settings/general?"));
+    assert_eq!(state.live().platform_name(), "Acme");
+    assert!(state.live().signup_enabled());
+    let (_, headers, _) = send(&state, "POST", "/console/settings/general", Some(&cookie), Some("platform.name=MustNotSave&__present.signup.enabled=1")).await;
+    assert!(headers["location"].to_str().unwrap().starts_with("/console/settings/general?"));
+    assert_eq!(state.live().platform_name(), "Acme", "a forged cross-section submission must be atomic");
+    assert!(state.live().signup_enabled());
+    let (_, headers, _) = send(&state, "POST", "/console/settings/signup", Some(&cookie), Some("__present.signup.enabled=1")).await;
+    assert!(headers["location"].to_str().unwrap().starts_with("/console/settings/signup?"));
+    assert!(!state.live().signup_enabled());
+    let (_, headers, _) = send(&state, "POST", "/console/settings/signup", Some(&cookie), Some("__present.signup.enabled=1&signup.enabled=1")).await;
+    assert!(headers["location"].to_str().unwrap().starts_with("/console/settings/signup?"));
+    assert!(state.live().signup_enabled());
+    let (status, _) = get(&state, "/console/settings/not-a-section", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn section_secrets_are_write_only_and_survive_blank_saves() {
+    let (state, _dir) = platform().await;
+    let cookie = as_operator(&state, StaffRole::Admin).await;
+    let (status, headers, _) = send(&state, "POST", "/console/settings/ses", Some(&cookie), Some("mail.ses.region=us-east-1&mail.ses.user=ses-private-user&mail.ses.pass=ses-private-password&mail.ses.endpoint=example.fips.region.mail-manager-smtp.amazonaws.com")).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(headers["location"].to_str().unwrap().starts_with("/console/settings/ses?"));
+    let (_, html) = get(&state, "/console/settings/ses", Some(&cookie)).await;
+    assert!(!html.contains("ses-private-user"));
+    assert!(!html.contains("ses-private-password"));
+    assert!(html.contains("example.fips.region.mail-manager-smtp.amazonaws.com"));
+    assert_eq!(state.live().mail().ses_smtp_host().as_deref(), Some("example.fips.region.mail-manager-smtp.amazonaws.com"));
+    let _ = send(&state, "POST", "/console/settings/ses", Some(&cookie), Some("mail.ses.user=&mail.ses.pass=&mail.ses.region=eu-west-1")).await;
+    assert_eq!(state.live().mail().ses.pass.as_deref(), Some("ses-private-password"));
+    assert_eq!(state.live().mail().ses.region.as_deref(), Some("eu-west-1"));
+    let (_, html) = get(&state, "/console/settings/billing", Some(&cookie)).await;
+    assert!(!html.contains(r#"form="settings-form""#), "admin must not receive an owner-only Save button");
+    assert!(html.contains("Owner only"));
 }
 
 /// The screen that makes a platform able to charge.
@@ -393,7 +454,7 @@ async fn plan_product_ids_are_settable_without_a_restart() {
 
     let (status, body) = get(&state, "/console/plans", Some(&cookie)).await;
     assert_eq!(status, StatusCode::OK);
-    assert_m3_shell(&body, "/console/plans");
+    assert_m3_shell(&body, "/console/settings");
     // It says plainly that the platform cannot sell, which is the whole point
     // of the screen existing.
     assert!(body.contains("Nothing can be bought yet"), "got no warning");
@@ -665,6 +726,36 @@ async fn the_landing_page_is_served_at_the_root() {
     // The price list stays where people who came to compare will look.
     let (status, _) = get(&state, "/pricing", None).await;
     assert_eq!(status, StatusCode::OK, "/pricing still serves the catalogue");
+}
+
+#[tokio::test]
+async fn yearly_pricing_defaults_to_monthly_equivalents_with_annual_billing() {
+    let (state, _dir) = platform().await;
+    let (_, home) = get(&state, "/", None).await;
+    assert!(home.contains(r#"id="bill-yearly" checked"#));
+    assert!(!home.contains(r#"id="bill-monthly" checked"#));
+    assert!(home.contains("$7 / month"));
+    for (slug, monthly, annual) in [("starter", "7", "84"), ("creator", "11", "132"), ("business", "33", "396")] {
+        assert!(home.contains(&format!(r#"{monthly}<span class="per">/month</span>"#)));
+        assert!(home.contains(&format!("${annual} billed yearly")));
+        assert!(home.contains(&format!("/signup?plan={slug}-yearly")));
+    }
+
+    let (_, yearly) = get(&state, "/pricing", None).await;
+    for (slug, monthly, annual) in [("starter", "7", "84"), ("creator", "11", "132"), ("business", "33", "396")] {
+        assert!(yearly.contains(&format!(r#"${monthly}<span> / month</span>"#)));
+        assert!(yearly.contains(&format!("${annual} billed yearly")));
+        let encoded = pro_web::view::urlencode(&format!("{slug}-yearly"));
+        assert!(yearly.contains(&format!(r#"href="/signup?plan={encoded}""#)));
+        assert!(!yearly.contains(&format!(r#"href="/signup?plan={slug}""#)));
+    }
+    let (_, monthly) = get(&state, "/pricing?billing=month", None).await;
+    for (slug, price) in [("starter", "9"), ("creator", "15"), ("business", "49")] {
+        assert!(monthly.contains(&format!(r#"${price}<span> / month</span>"#)));
+        assert!(monthly.contains(&format!(r#"href="/signup?plan={slug}""#)));
+        let encoded = pro_web::view::urlencode(&format!("{slug}-yearly"));
+        assert!(!monthly.contains(&format!(r#"href="/signup?plan={encoded}""#)));
+    }
 }
 
 /// Being a customer does not take the front page away from you.
@@ -997,5 +1088,108 @@ mod tempdir {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+}
+
+#[tokio::test]
+async fn console_managed_mail_updates_existing_sites_and_releases_them() {
+    use serde_json::json;
+    let (state, _dir) = platform().await;
+    let cookie = as_operator(&state, StaffRole::Admin).await;
+    let account = pro_db::accounts::create(&state.db, "tenant@example.test", "Tenant", "fixture-hash").await.unwrap();
+    let tenant = pro_db::tenants::create(&state.db, &account.id, "mail-site", "Mail site", "starter", "2026-01-01", 31000, 31100).await.unwrap();
+    pro_db::tenants::set_status(&state.db, &tenant.id, pro_core::TenantStatus::Active).await.unwrap();
+    let dir = state.config.tenant_dir(&tenant.id);
+    tokio::fs::create_dir_all(&dir).await.unwrap();
+    let body = pro_provision::config_file::build("https://mail-site.example.test", tenant.port, &state.config.plans[0], "2026-01-01", "https://billing", &Default::default(), &pro_provision::config_file::database_block(None));
+    pro_provision::config_file::write(&dir, &state.config.tenants.env, &body).await.unwrap();
+
+    let (status, _, _) = send(&state, "POST", "/console/settings", Some(&cookie), Some("mail.tenantProvider=ses&mail.ses.region=us-east-1&mail.ses.user=console-ses-user&mail.ses.pass=console-ses-password&mail.fromAddress=verified%40example.test")).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(state.live().mail().tenant_provider, "ses");
+    let (_, html) = get(&state, "/console/settings", Some(&cookie)).await;
+    assert!(html.contains("Amazon SES"));
+    assert!(!html.contains("console-ses-password"));
+    assert!(!html.contains("console-ses-user"));
+    let payloads: Vec<String> = sqlx::query_scalar("SELECT payload FROM jobs WHERE kind='sync_tenant_mail'").fetch_all(&state.db).await.unwrap();
+    assert!(!payloads.is_empty());
+    assert!(payloads.iter().all(|p| !p.contains("console-ses")));
+    let worker = tokio::spawn(pro_web::worker::run_jobs(state.clone()));
+    async fn await_provider(state: &pro_web::AppState, dir: &std::path::Path, expected: Option<&str>) {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let config = pro_provision::config_file::read(dir, &state.config.tenants.env).await.unwrap();
+                let actual = config.pointer("/hostSettings/managedMail/newsletter_transport").and_then(serde_json::Value::as_str);
+                if actual == expected { break; }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        }).await.unwrap();
+    }
+    await_provider(&state, &dir, Some("ses")).await;
+    assert!(!state.supervisor.is_running(&tenant.id), "hibernating sites must stay asleep");
+    let (status, _, _) = send(&state, "POST", "/console/settings", Some(&cookie), Some("mail.tenantProvider=mailgun&mail.mailgun.apiKey=console-mailgun-key&mail.mailgun.domain=mg.example.test")).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    await_provider(&state, &dir, Some("mailgun")).await;
+    let (status, _, _) = send(&state, "POST", "/console/settings", Some(&cookie), Some("mail.tenantProvider=tenant")).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    await_provider(&state, &dir, None).await;
+    let body = pro_provision::config_file::read(&dir, &state.config.tenants.env).await.unwrap();
+    assert!(body["hostSettings"]["limits"].is_object());
+    assert_eq!(body["url"], json!("https://mail-site.example.test"));
+    worker.abort();
+}
+
+#[tokio::test]
+async fn plan_email_allowances_are_editable_and_update_public_content() {
+    let (state,_dir)=platform().await;
+    let cookie=as_operator(&state,StaffRole::Owner).await;
+    let (_,html)=get(&state,"/console/plans",Some(&cookie)).await;
+    for plan in state.live().plans() {assert!(html.contains(&format!(r#"name="emails.{}""#,plan.slug)));}
+    let (status,_,_)=send(&state,"POST","/console/plans",Some(&cookie),Some("emails.starter=7000&emails.starter-yearly=8000")).await;
+    assert_eq!(status,StatusCode::SEE_OTHER);
+    assert_eq!(state.live().plan("starter").unwrap().email_allowance(),7000);
+    assert_eq!(state.live().plan("starter-yearly").unwrap().email_allowance(),8000);
+    let (_,homepage)=get(&state,"/",None).await;
+    assert!(homepage.contains("7,000 emails / month"));assert!(homepage.contains("8,000 emails / month"));
+    assert!(!homepage.contains("no send quota"));assert!(!homepage.contains("{{email_"));
+    assert!(homepage.contains("Email sending included"));
+    let jobs:i64=sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE kind='sync_tenant_mail'").fetch_one(&state.db).await.unwrap();
+    assert!(jobs>0);
+    let _=send(&state,"POST","/console/plans",Some(&cookie),Some("emails.starter=-1&emails.creator=9000")).await;
+    assert_eq!(state.live().plan("starter").unwrap().email_allowance(),7000);
+    assert_eq!(state.live().plan("creator").unwrap().email_allowance(),25000);
+    if let Some(dir)=std::env::var_os("VUUUT_EMAIL_PREVIEW_DIR") {
+        let dir=std::path::PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("homepage.html"),homepage).unwrap();
+        let (_,plans)=get(&state,"/console/plans",Some(&cookie)).await;std::fs::write(dir.join("plans.html"),plans).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn site_email_details_show_volume_and_support_individual_auto_stop_policy() {
+    use serde_json::json;
+    let (state,_dir)=platform().await;
+    let cookie=as_operator(&state,StaffRole::Admin).await;
+    let account=pro_db::accounts::create(&state.db,"volume@example.test","Volume owner","fixture").await.unwrap();
+    let tenant=pro_db::tenants::create(&state.db,&account.id,"volume-site","Volume site","starter","2026-01-01",31000,31100).await.unwrap();
+    pro_db::tenants::set_status(&state.db,&tenant.id,pro_core::TenantStatus::Active).await.unwrap();
+    let report=json!({"sent":50,"limit":5000,"pending":2,"failed":3,"blocked":4,"newsletter_sent":40,"transactional_sent":10,"total_sent":250,"remaining":4948,"period_start":"2026-11-01T00:00:00Z","period_end":"2026-12-01T00:00:00Z","daily":[{"date":"2026-11-02","sent":50,"failed":3,"blocked":4}],"providers":[{"provider":"ses","sent":50}],"history_note":"Accepted submissions"});
+    pro_db::email_usage::record(&state.db,&tenant.id,&report).await.unwrap();
+    let path=format!("/console/sites/{}",tenant.id);
+    let (status,html)=get(&state,&path,Some(&cookie)).await;
+    assert_eq!(status,StatusCode::OK);
+    for label in ["Sent this period","Monthly allowance","Remaining","Newsletter sends","Transactional sends","Daily email activity","Sending providers","Save sending policy","5,000","4,948"] {assert!(html.contains(label),"missing {label}");}
+    let policy_url=format!("{path}/email-policy");
+    let _=send(&state,"POST",&policy_url,Some(&cookie),Some("policy=continue")).await;
+    assert_eq!(pro_db::email_usage::policy(&state.db,&tenant.id).await.unwrap(),Some(false));
+    let _=send(&state,"POST",&policy_url,Some(&cookie),Some("policy=stop")).await;
+    assert_eq!(pro_db::email_usage::policy(&state.db,&tenant.id).await.unwrap(),Some(true));
+    let _=send(&state,"POST",&policy_url,Some(&cookie),Some("policy=inherit")).await;
+    assert_eq!(pro_db::email_usage::policy(&state.db,&tenant.id).await.unwrap(),None);
+    assert!(state.live().mail().auto_stop_at_limit);
+    let _=send(&state,"POST","/console/settings/email",Some(&cookie),Some("__present.mail.autoStopAtLimit=1")).await;
+    assert!(!state.live().mail().auto_stop_at_limit);
+    if let Some(dir)=std::env::var_os("VUUUT_EMAIL_PREVIEW_DIR") {
+        let dir=std::path::PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();std::fs::write(dir.join("site.html"),html).unwrap();
     }
 }

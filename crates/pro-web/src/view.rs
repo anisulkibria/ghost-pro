@@ -1,5 +1,5 @@
 //! HTML, written as functions — in the Material 3 language the Ghost CMS port
-//! at `Ghost-rust` uses for its admin.
+//! at `Vuuut` uses for its admin.
 //!
 //! ## Why functions and not templates
 //!
@@ -791,6 +791,22 @@ table.tbl td.empty-cell { padding: 32px 16px; text-align: center; color: var(--o
   .confirm .pop { right: auto; left: 0; }
   .plans { grid-template-columns: 1fr; }
 }
+/* Settings follow the CMS directory: compact links, then one focused editor. */
+.settings-directory .row:focus-visible { outline: 2px solid var(--primary); outline-offset: -3px; }
+.settings-head .settings-back svg { transform: rotate(180deg); }
+.settings-editor .row { scroll-margin-top: 112px; }
+.settings-editor .row:target { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+.settings-search-reset { margin: -6px 18px 16px; font-size: 13px; }
+.settings-search-reset a { color: var(--primary); }
+@media (max-width: 639px) {
+  .settings-directory.rows .row, .settings-directory .rows .row { flex-wrap: nowrap; align-items: center; }
+  .settings-directory.rows .row .body, .settings-directory .rows .row .body { flex: 1; }
+  .settings-directory.rows .row .trailing, .settings-directory .rows .row .trailing { flex: none; padding: 0; margin-left: auto; }
+  .settings-head .heading { flex: 1; }
+  .settings-head .actions { padding-left: 56px; }
+}
+
+
 "#;
 
 /// The stylesheet, inlined.

@@ -1,11 +1,11 @@
 //! Binding and serving.
 //!
-//! Mirrors Ghost-rust's own `serve` module, for the same reason it exists
+//! Mirrors Vuuut's own `serve` module, for the same reason it exists
 //! there: this is the one place that has to own the listener, negotiate TLS
 //! and hand connections to hyper, and keeping it separate stops that detail
 //! leaking into the application.
 //!
-//! The difference is the certificate set. Ghost-rust serves one site and knows
+//! The difference is the certificate set. Vuuut serves one site and knows
 //! its hostnames at boot. This serves every tenant subdomain and every custom
 //! domain a customer attaches, and that set changes while the process runs —
 //! so the ACME state is rebuilt when a domain goes live rather than fixed at

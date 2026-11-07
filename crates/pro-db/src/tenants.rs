@@ -171,7 +171,7 @@ pub async fn list(
     if search.is_some() {
         sql.push_str(" AND (slug LIKE ? OR name LIKE ?)");
     }
-    sql.push_str(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
+    sql.push_str(" ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?");
 
     let mut q = sqlx::query(&sql);
     if let Some(s) = status {

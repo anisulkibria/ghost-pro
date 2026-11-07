@@ -33,7 +33,7 @@ pub fn build(
     mail: &pro_core::config::MailConfig,
     database: &Value,
 ) -> Value {
-    json!({
+    let mut body = json!({
         "url": public_url,
         // Loopback only. Every request arrives through the platform's proxy,
         // so a tenant is not addressable from outside even if its port leaked.
@@ -46,12 +46,53 @@ pub fn build(
         "mail": mail_block(mail),
         // The plan, in the only form the CMS understands.
         "hostSettings": plan.host_settings(period_start, billing_url),
-    })
+    });
+    apply_managed_mail(&mut body, mail);
+    body
+}
+
+/// Update only the protected mail policy; preserve limits and billing metadata.
+pub fn apply_managed_mail(body: &mut Value, mail: &pro_core::config::MailConfig) {
+    body["hostSettings"]["emailQuota"]["autoStop"] = json!(mail.auto_stop_at_limit);
+    if let Some(values) = mail.managed_mail() {
+        body["hostSettings"]["managedMail"] = values;
+    } else if let Some(host) = body.get_mut("hostSettings").and_then(Value::as_object_mut) {
+        host.remove("managedMail");
+    }
+}
+
+/// Replace plan terms without dropping operator mail credentials.
+pub fn apply_host_settings(body: &mut Value, mut host: Value) {
+    if let Some(mail) = body.pointer("/hostSettings/managedMail") {
+        host["managedMail"] = mail.clone();
+    }
+    if let Some(value) = body.pointer("/hostSettings/emailQuota/autoStop") {
+        host["emailQuota"]["autoStop"] = value.clone();
+    }
+    body["hostSettings"] = host;
+}
+
+pub fn apply_email_allowance(body: &mut Value, max: i64) {
+    body["hostSettings"]["limits"]["emails"] = json!({"maxPeriodic":max,"error":"Your monthly email allowance has been reached."});
+    body["hostSettings"]["emailQuota"]["autoStop"] = body.pointer("/hostSettings/emailQuota/autoStop").cloned().unwrap_or(json!(true));
+}
+
+/// Reconcile staff limits and feature access on existing sites while preserving
+/// email allowances, billing metadata, and protected mail configuration.
+pub fn apply_plan_access(body: &mut Value, plan: &Plan) {
+    let host = plan.host_settings("", "");
+    for name in ["staff", "customIntegrations", "limitSocialWeb", "limitCustomFields", "limitStripeConnect", "limitAnalytics"] {
+        if let Some(restriction) = host["limits"].get(name) {
+            body["hostSettings"]["limits"][name] = restriction.clone();
+        } else if let Some(limits) = body["hostSettings"]["limits"].as_object_mut() {
+            limits.remove(name);
+        }
+    }
 }
 
 /// The `database` block for a tenant, in the form its CMS expects.
 ///
-/// Knex's shape, which is what Ghost's config uses and Ghost-rust reads: a
+/// Knex's shape, which is what Ghost's config uses and Vuuut reads: a
 /// `client` naming the engine and a `connection` holding either a filename or
 /// a set of server fields.
 ///
@@ -89,8 +130,8 @@ pub fn database_block(creds: Option<&crate::tenant_db::Credentials>) -> Value {
 ///
 /// Inherits the platform's SMTP by default, so member signup confirmations and
 /// password resets work the moment a site exists. A tenant's *newsletters* are
-/// a separate concern the site owner configures themselves — this is only the
-/// one-to-one mail that a site is broken without.
+/// configured separately, either by the tenant or through the protected
+/// hostSettings.managedMail policy.
 fn mail_block(mail: &pro_core::config::MailConfig) -> Value {
     if mail.transport != "smtp" || mail.host.is_none() {
         // No usable platform SMTP: say so explicitly rather than writing a
@@ -111,6 +152,23 @@ fn mail_block(mail: &pro_core::config::MailConfig) -> Value {
     })
 }
 
+/// Serialize read/modify/write operations so concurrent plan, domain and mail
+/// changes cannot overwrite one another's protected settings.
+pub async fn update(
+    dir: &Path,
+    env: &str,
+    mutate: impl FnOnce(&mut Value),
+) -> Result<bool> {
+    static UPDATES: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _guard = UPDATES.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+    let mut body = read(dir, env).await?;
+    let before = body.clone();
+    mutate(&mut body);
+    if body == before { return Ok(false); }
+    write(dir, env, &body).await?;
+    Ok(true)
+}
+
 /// Write the config file atomically.
 ///
 /// Written to a temporary file and renamed, because a tenant may be starting
@@ -119,9 +177,19 @@ fn mail_block(mail: &pro_core::config::MailConfig) -> Value {
 /// directory is atomic, so a reader sees either the old file or the new one.
 pub async fn write(dir: &Path, env: &str, body: &Value) -> Result<()> {
     let final_path = dir.join(format!("config.{env}.json"));
-    let tmp_path = dir.join(format!(".config.{env}.json.tmp"));
+    let tmp_path = dir.join(format!(".config.{env}.{}.json.tmp", pro_core::ids::object_id()));
     let pretty = serde_json::to_string_pretty(body)?;
-    tokio::fs::write(&tmp_path, pretty.as_bytes()).await?;
+    use tokio::io::AsyncWriteExt;
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(&tmp_path).await?;
+    #[cfg(unix)]
+    file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600)).await?;
+    file.write_all(pretty.as_bytes()).await?;
+    file.sync_all().await?;
+    drop(file);
     tokio::fs::rename(&tmp_path, &final_path).await?;
     Ok(())
 }
@@ -148,7 +216,36 @@ mod tests {
             from_address: Some("hello@example.com".into()),
             from_name: Some("Example".into()),
             reply_to: None,
+            ..MailConfig::default()
         }
+    }
+
+    #[test]
+    fn reconciles_existing_staff_and_feature_access_and_preserves_suspension() {
+        let mut plan = pro_core::plans::default_plans().remove(0);
+        plan.max_staff = Some(1);
+        plan.custom_integrations = false;
+        plan.social_web = false;
+        plan.custom_fields = false;
+        let mut body = build("https://site.example", 21000, &plan, "2026-01-01", "https://billing", &mail(), &database_block(None));
+        let protected_mail = body["hostSettings"]["emailQuota"].clone();
+        let terms = body["hostSettings"]["limits"]["emails"].clone();
+        apply_plan_access(&mut body, &pro_core::plans::default_plans()[0]);
+        for name in ["customIntegrations", "limitSocialWeb", "limitCustomFields", "limitStripeConnect", "limitAnalytics"] {
+            assert!(body["hostSettings"]["limits"][name].is_null());
+        }
+        assert_eq!(body["hostSettings"]["limits"]["staff"]["max"], 3);
+        apply_plan_access(&mut body, &pro_core::plans::default_plans()[1]);
+        assert_eq!(body["hostSettings"]["limits"]["staff"]["max"], 7);
+        assert_eq!(body["hostSettings"]["emailQuota"], protected_mail);
+        assert_eq!(body["hostSettings"]["limits"]["emails"], terms);
+        let suspended = pro_core::plans::suspended_plan();
+        apply_host_settings(&mut body, suspended.host_settings("2026-01-01", "https://billing"));
+        apply_plan_access(&mut body, &suspended);
+        assert_eq!(body["hostSettings"]["limits"]["publicSiteAccess"]["disabled"], true);
+        assert_eq!(body["hostSettings"]["limits"]["customIntegrations"]["disabled"], true);
+        assert_eq!(body["hostSettings"]["limits"]["emails"]["maxPeriodic"], 0);
+        assert!(body["hostSettings"]["limits"]["staff"].is_null());
     }
 
     #[test]
@@ -303,9 +400,58 @@ mod tests {
         assert!(back["hostSettings"]["limits"].is_object());
 
         // No temporary file left behind.
-        assert!(!dir.join(".config.production.json.tmp").exists());
+        let mut entries = tokio::fs::read_dir(&dir).await.unwrap();
+        while let Some(entry) = entries.next_entry().await.unwrap() {
+            assert!(!entry.file_name().to_string_lossy().ends_with(".tmp"));
+        }
+        #[cfg(unix)] {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(tokio::fs::metadata(dir.join("config.production.json")).await.unwrap().permissions().mode() & 0o777, 0o600);
+        }
         assert!(dir.join("config.production.json").exists());
 
         tokio::fs::remove_dir_all(&dir).await.unwrap();
     }
+
+    #[test]
+    fn managed_mail_survives_plan_changes_and_is_removed_when_disabled() {
+        let mut mail = mail();
+        mail.tenant_provider = "ses".into();
+        mail.ses = pro_core::config::SesConfig { endpoint: Some("example.fips.region.mail-manager-smtp.amazonaws.com".into()), max_send_rate: None, region: Some("us-east-1".into()), user: Some("ses-user".into()), pass: Some("ses-password".into()) };
+        mail.validate_managed().unwrap();
+        let plan = &pro_core::plans::default_plans()[0];
+        let mut body = build("https://a.example.test", 21000, plan, "2026-01-01", "https://billing", &mail, &database_block(None));
+        assert_eq!(body["hostSettings"]["managedMail"]["mail_transport"], "SES");
+        assert_eq!(body["hostSettings"]["managedMail"]["ses_smtp_pass"], "ses-password");
+        assert_eq!(body["hostSettings"]["managedMail"]["ses_smtp_endpoint"], "example.fips.region.mail-manager-smtp.amazonaws.com");
+        apply_host_settings(&mut body, pro_core::plans::suspended_plan().host_settings("2026-01-01", "https://billing"));
+        assert_eq!(body["hostSettings"]["managedMail"]["newsletter_transport"], "ses");
+        assert_eq!(body["hostSettings"]["limits"]["publicSiteAccess"]["disabled"], true);
+        mail.tenant_provider = "mailgun".into();
+        mail.mailgun.api_key = Some("mg-key".into());
+        mail.mailgun.domain = Some("mg.example.test".into());
+        apply_managed_mail(&mut body, &mail);
+        assert_eq!(body["hostSettings"]["managedMail"]["newsletter_transport"], "mailgun");
+        mail.tenant_provider = "tenant".into();
+        apply_managed_mail(&mut body, &mail);
+        assert!(body["hostSettings"].get("managedMail").is_none());
+        assert!(body["hostSettings"]["limits"].is_object());
+    }
+
+    #[tokio::test]
+    async fn concurrent_mail_and_plan_changes_preserve_both() {
+        let dir = std::env::temp_dir().join(format!("pro-mail-update-{}", pro_core::ids::object_id()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        write(&dir, "production", &json!({"hostSettings":{"limits":{}}})).await.unwrap();
+        let (mail, plan) = tokio::join!(
+            update(&dir, "production", |body| body["hostSettings"]["managedMail"] = json!({"newsletter_transport":"ses"})),
+            update(&dir, "production", |body| apply_host_settings(body, json!({"limits":{"staff":{"max":3}}}))),
+        );
+        mail.unwrap(); plan.unwrap();
+        let body = read(&dir, "production").await.unwrap();
+        assert_eq!(body["hostSettings"]["managedMail"]["newsletter_transport"], "ses");
+        assert_eq!(body["hostSettings"]["limits"]["staff"]["max"], 3);
+        tokio::fs::remove_dir_all(dir).await.unwrap();
+    }
+
 }

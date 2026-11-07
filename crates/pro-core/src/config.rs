@@ -120,7 +120,7 @@ pub struct PathsConfig {
     /// `PATH` when it is a bare name.
     #[serde(default = "default_ghost_binary")]
     pub ghost_binary: String,
-    /// Themes copied into every new tenant. Points at a Ghost-rust
+    /// Themes copied into every new tenant. Points at a Vuuut
     /// `content/themes` directory.
     #[serde(default)]
     pub theme_source: Option<String>,
@@ -479,6 +479,113 @@ pub struct MailConfig {
     /// Where a customer's reply goes, if that is not the from address.
     #[serde(default, alias = "replyTo")]
     pub reply_to: Option<String>,
+    #[serde(default)]
+    pub ses: SesConfig,
+    #[serde(default)]
+    pub mailgun: MailgunConfig,
+    /// "tenant" leaves provider configuration to each site; "ses" and
+    /// "mailgun" centrally manage delivery and lock tenant mail settings.
+    #[serde(default = "default_tenant_mail_provider")]
+    pub tenant_provider: String,
+    #[serde(default = "default_auto_stop_email")]
+    pub auto_stop_at_limit: bool,
+}
+
+fn default_auto_stop_email() -> bool { true }
+
+fn default_tenant_mail_provider() -> String { "tenant".into() }
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SesConfig {
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default)]
+    pub max_send_rate: Option<u32>,
+    pub region: Option<String>,
+    pub user: Option<String>,
+    pub pass: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailgunConfig {
+    pub api_key: Option<String>,
+    pub domain: Option<String>,
+    pub base_url: Option<String>,
+    pub webhook_signing_key: Option<String>,
+}
+
+fn valid_ses_smtp_endpoint(endpoint: &str) -> bool {
+    let aws_smtp = ["amazonaws.com", "amazonaws.com.cn", "amazonaws.eu"].iter().any(|suffix| {
+        (endpoint.starts_with("email-smtp.") && endpoint.ends_with(&format!(".{suffix}")))
+            || endpoint.ends_with(&format!(".mail-manager-smtp.{suffix}"))
+    });
+    aws_smtp && endpoint.len() <= 253 && endpoint.split('.').all(|label| {
+        !label.is_empty() && label.len() <= 63 && !label.starts_with('-') && !label.ends_with('-')
+            && label.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    })
+}
+
+impl MailConfig {
+    pub fn ses_smtp_host(&self) -> Option<String> {
+        if let Some(endpoint) = self.ses.endpoint.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            return valid_ses_smtp_endpoint(endpoint).then(|| endpoint.to_string());
+        }
+        let region = self.ses.region.as_deref()?.trim();
+        if region.is_empty() || !region.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            || region.split('-').count() < 3 { return None; }
+        let suffix = if region.starts_with("cn-") { "amazonaws.com.cn" } else { "amazonaws.com" };
+        Some(format!("email-smtp.{region}.{suffix}"))
+    }
+
+    pub fn validate_managed(&self) -> Result<()> {
+        let present = |s: &Option<String>| s.as_deref().is_some_and(|s| !s.trim().is_empty());
+        match self.tenant_provider.as_str() {
+            "tenant" => return Ok(()),
+            "ses" if self.ses_smtp_host().is_some() && present(&self.ses.user) && present(&self.ses.pass) => {},
+            "mailgun" if present(&self.mailgun.api_key) && present(&self.mailgun.domain) => {},
+            "ses" => return Err(ProError::BadRequest("Managed Amazon SES requires a valid region or SMTP endpoint, SMTP username and SMTP password.".into())),
+            "mailgun" => return Err(ProError::BadRequest("Managed Mailgun requires a sending domain and API key.".into())),
+            _ => return Err(ProError::BadRequest("Choose tenant, ses or mailgun as the tenant email provider.".into())),
+        }
+        if !present(&self.from_address) {
+            return Err(ProError::BadRequest("Set mail.fromAddress to a verified sender before enabling managed email.".into()));
+        }
+        Ok(())
+    }
+
+    /// This object is placed in hostSettings, outside the tenant's editable DB.
+    pub fn managed_mail(&self) -> Option<serde_json::Value> {
+        if self.tenant_provider == "tenant" { return None; }
+        let ses = self.tenant_provider == "ses";
+        let mut values = serde_json::json!({
+            "newsletter_transport": self.tenant_provider,
+            "mail_transport": if ses || self.transport == "ses" { "SES" } else if self.transport == "smtp" { "SMTP" } else { "Direct" },
+            "mail_smtp_host": self.host,
+            "mail_smtp_port": self.port.unwrap_or(587).to_string(),
+            "mail_smtp_security": if self.port == Some(465) { "tls" } else { "starttls" },
+            "mail_smtp_user": self.user,
+            "mail_smtp_pass": self.pass,
+            "mail_from_address": self.from_address,
+            "mail_from_name": self.from_name,
+            "mail_reply_to": self.reply_to,
+            "bulk_email_from_address": self.from_address,
+            "ses_region": self.ses.region,
+            "ses_smtp_endpoint": self.ses.endpoint,
+            "ses_max_send_rate": self.ses.max_send_rate.unwrap_or(1).clamp(1, 10_000).to_string(),
+            "ses_smtp_user": self.ses.user,
+            "ses_smtp_pass": self.ses.pass,
+            "mailgun_api_key": self.mailgun.api_key,
+            "mailgun_domain": self.mailgun.domain,
+            "mailgun_base_url": self.mailgun.base_url.as_deref().unwrap_or("https://api.mailgun.net/v3"),
+            "mailgun_webhook_signing_key": self.mailgun.webhook_signing_key,
+        });
+        for value in values.as_object_mut().unwrap().values_mut() {
+            if value.is_null() { *value = serde_json::Value::String(String::new()); }
+        }
+        Some(values)
+    }
 }
 
 impl Default for MailConfig {
@@ -492,6 +599,10 @@ impl Default for MailConfig {
             from_address: None,
             from_name: None,
             reply_to: None,
+            ses: SesConfig::default(),
+            mailgun: MailgunConfig::default(),
+            tenant_provider: default_tenant_mail_provider(),
+            auto_stop_at_limit: true,
         }
     }
 }
@@ -678,7 +789,7 @@ impl Config {
     /// lives in, not to whatever directory the process happened to be started
     /// from. That is what makes a config portable between machines: the
     /// binary and themes this platform needs belong to a *different* checkout
-    /// (Ghost-rust), and `../../Ghost-rust/target/release/ghost` names it
+    /// (Vuuut), and `../../Vuuut/target/release/ghost` names it
     /// correctly wherever the pair is cloned, while an absolute path names it
     /// on exactly one machine. A clone that had to be hand-edited before it
     /// would start is the thing being avoided here.
@@ -1087,6 +1198,19 @@ fn snake_to_camel(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ses_supports_mail_manager_endpoints_and_rejects_invalid_overrides() {
+        let mut mail = MailConfig::default();
+        let endpoint = "example.fips.region.mail-manager-smtp.amazonaws.com";
+        mail.ses.endpoint = Some(endpoint.into());
+        assert_eq!(mail.ses_smtp_host().as_deref(), Some(endpoint));
+        mail.ses.region = Some("us-east-1".into());
+        mail.ses.endpoint = Some("http://localhost".into());
+        assert!(mail.ses_smtp_host().is_none());
+        mail.ses.endpoint = None;
+        assert_eq!(mail.ses_smtp_host().as_deref(), Some("email-smtp.us-east-1.amazonaws.com"));
+    }
+
 
     fn cfg() -> Config {
         Config {

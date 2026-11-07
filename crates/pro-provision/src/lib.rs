@@ -18,7 +18,7 @@
 //! port — the same endpoint a human would hit in a browser. That endpoint
 //! refuses once setup is complete, so it cannot be replayed, and using it
 //! means the platform needs no knowledge of the CMS's user schema. When
-//! Ghost-rust changes how users are stored, this keeps working.
+//! Vuuut changes how users are stored, this keeps working.
 //! ## Where a tenant's data lives
 //!
 //! Step 2 differs by deployment. Locally, a tenant's database is a SQLite file

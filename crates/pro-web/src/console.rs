@@ -35,7 +35,6 @@ enum Tab {
     Overview,
     Sites,
     Customers,
-    Plans,
     Settings,
     Staff,
     Activity,
@@ -46,7 +45,6 @@ fn nav(active: Tab) -> Vec<NavItem> {
         NavItem::new("Overview", "/console", "chart", "blue", active == Tab::Overview),
         NavItem::new("Sites", "/console/sites", "sites", "green", active == Tab::Sites),
         NavItem::new("Customers", "/console/customers", "people", "purple", active == Tab::Customers),
-        NavItem::new("Plans", "/console/plans", "key", "teal", active == Tab::Plans),
         NavItem::new("Settings", "/console/settings", "settings", "pink", active == Tab::Settings),
         NavItem::new("Staff", "/console/staff", "shield", "amber", active == Tab::Staff),
         NavItem::new("Activity", "/console/activity", "history", "slate", active == Tab::Activity),
@@ -255,13 +253,13 @@ async fn overview_inner(
     if live.billing_provider() == "none" {
         warnings.push(
             r#"No payment provider is configured, so nothing is being charged.
-<a href="/console/settings">Set one up</a>"#
+<a href="/console/settings/billing">Set one up</a>"#
                 .to_string(),
         );
     } else if !live.provider_is_configured(&live.billing_provider()) {
         warnings.push(format!(
             r#"The selected provider (<strong>{}</strong>) is missing credentials — new checkouts
-will fail. <a href="/console/settings">Fix</a>"#,
+will fail. <a href="/console/settings/billing">Fix</a>"#,
             esc(&live.billing_provider())
         ));
     }
@@ -279,7 +277,7 @@ from <a href="/console/sites">Sites</a>."#,
             warnings.push(format!(
                 r#"No webhook signing secret for <strong>{}</strong>, so every payment
 notification is refused and paid sites stay closed.
-<a href="/console/settings">Set one</a>"#,
+<a href="/console/settings/billing">Set one</a>"#,
                 esc(&live.billing_provider())
             ));
         }
@@ -292,7 +290,7 @@ notification is refused and paid sites stay closed.
     {
         warnings.push(format!(
             r#"{reason} — so customers receive no email.
-<a href="/console/settings">Configure SMTP</a>"#,
+<a href="/console/settings/email">Configure email</a>"#,
             reason = esc(&reason),
         ));
     }
@@ -581,6 +579,8 @@ async fn site_inner(
         subscription.as_ref().map(|s| s.provider.as_str()),
     ));
     body.push_str("</div>");
+
+    body.push_str(&crate::email_usage::card(state, &tenant, can_write).await?);
 
     // ---- plan -------------------------------------------------------------
     let plan_options: String = live
@@ -1396,9 +1396,82 @@ pub async fn toggle_customer(
     }.await)
 }
 
+pub async fn save_email_policy(State(state): State<AppState>, Path(id): Path<String>, headers: HeaderMap, Form(form): Form<HashMap<String,String>>) -> Response {
+    let chrome = state.chrome(&headers);
+    let back = format!("/console/sites/{id}");
+    reply::or_redirect(&back,&chrome,async {
+        auth::require_same_origin(&headers,&state.config.host())?;
+        let actor = auth::staff_with(&state,&headers,StaffRole::Admin).await?;
+        let tenant = pro_db::tenants::get(&state.db,&id).await?;
+        let policy = match form.get("policy").map(String::as_str) {
+            Some("inherit")=>None,Some("stop")=>Some(true),Some("continue")=>Some(false),
+            _=>return Err(ProError::BadRequest("Choose a sending policy".into())),
+        };
+        pro_db::email_usage::set_policy(&state.db,&id,policy).await?;
+        pro_db::jobs::enqueue(&state.db,"apply_tenant_mail",Some(&id),serde_json::json!({})).await?;
+        pro_db::audit::record(&state.db,&format!("staff:{}",actor.id),"email.policy_changed",Some(&id),Some(&tenant.account_id),serde_json::json!({"auto_stop":policy})).await;
+        Ok(redirect_with(&back,Flash::ok("Sending policy saved. The site update is queued.")))
+    }.await)
+}
+
+pub async fn refresh_email_usage(State(state): State<AppState>, Path(id): Path<String>, headers: HeaderMap) -> Response {
+    let chrome = state.chrome(&headers);
+    let back = format!("/console/sites/{id}");
+    reply::or_redirect(&back,&chrome,async {
+        auth::require_same_origin(&headers,&state.config.host())?;
+        auth::staff_with(&state,&headers,StaffRole::Admin).await?;
+        let tenant = pro_db::tenants::get(&state.db,&id).await?;
+        if !tenant.status.is_routable() {return Err(ProError::BadRequest("This site cannot be started for usage reporting.".into()));}
+        crate::email_usage::fetch(&state,&tenant,true).await?;
+        Ok(redirect_with(&back,Flash::ok("Email usage refreshed.")))
+    }.await)
+}
+
 // ---------------------------------------------------------------------------
 // Settings — where the payment provider is chosen
 // ---------------------------------------------------------------------------
+
+/// A focused settings page, following the site's own settings directory.
+struct SettingsSection {
+    slug: &'static str,
+    title: &'static str,
+    group: &'static str,
+    icon: &'static str,
+    tint: &'static str,
+    summary: &'static str,
+}
+
+impl SettingsSection {
+    fn path(&self) -> String { format!("/console/settings/{}", self.slug) }
+}
+
+const SETTINGS_SECTIONS: &[SettingsSection] = &[
+    SettingsSection { slug: "general", title: "General settings", group: "Platform", icon: "settings", tint: "pink", summary: "Platform name · Support email · Site hosting" },
+    SettingsSection { slug: "signup", title: "Signup & security", group: "Signup", icon: "shield", tint: "teal", summary: "Account registration · Email verification · Disposable addresses" },
+    SettingsSection { slug: "billing", title: "Billing", group: "Billing", icon: "billing", tint: "green", summary: "Payment provider · Checkout · Dunning · Plan product IDs" },
+    SettingsSection { slug: "stripe", title: "Stripe", group: "Stripe", icon: "key", tint: "purple", summary: "API keys · Webhook signing secret" },
+    SettingsSection { slug: "paddle", title: "Paddle", group: "Paddle", icon: "key", tint: "blue", summary: "API key · Client token · Webhooks · Sandbox" },
+    SettingsSection { slug: "lemon-squeezy", title: "Lemon Squeezy", group: "Lemon Squeezy", icon: "key", tint: "amber", summary: "API key · Store ID · Webhooks · Test mode" },
+    SettingsSection { slug: "gumroad", title: "Gumroad", group: "Gumroad", icon: "key", tint: "red", summary: "Access token · Ping token · Product verification" },
+    SettingsSection { slug: "email", title: "Email", group: "Mail", icon: "mail", tint: "blue", summary: "Transactional email · SMTP · Sender identity · Auto-stop" },
+    SettingsSection { slug: "ses", title: "Amazon SES", group: "Amazon SES", icon: "mail", tint: "amber", summary: "AWS region · SMTP endpoint & credentials · Newsletter send rate" },
+    SettingsSection { slug: "mailgun", title: "Mailgun", group: "Mailgun", icon: "mail", tint: "purple", summary: "Sending domain · API key · Region · Webhooks" },
+];
+
+fn settings_section(slug: &str) -> Result<&'static SettingsSection> {
+    SETTINGS_SECTIONS.iter().find(|section| section.slug == slug)
+        .ok_or_else(|| ProError::NotFound("Settings page not found".into()))
+}
+
+fn settings_link(path: &str, title: &str, detail: &str, icon: &str, tint: &str) -> String {
+    format!(
+        r#"<a class="row" href="{path}"><span class="ic tint-{tint}">{icon}</span>
+<div class="body"><span class="title">{title}</span><span class="detail">{detail}</span></div>
+<div class="trailing chev">{chevron}</div></a>"#,
+        path = attr(path), tint = tint, icon = view::svg(icon),
+        title = esc(title), detail = esc(detail), chevron = view::svg("chevron"),
+    )
+}
 
 pub async fn settings(
     State(state): State<AppState>,
@@ -1407,8 +1480,7 @@ pub async fn settings(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_page_or_signin(
-        "/console/signin",
-        &chrome,
+        "/console/signin", &chrome,
         settings_inner(&state, chrome.theme, &headers, &query).await,
     )
 }
@@ -1420,111 +1492,139 @@ async fn settings_inner(
     query: &HashMap<String, String>,
 ) -> Result<Response> {
     let member = auth::staff(state, headers).await?;
-    let live = state.live();
-    let views = pro_db::settings::view_for(&live, member.role);
-
-    // One group per card, with the group's name as its section heading — the
-    // same shape as Ghost's own settings pages.
-    let mut groups = String::new();
-    for group in pro_core::settings::groups() {
-        let mut fields = String::new();
-        for item in views
-            .iter()
-            // A managed setting is a map edited on its own screen; there is no
-            // form field for it. See `Kind::Managed`.
-            .filter(|v| v.def.group == group && !matches!(v.def.kind, Kind::Managed))
-        {
-            fields.push_str(&render_setting(item));
+    let search = query.get("q").map(|q| q.trim()).unwrap_or("");
+    let words: Vec<String> = search.split_whitespace().map(str::to_lowercase).collect();
+    let matches = |text: &str| {
+        let text = text.to_lowercase();
+        words.iter().all(|word| text.contains(word))
+    };
+    let mut rows = String::new();
+    for section in SETTINGS_SECTIONS {
+        if words.is_empty() || matches(&format!("{} {} {}", section.title, section.group, section.summary)) {
+            rows.push_str(&settings_link(&section.path(), section.title, section.summary, section.icon, section.tint));
         }
-        if fields.is_empty() {
-            continue;
-        }
-        groups.push_str(&view::section(group));
-        groups.push_str(&view::rows(&fields));
-
-        // The Billing group's one managed setting is the plan catalogue's
-        // product ids, and an operator looking for "where do I paste my Lemon
-        // Squeezy variant id" looks here first.
-        if group == "Billing" {
-            groups.push_str(&view::rows(&view::row(
-                "key",
-                "teal",
-                "Plan product ids",
-                "Which product or variant each plan is, at each provider. A plan with none \
-                 cannot be bought.",
-                r#"<a class="btn outlined small" href="/console/plans">Open Plans</a>"#,
-            )));
+        if !words.is_empty() {
+            for def in pro_core::settings::REGISTRY.iter().filter(|def| def.group == section.group && !matches!(def.kind, Kind::Managed)) {
+                // Search metadata only; saved values and credentials never enter the index.
+                if matches(&format!("{} {} {}", def.label, def.key, def.help)) {
+                    rows.push_str(&settings_link(
+                        &format!("{}#setting-{}", section.path(), def.key.replace('.', "_")),
+                        def.label, section.title, section.icon, section.tint,
+                    ));
+                }
+            }
         }
     }
-
-    // The one thing an operator most needs to see before saving: which
-    // provider is live, and whether it can actually take money.
-    let provider = live.billing_provider();
-    let banner = if provider == "none" {
-        view::banner(
-            BannerKind::Warn,
-            "No payment provider is selected, so no customer is being charged. Choose one \
-             below and fill in its credentials in the same save.",
-        )
-    } else if live.provider_is_configured(&provider) {
-        view::banner(
-            BannerKind::Ok,
-            &format!(
-                "New checkouts go to <strong>{}</strong>. Existing subscriptions keep billing \
-                 wherever they were created — switching provider does not interrupt anyone \
-                 already paying.",
-                esc(&provider)
-            ),
-        )
-    } else {
-        view::banner(
-            BannerKind::Error,
-            &format!(
-                "<strong>{}</strong> is selected but its credentials are missing, so new \
-                 checkouts will fail.",
-                esc(&provider)
-            ),
-        )
+    for (path, title, detail, icon, tint) in [
+        ("/console/staff", "Staff", "People · Roles · Console access", "people", "teal"),
+        ("/console/plans", "Plans", "Email allowances · Product IDs · Pricing", "billing", "green"),
+        ("/console/activity", "History", "Platform activity · Audit log", "history", "slate"),
+    ] {
+        if words.is_empty() || matches(&format!("{title} {detail}")) {
+            rows.push_str(&settings_link(path, title, detail, icon, tint));
+        }
+    }
+    if rows.is_empty() {
+        rows = view::row("search", "slate", "Nothing matches", "Try another word, or clear the search to browse the pages.", "");
+    }
+    let clear = if words.is_empty() { "" } else {
+        r#"<p class="settings-search-reset"><a href="/console/settings">Clear search</a></p>"#
     };
-
-    let role_note = if member.role < StaffRole::Owner {
-        format!(
-            r#"<p class="footnote">Some settings are locked because they need the {} role — the
-payment provider and its credentials can only be changed by the platform owner.</p>"#,
-            esc(StaffRole::Owner.label())
-        )
-    } else {
-        String::new()
-    };
-
     let body = format!(
-        r#"{head}{banner}
-<form method="post" action="/console/settings">
-{groups}
-<div style="margin-top:20px"><button class="btn" type="submit">{check} Save settings</button></div>
-</form>
-{role_note}"#,
-        head = view::page_head(
-            "Settings",
-            "These take effect immediately, without a restart. They override whatever is in \
-             <code>pro.json</code>.",
-            ""
-        ),
-        banner = banner,
-        groups = groups,
-        check = view::svg("check"),
-        role_note = role_note,
+        r#"<div class="settings-directory"><header class="page-head"><div class="heading"><h1>Settings</h1><p class="sub">Platform configuration</p></div></header>
+{search}{clear}<div class="card rows" id="settings-groups">{rows}</div></div>"#,
+        search = view::search_form("/console/settings", search, "Search all settings"),
     );
+    Ok(shell(state, theme, "Settings", Tab::Settings, &member, Flash::from_query(query).as_ref(), &body))
+}
 
-    Ok(shell(
-        state,
-        theme,
-        "Settings",
-        Tab::Settings,
-        &member,
-        Flash::from_query(query).as_ref(),
-        &body,
-    ))
+pub async fn settings_group(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    let chrome = state.chrome(&headers);
+    let result = async {
+        let member = auth::staff(&state, &headers).await?;
+        let section = settings_section(&slug)?;
+        settings_group_inner(&state, chrome.theme, &member, section, &query)
+    }.await;
+    reply::or_page_or_signin("/console/signin", &chrome, result)
+}
+
+fn settings_group_inner(
+    state: &AppState,
+    theme: Theme,
+    member: &Staff,
+    section: &SettingsSection,
+    query: &HashMap<String, String>,
+) -> Result<Response> {
+    let live = state.live();
+    let views = pro_db::settings::view_for(&live, member.role);
+    let fields: Vec<_> = views.iter().filter(|item| item.def.group == section.group && !matches!(item.def.kind, Kind::Managed)).collect();
+    let editable = fields.iter().any(|item| item.editable);
+    let save = if editable {
+        format!(r#"<button class="btn" type="submit" form="settings-form">{} Save</button>"#, view::svg("check"))
+    } else { String::new() };
+    let mut body = format!(
+        r#"<div class="settings-editor"><header class="page-head settings-head">
+<a class="icon-btn settings-back" href="/console/settings" aria-label="Back to settings" title="Back to settings">{back}</a>
+<div class="heading"><h1>{title}</h1><p class="sub">{summary}</p></div><div class="actions">{save}</div></header>"#,
+        back = view::svg("chevron"), title = esc(section.title), summary = esc(section.summary),
+    );
+    if section.slug == "billing" {
+        let provider = live.billing_provider();
+        body.push_str(&if provider == "none" {
+            view::banner(BannerKind::Info, "No payment provider is selected. Configure a provider below, then select it here when you are ready to accept payments.")
+        } else if live.provider_is_configured(&provider) {
+            view::banner(BannerKind::Ok, &format!("New checkouts use <strong>{}</strong>. Existing subscriptions keep their current provider.", esc(&provider)))
+        } else {
+            view::banner(BannerKind::Warn, &format!("<strong>{}</strong> is selected but needs credentials. Open its settings below.", esc(&provider)))
+        });
+    }
+    if !editable {
+        body.push_str(&view::banner(BannerKind::Info, "You can view these settings. Fields marked with a role can be changed by staff with that role."));
+    }
+    body.push_str(&format!(
+        r#"<form method="post" action="{path}" id="settings-form">{fields}</form>"#,
+        path = section.path(), fields = view::rows(&fields.iter().map(|item| render_setting(item)).collect::<String>()),
+    ));
+    let mut related = String::new();
+    if section.slug == "billing" {
+        for provider in SETTINGS_SECTIONS.iter().filter(|s| ["stripe", "paddle", "lemon-squeezy", "gumroad"].contains(&s.slug)) {
+            related.push_str(&settings_link(&provider.path(), provider.title, provider.summary, provider.icon, provider.tint));
+        }
+        related.push_str(&settings_link("/console/plans", "Plans & email allowances", "Monthly email allowances and payment product IDs for every plan.", "key", "teal"));
+    } else if section.slug == "email" {
+        for provider in SETTINGS_SECTIONS.iter().filter(|s| ["ses", "mailgun"].contains(&s.slug)) {
+            related.push_str(&settings_link(&provider.path(), provider.title, provider.summary, provider.icon, provider.tint));
+        }
+    } else if ["ses", "mailgun"].contains(&section.slug) {
+        related.push_str(&settings_link("/console/settings/email", "Email delivery", "Choose the transactional transport, tenant provider, and verified sender.", "mail", "blue"));
+    } else if ["stripe", "paddle", "lemon-squeezy", "gumroad"].contains(&section.slug) {
+        related.push_str(&settings_link("/console/settings/billing", "Billing", "Choose the provider for new checkouts.", "billing", "green"));
+    }
+    if !related.is_empty() {
+        body.push_str(&view::section("Related settings"));
+        body.push_str(&format!(r#"<div class="card rows settings-directory">{related}</div>"#));
+    }
+    body.push_str("</div>");
+    Ok(shell(state, theme, section.title, Tab::Settings, member, Flash::from_query(query).as_ref(), &body))
+}
+
+pub async fn save_settings_group(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    let chrome = state.chrome(&headers);
+    let section = match settings_section(&slug) {
+        Ok(section) => section,
+        Err(error) => return reply::or_page_or_signin("/console/signin", &chrome, Err(error)),
+    };
+    reply::or_redirect(&section.path(), &chrome, save_settings_inner(&state, &headers, &body, Some(section)).await)
 }
 
 /// Marks a boolean as having been *present* in a submission.
@@ -1629,8 +1729,9 @@ fn render_setting(item: &pro_db::settings::SettingView) -> String {
     };
 
     format!(
-        r#"<div class="row"><div class="body"><span class="title">{label}{badges}</span>
+        r#"<div class="row" id="setting-{id}"><div class="body"><span class="title">{label}{badges}</span>
 {help}</div><div class="trailing">{control}</div></div>"#,
+        id = attr(&id),
         label = esc(def.label),
         badges = badges,
         help = if def.help.is_empty() {
@@ -1651,7 +1752,7 @@ pub async fn save_settings(
     reply::or_redirect(
         "/console/settings",
         &chrome,
-        save_settings_inner(&state, &headers, &body).await,
+        save_settings_inner(&state, &headers, &body, None).await,
     )
 }
 
@@ -1671,16 +1772,27 @@ async fn save_settings_inner(
     state: &AppState,
     headers: &HeaderMap,
     body: &str,
+    section: Option<&SettingsSection>,
 ) -> Result<Response> {
     auth::require_same_origin(headers, &state.config.host())?;
     let member = auth::staff(state, headers).await?;
+    let back = section.map(SettingsSection::path).unwrap_or_else(|| "/console/settings".into());
 
     let submitted: HashMap<String, String> = form_urlencoded::parse(body.as_bytes())
         .map(|(k, v)| (k.into_owned(), v.into_owned()))
         .collect();
 
+    if let Some(section) = section {
+        for key in submitted.keys() {
+            let key = key.strip_prefix(PRESENT_PREFIX).unwrap_or(key);
+            if pro_core::settings::def(key).is_some_and(|def| def.group != section.group) {
+                return Err(ProError::BadRequest("This page only saves its own settings. Open the other section to change those fields.".into()));
+            }
+        }
+    }
     let mut changes: Vec<(String, Option<serde_json::Value>)> = Vec::new();
     for def in pro_core::settings::REGISTRY {
+        if section.is_some_and(|section| def.group != section.group) { continue; }
         // Not this actor's to change: leave whatever is stored alone.
         if !pro_core::settings::can_edit(def.key, member.role) {
             continue;
@@ -1724,6 +1836,9 @@ async fn save_settings_inner(
         .save(&state.db, &changes, member.role, &format!("staff:{}", member.id))
         .await?;
     let after = state.live().billing_provider();
+    if changes.iter().any(|(key, _)| key.starts_with("mail.")) {
+        pro_db::jobs::enqueue(&state.db, "sync_tenant_mail", None, serde_json::json!({})).await?;
+    }
 
     pro_db::audit::record(
         &state.db,
@@ -1747,6 +1862,10 @@ async fn save_settings_inner(
         "Settings saved.".to_string()
     };
 
+    if changes.iter().any(|(key, _)| key.starts_with("mail.")) {
+        message.push_str(" Tenant email updates are queued; running sites will restart to apply them.");
+    }
+
     // An operator who just filled in SMTP details has to be told here whether
     // mail will now actually leave the machine. Saying only "Settings saved."
     // is how somebody configures SMTP, believes it worked, and finds out from
@@ -1765,13 +1884,13 @@ async fn save_settings_inner(
     match mail_problem {
         Some(reason) => {
             message.push_str(&format!(" Mail is still not being sent: {reason}."));
-            Ok(redirect_with("/console/settings", Flash::warn(message)))
+            Ok(redirect_with(&back, Flash::warn(message)))
         }
         None => {
             if touched_mail {
-                message.push_str(" Platform email is being sent over SMTP.");
+                message.push_str(" Platform email delivery is configured.");
             }
-            Ok(redirect_with("/console/settings", Flash::ok(message)))
+            Ok(redirect_with(&back, Flash::ok(message)))
         }
     }
 }
@@ -1849,7 +1968,7 @@ async fn plans_inner(
     let mut body = view::page_head(
         "Plans",
         &format!(
-            "Which product each plan is, at each provider. {}",
+            "Monthly email allowances and payment product IDs. {}",
             match active.as_str() {
                 "none" => "No provider is selected, so nothing is being charged.".to_string(),
                 other => format!(
@@ -1861,11 +1980,13 @@ async fn plans_inner(
         "",
     );
 
+    body.push_str(&view::banner(BannerKind::Info, r#"Newsletter recipients and transactional emails share one monthly allowance, including on yearly subscriptions. Configure the default auto-stop behavior in <a href="/console/settings/email">Email settings</a>, or override it in a site's details."#));
+
     if providers.is_empty() {
         body.push_str(&view::banner(
             BannerKind::Info,
             r#"No payment provider is configured, so there are no product ids to set.
-<a href="/console/settings">Choose a provider</a> first."#,
+<a href="/console/settings/billing">Choose a provider</a> first."#,
         ));
     }
 
@@ -1891,9 +2012,6 @@ async fn plans_inner(
     let plans = live.plans();
     let mut cards = String::new();
     for plan in &plans {
-        if providers.is_empty() {
-            break;
-        }
         let fields: String = providers
             .iter()
             .map(|provider| {
@@ -1942,14 +2060,15 @@ async fn plans_inner(
             interval = esc(&plan.interval),
             slug = esc(&plan.slug),
             status = status,
-            fields = fields,
+            fields = format!(r#"<div>{email}<p class="hint">Newsletter recipients and transactional emails per month, including on yearly billing. 0 stops sending when auto-stop is enabled.</p></div>{fields}"#,
+                email=view::field_full(&format!("emails.{}",plan.slug),"Monthly email allowance","number",&plan.email_allowance().to_string(),None,&format!(r#" min="0" max="1000000000" step="1"{}"#,view::flag("disabled",!is_owner)))),
         ));
     }
 
     if !cards.is_empty() {
         body.push_str(&format!(
             r#"<form method="post" action="/console/plans">{cards}
-<button class="btn" type="submit"{disabled}>{check} Save product ids</button></form>"#,
+<button class="btn" type="submit"{disabled}>{check} Save plans</button></form>"#,
             cards = cards,
             disabled = view::flag("disabled", !is_owner),
             check = view::svg("check"),
@@ -2001,7 +2120,7 @@ async fn plans_inner(
         state,
         theme,
         "Plans",
-        Tab::Plans,
+        Tab::Settings,
         &member,
         Flash::from_query(query).as_ref(),
         &body,
@@ -2102,7 +2221,17 @@ async fn save_plans_inner(
         })
         .collect();
 
+    let mut email_limits: serde_json::Map<String,serde_json::Value> = live.plans().iter().map(|plan|(plan.slug.clone(),serde_json::json!(plan.email_allowance()))).collect();
+    let mut limits_changed = false;
     let mut touched = 0usize;
+    for (field,value) in &submitted {
+        if let Some(slug) = field.strip_prefix("emails.") {
+            let plan = live.plan(slug).ok_or_else(||ProError::BadRequest("Unknown plan in email allowances".into()))?;
+            let amount = value.parse::<i64>().ok().filter(|n|(0..=1_000_000_000).contains(n)).ok_or_else(||ProError::BadRequest("Email allowances must be whole numbers from 0 to 1000000000".into()))?;
+            if amount != plan.email_allowance() { limits_changed=true; touched+=1; }
+            email_limits.insert(slug.to_string(),serde_json::json!(amount));
+        }
+    }
     for (field, value) in &submitted {
         let Some(rest) = field.strip_prefix("id.") else { continue };
         // `id.<plan>.<provider>` — split from the right, because a plan slug
@@ -2142,7 +2271,8 @@ async fn save_plans_inner(
         .settings
         .save(
             &state.db,
-            &[("billing.priceIds".to_string(), Some(serde_json::Value::Object(map)))],
+            &[("billing.priceIds".to_string(), Some(serde_json::Value::Object(map))),
+              ("billing.emailLimits".to_string(), Some(serde_json::Value::Object(email_limits)))],
             member.role,
             &format!("staff:{}", member.id),
         )
@@ -2160,18 +2290,20 @@ async fn save_plans_inner(
     )
     .await;
 
+    if limits_changed { pro_db::jobs::enqueue(&state.db,"sync_tenant_mail",None,serde_json::json!({})).await?; }
+
     // What the operator actually wants to know: can the platform sell now?
     let live = state.live();
     let provider = live.billing_provider();
     let on_sale = live.purchasable_plans().len();
     let message = if provider == "none" {
-        format!("Saved {touched} product id(s).")
+        format!("Saved {touched} plan setting(s).")
     } else if on_sale == 0 {
         format!(
             "Saved, but no plan has a {provider} id yet — nothing can be bought."
         )
     } else {
-        format!("Saved. {on_sale} plan(s) can now be bought through {provider}.")
+        format!("Saved. {on_sale} plan(s) can now be bought through {provider}. Email allowance updates are queued when changed.")
     };
     Ok(redirect_with("/console/plans", Flash::ok(message)))
 }
@@ -2694,4 +2826,15 @@ mod tests {
         assert!(html.contains(r#"value="""#), "got {html}");
         assert!(html.contains(r#"type="password""#));
     }
+    #[test]
+    fn every_settings_group_has_one_directory_page() {
+        for group in pro_core::settings::groups() {
+            assert_eq!(SETTINGS_SECTIONS.iter().filter(|section| section.group == group).count(), 1, "{group} must have one page");
+        }
+        for (index, section) in SETTINGS_SECTIONS.iter().enumerate() {
+            assert!(SETTINGS_SECTIONS[index + 1..].iter().all(|other| other.slug != section.slug));
+            assert!(view::svg(section.icon).contains("<path"), "missing icon for {}", section.slug);
+        }
+    }
+
 }

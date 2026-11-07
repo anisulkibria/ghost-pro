@@ -111,6 +111,7 @@ async fn build_and_start(
         }
     };
 
+    mail.validate_managed()?;
     let mut body = config_file::build(
         &config.tenant_url(&tenant.slug),
         tenant.port,
@@ -124,7 +125,7 @@ async fn build_and_start(
     // Bootstrap config: the `customIntegrations` flag is lifted for the site's
     // first moments, because the platform's own integration — the key it will
     // sample usage with forever after — is created in that window, and a
-    // starter plan that withholds integrations from the *customer* must not
+    // custom plan that withholds integrations from the *customer* must not
     // withhold them from the host. The plan is applied in full below, which
     // rewrites the config and restarts the site; what this relaxes is one key
     // for the length of a setup, on a site nobody knows exists yet.
@@ -188,9 +189,9 @@ async fn create_tree(dir: &Path) -> Result<()> {
 /// tenant's theme change show up on another's site.
 async fn install_themes(config: &Arc<Config>, dir: &Path) -> Result<()> {
     // Relative paths are taken from the deployment directory, so a config can
-    // point at the Ghost-rust checkout beside it without naming this machine.
+    // point at the Vuuut checkout beside it without naming this machine.
     let Some(source) = config.theme_source_path() else {
-        // Not fatal. Ghost-rust falls back to its built-in rendering, and a
+        // Not fatal. Vuuut falls back to its built-in rendering, and a
         // platform may deliberately ship no themes and let customers upload.
         tracing::warn!(
             "paths.themeSource is unset, so new sites start with no theme installed"
@@ -375,9 +376,9 @@ pub async fn apply_plan(
     plan: &Plan,
 ) -> Result<()> {
     let dir = config.tenant_dir(&tenant.id);
-    let mut body = config_file::read(&dir, &config.tenants.env).await?;
-    body["hostSettings"] = plan.host_settings(&tenant.period_start, &config.billing_url());
-    config_file::write(&dir, &config.tenants.env, &body).await?;
+    config_file::update(&dir, &config.tenants.env, |body| {
+        config_file::apply_host_settings(body, plan.host_settings(&tenant.period_start, &config.billing_url()));
+    }).await?;
 
     pro_db::tenants::set_plan(pool, &tenant.id, &plan.slug).await?;
 
@@ -410,9 +411,9 @@ pub async fn suspend_site(
     // fail on — mark it and move on, so the suspension sweep is not blocked
     // by one bad row.
     if dir.exists() {
-        let mut body = config_file::read(&dir, &config.tenants.env).await?;
-        body["hostSettings"] = suspended.host_settings(&tenant.period_start, &config.billing_url());
-        config_file::write(&dir, &config.tenants.env, &body).await?;
+        config_file::update(&dir, &config.tenants.env, |body| {
+            config_file::apply_host_settings(body, suspended.host_settings(&tenant.period_start, &config.billing_url()));
+        }).await?;
     } else {
         tracing::warn!(tenant = %tenant.slug, "suspending a tenant whose directory is missing");
     }
@@ -459,12 +460,10 @@ pub async fn update_primary_domain(
     };
 
     let dir = config.tenant_dir(&tenant.id);
-    let mut body = config_file::read(&dir, &config.tenants.env).await?;
-    if body["url"] == serde_json::json!(url) {
-        return Ok(());
-    }
-    body["url"] = serde_json::json!(url);
-    config_file::write(&dir, &config.tenants.env, &body).await?;
+    let changed = config_file::update(&dir, &config.tenants.env, |body| {
+        body["url"] = serde_json::json!(url);
+    }).await?;
+    if !changed { return Ok(()); }
 
     // This one *must* restart even if hibernating: the site's links are wrong
     // until it does, and a sleeping site will be woken by the next visitor
