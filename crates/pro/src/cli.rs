@@ -14,6 +14,8 @@ pub enum Command {
     Serve,
     Setup(Args),
     Doctor,
+    /// Print the resolved tenant CMS binary, for `run.sh`.
+    TenantBinary,
     Db,
     CreateStaff(Args),
     Help,
@@ -64,6 +66,7 @@ pub fn parse() -> Command {
         "serve" | "start" | "run" => Command::Serve,
         "setup" | "install" => Command::Setup(args),
         "doctor" | "check" => Command::Doctor,
+        "tenant-binary" => Command::TenantBinary,
         "db" | "database" => Command::Db,
         "create-staff" | "createstaff" | "staff" => Command::CreateStaff(args),
         "version" | "--version" | "-V" => Command::Version,
@@ -134,38 +137,31 @@ EXAMPLES
 
 /// Find the Vuuut checkout this platform should run tenant sites from.
 ///
-/// Returned relative to the deployment directory, deliberately: the whole
-/// point is a `pro.json` that survives being cloned onto another machine, and
-/// an absolute path baked in at setup time is the one thing that guarantees it
-/// will not. The usual layout is the two repositories side by side, with the
-/// deployment directory one level inside Vuuut-pro (`Vuuut-pro/run`), so that
-/// is the first place looked.
-///
-/// `None` when no checkout is found, which is not an error — an operator may
-/// be setting up before building Vuuut, and `doctor` says so later.
+/// The search itself lives in [`pro_core::checkout`], because `setup` is no
+/// longer the only caller: the running platform repeats it whenever the path
+/// it recorded here has gone stale, so the two must use one list of names.
 fn discover_ghost_rust() -> Option<String> {
-    // Searched in order of how likely each is to be the intended one, so a
-    // machine with more than one checkout gets the nearest.
-    const PREFIXES: [&str; 3] = ["..", "../..", "../../.."];
-    const NAMES: [&str; 6] = ["Vuuut", "vuuut", "Ghost-rust", "ghost-rust", "rust-ghost", "Ghost-Rust"];
-
     let cwd = std::env::current_dir().ok()?;
-    for prefix in PREFIXES {
-        for name in NAMES {
-            let rel = format!("{prefix}/{name}");
-            let candidate = cwd.join(&rel);
-            // A directory with the right name is not enough; it has to look
-            // like the checkout. Either half is sufficient — the themes are
-            // committed so they are there straight after a clone, and the
-            // binary appears once it has been built.
-            let looks_right = candidate.join("content/themes").is_dir()
-                || candidate.join("target/release/ghost").is_file();
-            if looks_right {
-                return Some(rel);
-            }
-        }
+    pro_core::checkout::discover(&cwd)
+}
+
+/// Print the path tenant processes will actually be spawned from.
+///
+/// Exists for `run.sh`, which has to build the CMS before starting the
+/// platform and so needs the same answer the platform will reach — including
+/// the fallback search when `pro.json` names a checkout that has since been
+/// renamed or moved. Resolving the config layers a second time in shell was
+/// the alternative, and a second implementation of this is a second thing to
+/// get wrong.
+///
+/// Prints nothing and succeeds when the binary is a bare name for `PATH` to
+/// resolve, which is the right answer for a packaged install.
+pub async fn tenant_binary() -> Result<()> {
+    let config = Config::load(None)?;
+    if let Some(path) = config.ghost_binary_path() {
+        println!("{}", path.display());
     }
-    None
+    Ok(())
 }
 
 /// Write a `pro.json`.
@@ -312,6 +308,18 @@ pub async fn doctor() -> Result<()> {
 
     // ---- the CMS binary --------------------------------------------------
     match pro_supervisor::Supervisor::new(std::sync::Arc::new(config.clone())) {
+        // Passing while the configured path is stale is still worth saying:
+        // the platform runs, but `pro.json` no longer describes what it runs,
+        // and the next person to read that file would be misled.
+        Ok(_) if config.ghost_binary_is_rehomed() => check(
+            true,
+            "ghost binary",
+            &format!(
+                "found beside this checkout — paths.ghostBinary ({}) does not exist. \
+                 Update pro.json to silence this",
+                config.paths.ghost_binary
+            ),
+        ),
         Ok(_) => check(true, "ghost binary", "found"),
         Err(e) => {
             check(false, "ghost binary", &e.to_string());

@@ -808,15 +808,81 @@ impl Config {
 
     /// The `ghost` binary as a path, or `None` when it is a bare name that
     /// should be looked up on `PATH` the way a shell would.
+    ///
+    /// A configured path that no longer exists is treated as the stale hint
+    /// it is, not as an instruction: the sibling checkout is looked for again
+    /// and used if it is found. `pro.json` records where Vuuut was when
+    /// `setup` ran, and that path goes out of date for reasons that are not
+    /// mistakes — the checkout is renamed, the pair is cloned onto another
+    /// machine, the deployment directory is copied to a new host. In every
+    /// one of those cases the checkout is still next to this one, and
+    /// refusing to start over its name would be pedantry. See
+    /// [`crate::checkout`]; [`Self::ghost_binary_is_rehomed`] reports when
+    /// this has happened so the operator is told rather than left guessing.
     pub fn ghost_binary_path(&self) -> Option<PathBuf> {
         let p = Path::new(&self.paths.ghost_binary);
-        (p.is_absolute() || p.components().count() > 1)
-            .then(|| self.resolve_path(&self.paths.ghost_binary))
+        // A bare name belongs to `PATH`, and this does not second-guess it.
+        if !p.is_absolute() && p.components().count() <= 1 {
+            return None;
+        }
+        let configured = self.resolve_path(&self.paths.ghost_binary);
+        if configured.is_file() {
+            return Some(configured);
+        }
+        // Only a *relative* path is a portable hint. `setup` writes one
+        // precisely so the config survives being cloned elsewhere, and
+        // re-deriving it is restoring its meaning. An absolute path is this
+        // machine's deliberate answer — an operator who names
+        // `/opt/vuuut/target/release/ghost` wants that file, and quietly
+        // running a different binary found next door would be a worse
+        // outcome than refusing to start. So it stands, and fails loudly.
+        if Path::new(&self.paths.ghost_binary).is_absolute() {
+            return Some(configured);
+        }
+        match crate::checkout::discover_binary(&self.base_dir) {
+            Some(found) => Some(self.resolve_path(&found)),
+            // Nothing found, so the configured path stands and the error
+            // names what the operator actually wrote.
+            None => Some(configured),
+        }
+    }
+
+    /// Whether [`Self::ghost_binary_path`] had to go looking.
+    ///
+    /// True when the configured path does not exist but a checkout nearby
+    /// does. The platform runs either way; this is what lets it say so once
+    /// at startup instead of silently diverging from its own config file.
+    pub fn ghost_binary_is_rehomed(&self) -> bool {
+        let p = Path::new(&self.paths.ghost_binary);
+        if !p.is_absolute() && p.components().count() <= 1 {
+            return false;
+        }
+        !p.is_absolute()
+            && !self.resolve_path(&self.paths.ghost_binary).is_file()
+            && crate::checkout::discover_binary(&self.base_dir).is_some()
     }
 
     /// The themes copied into every new tenant, if any are configured.
+    ///
+    /// A stale *relative* path is re-derived on the same terms as the binary,
+    /// and for the same reason: a configured directory that moved would
+    /// otherwise mean every new site is created with no theme — a failure
+    /// that surfaces much later, in a customer's site, as a blank page.
+    ///
+    /// Unset is left unset. It is a documented state — sites start bare —
+    /// and an operator who cleared this field, or who ran `setup` before
+    /// cloning the CMS, has said something; finding themes nearby is not a
+    /// reason to overrule it. `doctor` reports it, which is the right place
+    /// to raise it.
     pub fn theme_source_path(&self) -> Option<PathBuf> {
-        self.paths.theme_source.as_deref().map(|p| self.resolve_path(p))
+        let raw = self.paths.theme_source.as_deref()?;
+        let configured = self.resolve_path(raw);
+        if configured.is_dir() || Path::new(raw).is_absolute() {
+            return Some(configured);
+        }
+        crate::checkout::discover_themes(&self.base_dir)
+            .map(|found| self.resolve_path(&found))
+            .or(Some(configured))
     }
 
     /// The control-plane database as a SQLite file.
@@ -1211,6 +1277,124 @@ mod tests {
         assert_eq!(mail.ses_smtp_host().as_deref(), Some("email-smtp.us-east-1.amazonaws.com"));
     }
 
+
+    /// Where a path actually lands. `resolve_path` joins rather than
+    /// normalises — `run/../../vuuut/x` is correct and is not spelled like
+    /// `vuuut/x` — so these compare the destination.
+    fn real(p: Option<PathBuf>) -> Option<PathBuf> {
+        p.map(|p| p.canonicalize().unwrap_or(p))
+    }
+
+    /// Build `<root>/vuuut` as a checkout and `<root>/vuuut-pro/run` as the
+    /// deployment directory, the layout a clone of the pair lands in.
+    fn side_by_side() -> (PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("pro-rehome-{}", crate::ids::object_id()));
+        let checkout = root.join("vuuut");
+        std::fs::create_dir_all(checkout.join("content/themes/casper")).unwrap();
+        std::fs::create_dir_all(checkout.join("target/release")).unwrap();
+        std::fs::write(checkout.join("target/release/ghost"), b"#!/bin/sh\n").unwrap();
+        let base = root.join("vuuut-pro/run");
+        std::fs::create_dir_all(&base).unwrap();
+        (root, base)
+    }
+
+    /// The failure this fixes: `pro.json` names a checkout that has been
+    /// renamed, so the recorded path resolves to nothing. The checkout is
+    /// still next door, so the platform finds it and runs.
+    #[test]
+    fn a_renamed_checkout_is_found_again() {
+        let (root, base) = side_by_side();
+        let mut c = cfg();
+        c.base_dir = base;
+        // What setup wrote before the rename.
+        c.paths.ghost_binary = "../../Vuuut-old/target/release/ghost".into();
+        c.paths.theme_source = Some("../../Vuuut-old/content/themes".into());
+
+        assert_eq!(real(c.ghost_binary_path()), real(Some(root.join("vuuut/target/release/ghost"))));
+        assert_eq!(real(c.theme_source_path()), real(Some(root.join("vuuut/content/themes"))));
+        assert!(c.ghost_binary_is_rehomed(), "the operator is not being told");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A path that does resolve is used as written, and reported as its own.
+    #[test]
+    fn a_correct_path_is_left_alone() {
+        let (root, base) = side_by_side();
+        let mut c = cfg();
+        c.base_dir = base;
+        c.paths.ghost_binary = "../../vuuut/target/release/ghost".into();
+        c.paths.theme_source = Some("../../vuuut/content/themes".into());
+
+        assert_eq!(real(c.ghost_binary_path()), real(Some(root.join("vuuut/target/release/ghost"))));
+        assert!(!c.ghost_binary_is_rehomed());
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// With nothing to find, the configured path stands: the error an
+    /// operator sees should name what they wrote, not a guess.
+    #[test]
+    fn a_stale_path_with_no_checkout_nearby_is_reported_as_written() {
+        let root = std::env::temp_dir().join(format!("pro-rehome-{}", crate::ids::object_id()));
+        let base = root.join("vuuut-pro/run");
+        std::fs::create_dir_all(&base).unwrap();
+        let mut c = cfg();
+        c.base_dir = base.clone();
+        c.paths.ghost_binary = "../../nowhere/target/release/ghost".into();
+
+        assert_eq!(c.ghost_binary_path(), Some(base.join("../../nowhere/target/release/ghost")));
+        assert!(!c.ghost_binary_is_rehomed());
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// An absolute path is not re-derived. An operator who names an exact
+    /// file wants that file, and a silent substitution would be worse than
+    /// the refusal they get instead.
+    #[test]
+    fn an_absolute_path_is_never_rehomed() {
+        let (root, base) = side_by_side();
+        let mut c = cfg();
+        c.base_dir = base;
+        c.paths.ghost_binary = "/nonexistent/ghost".into();
+        c.paths.theme_source = Some("/nonexistent/themes".into());
+
+        assert_eq!(c.ghost_binary_path(), Some(PathBuf::from("/nonexistent/ghost")));
+        assert_eq!(c.theme_source_path(), Some(PathBuf::from("/nonexistent/themes")));
+        assert!(!c.ghost_binary_is_rehomed());
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A bare name is `PATH`'s business — a packaged install, where there is
+    /// no checkout and none should be looked for.
+    #[test]
+    fn a_bare_name_is_left_to_the_path() {
+        let (root, base) = side_by_side();
+        let mut c = cfg();
+        c.base_dir = base;
+        c.paths.ghost_binary = "ghost".into();
+
+        assert_eq!(c.ghost_binary_path(), None);
+        assert!(!c.ghost_binary_is_rehomed());
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Themes left unset stay unset: it is a documented state, and a
+    /// checkout sitting next door is not a reason to overrule the operator.
+    #[test]
+    fn unset_themes_stay_unset() {
+        let (root, base) = side_by_side();
+        let mut c = cfg();
+        c.base_dir = base;
+        c.paths.theme_source = None;
+
+        assert_eq!(c.theme_source_path(), None);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
 
     fn cfg() -> Config {
         Config {

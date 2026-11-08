@@ -175,55 +175,30 @@ require_bin() {
 }
 
 # Build the tenant executable too when its configured path names a local CMS
-# checkout. Resolve the same file/environment layers as the platform first.
+# checkout.
+#
+# Where that is comes from the platform binary itself — `ghost-pro
+# tenant-binary` resolves pro.json, pro.<env>.json and the PRO_* environment
+# exactly as startup does, including the fallback to a Vuuut checkout beside
+# this one when the recorded path has been renamed or moved. This used to
+# re-implement that resolution in shell, which meant two answers to one
+# question and a clone that failed here while the platform would have
+# started fine.
 require_tenant_bin() {
-    command -v python3 >/dev/null 2>&1 || return 0
     local tenant_bin checkout
-    tenant_bin=$(python3 - "$PRO_DIR" <<'PYTHON'
-import json, os, pathlib, shutil, sys
-base = pathlib.Path(sys.argv[1]).resolve()
-env = os.environ.get("PRO_ENV", os.environ.get("NODE_ENV", "development"))
-config = {"paths": {"ghostBinary": "ghost"}}
-def merge(dst, src):
-    if isinstance(dst, dict) and isinstance(src, dict):
-        for key, value in src.items():
-            dst[key] = merge(dst.get(key), value)
-        return dst
-    return src
-try:
-    for filename in ("pro.json", "pro." + env + ".json"):
-        path = base / filename
-        if path.exists():
-            config = merge(config, json.loads(path.read_text()))
-    for key, value in os.environ.items():
-        if not key.startswith("PRO_") or key == "PRO_ENV":
-            continue
-        def camel(part):
-            first, *rest = part.lower().split("_")
-            return first + "".join(word.capitalize() for word in rest)
-        parts = [camel(part) for part in key[4:].split("__")]
-        if not all(parts):
-            continue
-        current = config
-        for part in parts[:-1]:
-            if not isinstance(current.get(part), dict):
-                current[part] = {}
-            current = current[part]
-        try:
-            parsed = json.loads(value)
-        except ValueError:
-            parsed = value
-        current[parts[-1]] = parsed
-    binary = config["paths"]["ghostBinary"]
-    if not isinstance(binary, str) or not binary:
-        raise ValueError("paths.ghostBinary must be a nonempty string")
-    print((base / binary).resolve() if "/" in binary else (shutil.which(binary) or binary))
-except (OSError, ValueError, TypeError, KeyError) as error:
-    print("cannot resolve tenant binary: " + str(error), file=sys.stderr)
-    sys.exit(1)
-PYTHON
-    )
-    if [ -x "$tenant_bin" ] && [ -f "$tenant_bin" ]; then return 0; fi
+    # Run it from the deployment directory: that is where the platform reads
+    # its config from, so it is where this has to ask.
+    if ! tenant_bin=$(cd "$PRO_DIR" && "$BIN" tenant-binary 2>/dev/null); then
+        echo "could not read $PRO_DIR/pro.json — run ./run.sh doctor" >&2
+        return 1
+    fi
+    # Empty means a bare name for PATH to resolve, which is a packaged
+    # install and nothing for this script to build.
+    [ -n "$tenant_bin" ] || return 0
+    if [ -f "$tenant_bin" ] && [ -x "$tenant_bin" ]; then return 0; fi
+
+    # Not built yet. If the path names a CMS checkout, build it rather than
+    # telling the operator to.
     if [[ "$tenant_bin" = */target/release/ghost ]]; then
         checkout=${tenant_bin%/target/release/ghost}
         if [ -f "$checkout/Cargo.toml" ] && [ -f "$checkout/crates/ghost/Cargo.toml" ]; then
@@ -234,7 +209,8 @@ PYTHON
     fi
     if [ ! -f "$tenant_bin" ] || [ ! -x "$tenant_bin" ]; then
         echo "tenant CMS binary is missing or not executable: $tenant_bin" >&2
-        echo "build Vuuut with cargo build --release, or correct paths.ghostBinary in $PRO_DIR/pro.json." >&2
+        echo "Clone Vuuut next to this directory and build it with cargo build --release," >&2
+        echo "or set paths.ghostBinary in $PRO_DIR/pro.json." >&2
         return 1
     fi
 }

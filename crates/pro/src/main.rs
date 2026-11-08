@@ -64,6 +64,7 @@ async fn run(command: cli::Command) -> Result<()> {
         }
         cli::Command::Setup(args) => cli::setup(args).await,
         cli::Command::Doctor => cli::doctor().await,
+        cli::Command::TenantBinary => cli::tenant_binary().await,
         cli::Command::Db => cli::db().await,
         cli::Command::CreateStaff(args) => cli::create_staff(args).await,
         cli::Command::Serve => serve_platform().await,
@@ -78,6 +79,18 @@ async fn serve_platform() -> Result<()> {
         env!("CARGO_PKG_VERSION"),
         config.env
     );
+
+    // The config named a checkout that is no longer there, and one nearby was
+    // used instead. The platform works either way, but an operator reading
+    // `pro.json` would otherwise have no way to know why it disagrees with
+    // what is running.
+    if config.ghost_binary_is_rehomed() {
+        tracing::warn!(
+            "paths.ghostBinary ({}) does not exist, so a Vuuut checkout next to this one is \
+             being used instead. Update pro.json to silence this",
+            config.paths.ghost_binary,
+        );
+    }
 
     // ---- storage ---------------------------------------------------------
     for dir in [

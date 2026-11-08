@@ -31,6 +31,7 @@
 //! layers the operator's console changes on top, so switching payment
 //! provider does not mean a restart. Only [`models::StaffRole::Owner`] may
 //! change the settings that decide how money is taken.
+pub mod checkout;
 pub mod config;
 pub mod database;
 pub mod error;

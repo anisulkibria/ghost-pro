@@ -1,6 +1,6 @@
-# Installing Vuuut-pro on another machine
+# Installing vuuut-pro on another machine
 
-Vuuut-pro is the managed-hosting control plane: it sells plans, provisions
+vuuut-pro is the managed-hosting control plane: it sells plans, provisions
 sites, and runs each customer's site as a child process behind one edge proxy.
 This guide takes you from a `git clone` to a platform you can sign into.
 
@@ -11,15 +11,15 @@ If you have cloned the repository and `./run.sh start` did nothing useful,
 
 ## Why there are two repositories
 
-Vuuut-pro does not contain a CMS. It *runs* one — Vuuut — once per
+vuuut-pro does not contain a CMS. It *runs* one — Vuuut — once per
 customer site, and it needs two things from that checkout:
 
 | What | Where it comes from | Used for |
 |---|---|---|
-| The `ghost` binary | `Vuuut/target/release/ghost` | Every tenant site is one of these processes |
-| The starting themes | `Vuuut/content/themes` | Copied into each new site when it is created |
+| The `ghost` binary | `vuuut/target/release/ghost` | Every tenant site is one of these processes |
+| The starting themes | `vuuut/content/themes` | Copied into each new site when it is created |
 
-So **install Vuuut first**. A Vuuut-pro with no Vuuut beside it will
+So **install Vuuut first**. A vuuut-pro with no Vuuut beside it will
 start, serve its dashboard, and then fail to provision the first site.
 
 ---
@@ -61,38 +61,46 @@ server, no system OpenSSL.
 ## Step 1 — Clone both repositories side by side
 
 The directory names and the layout both matter: side-by-side is the layout
-Vuuut-pro looks for, so this is the version that needs no configuration.
+vuuut-pro looks for, so this is the version that needs no configuration.
 
 ```bash
 mkdir -p ~/Ghost && cd ~/Ghost
-git clone https://github.com/anisulkibria/rust-ghost.git Vuuut
-git clone https://github.com/anisulkibria/ghost-pro.git  Vuuut-pro
+git clone https://github.com/anisulkibria/rust-ghost.git vuuut
+git clone https://github.com/anisulkibria/ghost-pro.git  vuuut-pro
 ```
 
 You should end up with:
 
 ```
 ~/Ghost
-├── Vuuut      the CMS — one process per customer site
-└── Vuuut-pro       the platform — this repository
+├── vuuut           the CMS — one process per customer site
+└── vuuut-pro       the platform — this repository
 ```
 
-Any of `Vuuut`, `ghost-rust` or `rust-ghost` is recognised, as a sibling
-of `Vuuut-pro` or one level further out. Somewhere else entirely is fine too —
-[Step 3](#step-3--start-the-platform) says how to point at it.
+Any of `vuuut`, `ghost-rust` or `rust-ghost` is recognised, in either case,
+as a sibling of `vuuut-pro` or up to three levels further out. Somewhere else
+entirely is fine too — [Step 3](#step-3--start-the-platform) says how to point
+at it.
+
+You are not locked in by that choice. `pro.json` records where the checkout
+was when `setup` ran, and the platform treats that record as a hint: if the
+path no longer resolves — the directory was renamed, the pair was cloned onto
+another machine under different names, the deployment directory was copied to
+a new host — it searches again and runs from what it finds, saying so once in
+the log and in `doctor`. Nothing has to be re-run by hand after a move.
 
 ## Step 2 — Build both
 
 ```bash
-cd ~/Ghost/Vuuut && cargo build --release
-cd ~/Ghost/Vuuut-pro  && cargo build --release
+cd ~/Ghost/vuuut && cargo build --release
+cd ~/Ghost/vuuut-pro  && cargo build --release
 ```
 
 The first build of each takes a few minutes and is most of the time this
 guide costs. Confirm both binaries exist before continuing:
 
 ```bash
-ls -l ~/Ghost/Vuuut/target/release/ghost ~/Ghost/Vuuut-pro/target/release/ghost-pro
+ls -l ~/Ghost/vuuut/target/release/ghost ~/Ghost/vuuut-pro/target/release/ghost-pro
 ```
 
 `./run.sh start` also builds a missing CMS binary when `paths.ghostBinary`
@@ -108,7 +116,7 @@ produce `unable to open database file` until it is restarted.
 ## Step 3 — Start the platform
 
 ```bash
-cd ~/Ghost/Vuuut-pro
+cd ~/Ghost/vuuut-pro
 ./run.sh start
 ```
 
@@ -116,17 +124,17 @@ On a fresh clone there is no `run/`, so the script creates it and writes a
 local-development `pro.json` before starting — printing what it found:
 
 ```
-no pro.json in /Users/you/Ghost/Vuuut-pro/run — writing one for local development…
+no pro.json in /Users/you/Ghost/vuuut-pro/run — writing one for local development…
 
-Wrote /Users/you/Ghost/Vuuut-pro/run/pro.json
+Wrote /Users/you/Ghost/vuuut-pro/run/pro.json
 
-Found a Vuuut checkout at ../../Vuuut (relative to this directory,
+Found a Vuuut checkout at ../../vuuut (relative to this directory,
 so this config stays valid on other machines).
 
 started (pid 12345)
   dashboard  http://pro.localhost:8080/dashboard
   console    http://pro.localhost:8080/console
-  log        /Users/you/Ghost/Vuuut-pro/run/server.log
+  log        /Users/you/Ghost/vuuut-pro/run/server.log
 ```
 
 Run `./run.sh init` instead if you would rather read the config over before
@@ -169,7 +177,7 @@ ports, mail, billing — run against the deployment directory as it stands:
 ```
   ✓ config             loaded for development mode
   ✓ ghost binary       found
-  ✓ themes             2 available in .../Vuuut/content/themes
+  ✓ themes             2 available in .../vuuut/content/themes
   ✓ data directory     writable
   ✓ database           open and migrated
   ✓ operator login     1 configured
@@ -227,8 +235,8 @@ repository — it is per-machine, and on a real platform it holds credentials.
   "subdomainBase": "localhost",
   "paths": {
     "dataDir": "data",
-    "ghostBinary": "../../Vuuut/target/release/ghost",
-    "themeSource": "../../Vuuut/content/themes"
+    "ghostBinary": "../../vuuut/target/release/ghost",
+    "themeSource": "../../vuuut/content/themes"
   },
   "ssl": { "enabled": false },
   "billing": { "provider": "none" },
@@ -287,7 +295,7 @@ storage design, so a move is one copy:
 2. Copy `run/data` across:
 
    ```bash
-   rsync -a ~/Ghost/Vuuut-pro/run/data/ newmachine:~/Ghost/Vuuut-pro/run/data/
+   rsync -a ~/Ghost/vuuut-pro/run/data/ newmachine:~/Ghost/vuuut-pro/run/data/
    ```
 
 3. On the new machine, follow Steps 1–3 above. `init` writes a fresh
@@ -308,13 +316,13 @@ The local install above is plain HTTP on a hostname that needs no DNS. A real
 platform differs in four ways:
 
 ```bash
-cd ~/Ghost/Vuuut-pro
+cd ~/Ghost/vuuut-pro
 mkdir -p run
 (cd run && ../target/release/ghost-pro setup --force \
     --url https://pro.example.com \
     --subdomain-base sites.example.com \
-    --ghost-binary ../../Vuuut/target/release/ghost \
-    --theme-source ../../Vuuut/content/themes \
+    --ghost-binary ../../vuuut/target/release/ghost \
+    --theme-source ../../vuuut/content/themes \
     --ssl --email you@example.com)
 ```
 
@@ -362,7 +370,7 @@ which `SIGKILL` skips.
 | `no deployment directory at .../run` | An older `run.sh` that would not bootstrap | `git pull`, then `./run.sh start` |
 | `paths.ghostBinary points at … which does not exist` | Vuuut not built, or wrong path | `cargo build --release` in Vuuut; check `paths.ghostBinary` |
 | `could not find the "ghost" binary on PATH` | No checkout was found at setup, so the config has a bare name | Set `paths.ghostBinary` to your `target/release/ghost` |
-| `paths.themeSource … does not exist; skipping` | Wrong path; sites are created with no theme | Point it at `Vuuut/content/themes`, then recreate the site |
+| `paths.themeSource … does not exist; skipping` | Wrong path; sites are created with no theme | Point it at `vuuut/content/themes`, then recreate the site |
 | `port 8080 is held by something that is not this platform` | Another process, often a second deployment | `PRO_SERVER__PORT=8099 ./run.sh start` |
 | Started, but nothing on the port | Startup failed after the fork | `./run.sh log` — a bad config or a failed migration says so there |
 | A site 502s or hangs on first load | The site's process is starting, or failed to | `./run.sh tenants`, then `./run.sh log` |
