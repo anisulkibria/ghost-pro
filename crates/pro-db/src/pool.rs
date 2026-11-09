@@ -228,6 +228,18 @@ pub async fn open_in_memory() -> Result<Db> {
 /// read is a schema that grows bugs. The two files are kept in step by
 /// [`crate::tests::both_engines_declare_the_same_tables`].
 pub async fn migrate(pool: &Db) -> Result<()> {
+    if engine() == Engine::MySql {
+        // Initial tables explicitly use unicode_ci. Migration 0003 has
+        // foreign keys but inherits the database default, which can be
+        // 0900_ai_ci on a fresh MySQL 8+ server. Align future table defaults
+        // before running the unchanged migration; existing columns/checksums
+        // are untouched.
+        let (database,collation):(String,String)=sqlx::query_as("SELECT DATABASE(),DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=DATABASE()")
+            .fetch_one(pool).await.db_err()?;
+        if collation != "utf8mb4_unicode_ci" {
+            sqlx::raw_sql(&format!("ALTER DATABASE `{}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",database.replace('`',"``"))).execute(pool).await.db_err()?;
+        }
+    }
     let result = match engine() {
         Engine::Sqlite => sqlx::migrate!("../../migrations/sqlite").run(pool).await,
         Engine::MySql => sqlx::migrate!("../../migrations/mysql").run(pool).await,

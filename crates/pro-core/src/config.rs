@@ -49,6 +49,9 @@ pub struct Config {
     pub billing: BillingConfig,
     #[serde(default)]
     pub mail: MailConfig,
+    /// Optional native analytics control plane. Platform credential stays here.
+    #[serde(default)]
+    pub click: serde_json::Value,
     /// The plan catalogue. Replaces the built-in list wholesale when present,
     /// so an operator's prices are never merged with ours field by field.
     #[serde(default)]
@@ -1407,6 +1410,7 @@ mod tests {
             ssl: SslConfig { enabled: true, ..Default::default() },
             billing: BillingConfig::default(),
             mail: MailConfig::default(),
+            click: serde_json::Value::Null,
             plans: default_plans(),
             reserved_slugs: vec!["acme".into()],
             public_addresses: vec![],

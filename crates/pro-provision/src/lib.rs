@@ -29,6 +29,7 @@
 //! is the property worth preserving — see [`pro_core::TenantStore`].
 pub mod backup;
 pub mod config_file;
+pub mod click;
 mod lifecycle;
 mod storage;
 pub mod tenant_db;

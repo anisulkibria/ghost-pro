@@ -99,7 +99,7 @@ fn pack_blocking(tenant_dir: &Path, dest: &Path, db_snapshot: Option<&Path>) -> 
             if rel.components().count() == 1 && name.starts_with("config.") && name.ends_with(".json") {
                 let mut config: serde_json::Value = serde_json::from_slice(&bytes)?;
                 let managed = config.get_mut("hostSettings").and_then(serde_json::Value::as_object_mut)
-                    .and_then(|host| host.remove("managedMail")).is_some();
+                    .map(|host| {let mail=host.remove("managedMail").is_some(); let click=host.contains_key("click"); if click {host.insert("click".into(),serde_json::json!({"disabled":true}));} mail || click}).unwrap_or(false);
                 // This block is inherited from the platform too; tenant-owned mail
                 // lives in the tenant DB, never in this generated config.
                 let inherited = config.as_object_mut().and_then(|c| c.remove("mail")).is_some();
@@ -412,7 +412,7 @@ mod tests {
     #[tokio::test]
     async fn downloadable_backups_omit_platform_mail_credentials() {
         let dir = sample_tenant().await;
-        let config = serde_json::json!({"url":"https://a.example", "mail":{"options":{"auth":{"pass":"inherited-secret"}}}, "hostSettings":{"limits":{"staff":{"max":2}}, "managedMail":{"ses_smtp_pass":"platform-secret", "mailgun_api_key":"platform-key"}}});
+        let config = serde_json::json!({"url":"https://a.example", "mail":{"options":{"auth":{"pass":"inherited-secret"}}}, "hostSettings":{"limits":{"staff":{"max":2}}, "managedMail":{"ses_smtp_pass":"platform-secret", "mailgun_api_key":"platform-key"}, "click":{"integrationKey":"native-website-secret"}}});
         tokio::fs::write(dir.join("config.production.json"), config.to_string()).await.unwrap();
         let archive = dir.with_extension("zip");
         pack(&dir, &archive, None).await.unwrap();
@@ -420,6 +420,7 @@ mod tests {
         unpack(&archive, &restored).await.unwrap();
         let raw = tokio::fs::read_to_string(restored.join("config.production.json")).await.unwrap();
         assert!(!raw.contains("platform-secret"));
+        assert!(!raw.contains("native-website-secret"));
         assert!(!raw.contains("platform-key"));
         assert!(!raw.contains("inherited-secret"));
         let config: serde_json::Value = serde_json::from_str(&raw).unwrap();

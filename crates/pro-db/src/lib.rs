@@ -45,6 +45,7 @@
 //! | [`usage`] | sampled per-tenant usage, for quotas and charts |
 //! | [`backups`] | snapshot archives, kept a few per tenant |
 pub mod accounts;
+mod click;
 pub mod audit;
 pub mod backups;
 pub mod dialect;

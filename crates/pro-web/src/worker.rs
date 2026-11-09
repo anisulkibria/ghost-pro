@@ -19,6 +19,22 @@ use std::time::Duration;
 
 use crate::state::AppState;
 
+/// Native analytics has its own cadence and persistent retry state, so a slow
+/// report service never holds the provisioning/backup job queue.
+pub async fn run_click(state: AppState) {
+    match pro_provision::click::Settings::load(&state.config) {
+        Ok(Some(_)) => {
+            if let Err(e)=pro_provision::click::reconcile(&state.db).await {tracing::error!("Click reconciliation: {e}");}
+        },
+        Ok(None)=>return,
+        Err(_)=>{tracing::error!("Invalid native Click configuration");return;}
+    }
+    loop {
+        if pro_provision::click::sync_once(&state.db,&state.config,&state.supervisor).await.is_err() {tracing::warn!("Click synchronization failed; pending state retained");}
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
 /// Claim and run jobs, forever.
 pub async fn run_jobs(state: AppState) {
     // Anything left `running` by a previous process would never be claimed

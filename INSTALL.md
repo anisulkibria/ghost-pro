@@ -497,3 +497,7 @@ report data private. Update both binaries for reporting and enforcement.
 Known historical newsletter submissions are imported into the usage ledger.
 Transactional mail sent before this feature was installed has no historic
 ledger and cannot be reconstructed; its usage is tracked from installation.
+
+For optional native analytics provisioning, staff access and CMS reports, see
+[NATIVE_CLICK.md](NATIVE_CLICK.md). Enable it only after registering this
+platform at the independent Click service and deploying the matching CMS build.

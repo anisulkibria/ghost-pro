@@ -161,6 +161,7 @@ async fn serve_platform() -> Result<()> {
 
     // ---- background loops ------------------------------------------------
     tokio::spawn(pro_web::worker::run_jobs(state.clone()));
+    tokio::spawn(pro_web::worker::run_click(state.clone()));
     tokio::spawn(pro_web::worker::run_hibernation(state.clone()));
     tokio::spawn(pro_web::worker::run_housekeeping(state.clone()));
 

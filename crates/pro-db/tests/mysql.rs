@@ -518,3 +518,17 @@ fn test_config() -> pro_core::Config {
     cfg.plans = pro_core::plans::default_plans();
     cfg
 }
+
+mysql_test!(native_click_changes_are_transactional_and_revisioned, |pool| {
+    let account=pro_db::accounts::create(&pool,"click@mysql.test","Click","unused").await.unwrap();
+    let t=pro_db::tenants::create(&pool,&account.id,"click","Click","starter",&pro_core::now_iso(),22000,23000).await.unwrap();
+    let first:i64=sqlx::query_scalar("SELECT revision FROM click_sync WHERE tenant_id=?").bind(&t.id).fetch_one(&pool).await.unwrap();
+    let mut tx=pool.begin().await.unwrap();
+    sqlx::query("UPDATE tenants SET status='active' WHERE id=?").bind(&t.id).execute(&mut *tx).await.unwrap();
+    tx.rollback().await.unwrap();
+    assert_eq!(first,sqlx::query_scalar::<_,i64>("SELECT revision FROM click_sync WHERE tenant_id=?").bind(&t.id).fetch_one(&pool).await.unwrap());
+    pro_db::tenants::set_status(&pool,&t.id,pro_core::TenantStatus::Active).await.unwrap();
+    pro_db::domains::add(&pool,&t.id,"click.example.test",pro_core::DomainKind::Subdomain,true).await.unwrap();
+    let revision:i64=sqlx::query_scalar("SELECT revision FROM click_sync WHERE tenant_id=?").bind(&t.id).fetch_one(&pool).await.unwrap();
+    assert_eq!(first+2,revision);
+});

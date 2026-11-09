@@ -860,6 +860,19 @@ creating a site.</p>"#
         },
     )));
 
+    if pro_provision::click::Settings::load(&state.config)?.is_some() {
+        body.push_str(&view::section("Vuuut Click analytics"));
+        type ClickSyncRow=(String,i64,i64,Option<String>,Option<String>);
+        let sync:Option<ClickSyncRow>=sqlx::query_as("SELECT state,revision,synced_revision,last_error,verification_token FROM click_sync WHERE tenant_id=?").bind(&tenant.id).fetch_optional(&state.db).await.map_err(ProError::internal)?;
+        if let Some((status,revision,synced,error,verification))=sync {
+            body.push_str(&format!("<p>Status: {} · revision {synced}/{revision}</p>",esc(&status)));
+            if let Some(error)=error {body.push_str(&format!("<p role=\"status\">{}</p>",esc(&error)));}
+            if status=="waiting_dns" {
+                if let Some(token)=verification {body.push_str(&format!("<p>Add a TXT record at <code>_vuuut-click.{}</code> with value <code>vuuut-click={}</code>.</p>",esc(&host),esc(&token)));}
+            }
+        }
+        body.push_str(&format!(r#"<p><a href="{scheme}://{host}/ghost/analytics/click/" target="_blank" rel="noopener">Open native analytics in your site's Admin</a></p><form method="post" action="/dashboard/sites/{id}/click"><button class="btn outlined small" name="action" value="retry">Retry sync</button> <button class="btn outlined small" name="action" value="rotate">Rotate credential</button> <button class="btn outlined small" name="action" value="disconnect">Disconnect</button> <button class="btn outlined small" name="action" value="connect">Reconnect</button></form>"#,host=attr(&host),id=attr(&tenant.id)));
+    }
     body.push_str(&backups_section(state, &tenant).await?);
 
     Ok(shell(
@@ -1425,5 +1438,22 @@ pub async fn restore_site(
         )
         .await;
         Ok(redirect_with(&back, Flash::ok("Deletion cancelled. Your site is safe.")))
+    }.await)
+}
+
+/// Customer controls are scoped through the same tenant ownership check as
+/// restarts and billing; no remote or tenant credentials enter the response.
+pub async fn click_action(State(state):State<AppState>,headers:HeaderMap,Path(id):Path<String>,Form(form):Form<HashMap<String,String>>)->Response {
+    let chrome=state.chrome(&headers);
+    let back=format!("/dashboard/sites/{id}");
+    reply::or_redirect(&back,&chrome,async {
+        auth::require_same_origin(&headers,&state.config.host())?;
+        let account=auth::account(&state,&headers).await?;
+        auth::owned_tenant(&state,&account,&id).await?;
+        if pro_provision::click::Settings::load(&state.config)?.is_none() {return Err(ProError::BadRequest("The platform has not configured Click".into()));}
+        let action=form.get("action").map(String::as_str).unwrap_or("");
+        pro_provision::click::action(&state.db,&id,action).await?;
+        pro_db::audit::record(&state.db,&format!("account:{}",account.id),&format!("click.{action}"),Some(&id),Some(&account.id),serde_json::json!({})).await;
+        Ok(redirect_with(&back,Flash::ok("Analytics change queued.")))
     }.await)
 }
