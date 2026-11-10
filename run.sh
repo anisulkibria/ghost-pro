@@ -20,6 +20,42 @@ set -euo pipefail
 cd "$(dirname "$0")"
 ROOT=$(pwd)
 
+# Private per-machine settings, never committed (see .env.example). Plain
+# KEY=value lines, '#' comments, optional quotes. A variable already set in the
+# shell wins over the file, so a one-off `PRO_DIR=/x ./run.sh …` still works.
+load_env_file() {
+    local line key value
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=${line#"${line%%[![:space:]]*}"}
+        case $line in ''|'#'*) continue ;; esac
+        line=${line#export }
+        key=${line%%=*}; value=${line#*=}
+        case $key in ''|*[!A-Za-z0-9_]*) echo "ignoring malformed line in $1: $line" >&2; continue ;; esac
+        [ -n "${!key+x}" ] && continue
+        case $value in \"*\") value=${value#\"}; value=${value%\"} ;; \'*\') value=${value#\'}; value=${value%\'} ;; esac
+        export "$key=$value"
+    done < "$1"
+}
+# Where the deployment directory is, where the Vuuut checkout is, which port.
+# PRO_* variables are read by the platform itself as config overrides
+# (PRO_<SECTION>__<KEY>), so what is set here is what the binary sees.
+[ -f "$ROOT/.env" ] && load_env_file "$ROOT/.env"
+
+# VUUUT_DIR names the CMS checkout outright, for a layout where it is not
+# next to this one. It becomes the two paths the platform reads, unless those
+# are already set explicitly. Made absolute here because the platform resolves
+# a relative path against the deployment directory, not against this one, and
+# an operator writing `../vuuut` in this file means relative to this file.
+if [ -n "${VUUUT_DIR:-}" ]; then
+    if [ ! -d "$VUUUT_DIR" ]; then
+        echo "VUUUT_DIR is set to '$VUUUT_DIR' but that is not a directory" >&2
+        exit 1
+    fi
+    VUUUT_DIR=$(cd "$VUUUT_DIR" && pwd)
+    export PRO_PATHS__GHOST_BINARY=${PRO_PATHS__GHOST_BINARY:-$VUUUT_DIR/target/release/ghost}
+    export PRO_PATHS__THEME_SOURCE=${PRO_PATHS__THEME_SOURCE:-$VUUUT_DIR/content/themes}
+fi
+
 BIN=$ROOT/target/release/ghost-pro
 # Where pro.json and data/ live. The platform reads its config from the
 # working directory, which is why this is a directory and not a file path.
@@ -492,8 +528,11 @@ usage: ./run.sh <command>
   rebuild    cargo clean && cargo build --release
   test       cargo test --workspace
 
-environment:
+environment (also read from ./.env, which is gitignored — see .env.example):
   PRO_DIR               deployment directory (default: ./run)
+  VUUUT_DIR             the Vuuut checkout tenants run from, when it is not
+                        next to this directory (sets PRO_PATHS__GHOST_BINARY
+                        and PRO_PATHS__THEME_SOURCE)
   PRO_SERVER__PORT      override the edge port from pro.json
   PRO_URL               platform URL written by init
                         (default: http://pro.localhost:8080)

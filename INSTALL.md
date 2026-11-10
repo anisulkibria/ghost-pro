@@ -109,7 +109,7 @@ binary path is reported before the platform is launched. Startup failures show
 only output from the current launch; older errors remain in `run/server.log`.
 
 Stop the platform with `./run.sh stop` before moving or renaming its directory,
-then start it from the new location. A running SQLite connection pool retains
+then start it from the new location. If the Vuuut checkout is not next to this one, say where it is in a private `.env` beside `run.sh` (`VUUUT_DIR=/path/to/vuuut`; see `.env.example`) — `run.sh` loads it and passes the paths to the platform, so neither `pro.json` nor anything in the tree needs editing after a move. A running SQLite connection pool retains
 its old absolute database path, so moving its directory while it is running can
 produce `unable to open database file` until it is restarted.
 
