@@ -285,36 +285,56 @@ code, .mono { font-family: var(--mono); }
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 [hidden] { display: none !important; }
 
-/* ---- shell: nav rail + content ---- */
-.shell { display: flex; min-height: 100vh; }
-.rail { width: 240px; flex: none; padding: 8px 10px 12px; display: flex; flex-direction: column; gap: 2px;
-  background: var(--sc-low); position: sticky; top: 0; height: 100vh; overflow-y: auto;
-  scrollbar-width: thin; scrollbar-color: var(--outline-variant) transparent;
+/* ---- shell: nav rail + content ----
+   The rail is a 246px column with the same proportions as the Click
+   dashboard's sidebar: generous top padding, the brand given real room
+   beneath it, pill-shaped tabs. It is sticky and never scrolls itself — the
+   nav list inside it does — so a popover in its foot can reach past its
+   edge instead of growing the rail a scrollbar. */
+.shell { display: flex; min-height: 100vh; --rail-w: 246px; }
+.rail { width: var(--rail-w); flex: none; padding: 28px 16px 16px; display: flex; flex-direction: column;
+  background: var(--sc-low); position: sticky; top: 0; height: 100vh; z-index: 30;
   border-right: 1px solid color-mix(in srgb, var(--outline-variant) 55%, transparent); }
-/* One mark only, given the whole slot so it can run larger than it could
-   beside a label. */
-.brand { display: flex; align-items: center; gap: 10px; min-height: 64px;
-  padding: 12px 10px 14px; color: inherit; text-decoration: none; border-radius: 12px; }
+.rail .nav-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: thin; scrollbar-color: var(--outline-variant) transparent;
+  margin: 0 -6px; padding: 0 6px; }
+/* The brand lockup: mark beside wordmark, with the tag letterspaced under
+   it. The 40px beneath is what separates it from the first tab, so the
+   column reads as masthead, then navigation, rather than one list. */
+.brand { display: flex; align-items: center; gap: 12px; min-height: 0;
+  padding: 10px 12px; margin: 0 0 40px; color: inherit; text-decoration: none; border-radius: 16px; }
 .brand:hover { background: color-mix(in srgb, var(--on-surface) 6%, transparent); }
 .brand:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-.brand .mark { color: var(--primary); display: grid; place-items: center; flex: none; }
-.brand .mark svg { width: 34px; height: 34px; }
+/* The platform's tile: an italic serif `v` on a rounded square with one
+   corner squared off, the arrow riding its top-right — the Click
+   dashboard's mark, drawn at this rail's scale. */
+.brand-mark { font-family: Georgia, 'Iowan Old Style', serif; font-style: italic; font-weight: 400;
+  width: 40px; height: 43px; border-radius: 14px 14px 14px 4px; display: grid; place-items: center;
+  background: var(--primary); color: var(--on-primary); font-size: 37px; line-height: 1;
+  position: relative; flex: none; }
+.brand-mark span { position: absolute; font-family: var(--font); font-style: normal; font-weight: 600;
+  font-size: 16px; line-height: 1; right: 3px; top: 2px; }
 .brand .brand-name { min-width: 0; overflow-wrap: anywhere; }
-.brand b { font-size: 18px; font-weight: 600; letter-spacing: -.1px; display: block; line-height: 1.2; }
-.brand .tag { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: .08em; color: var(--primary); }
-.nav-item { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 10px;
+/* The wordmark and its sub-label at the Click dashboard's scale: a tight,
+   heavy name with a tiny tracked-out caption in the accent beneath it. */
+.brand b { font-size: 26px; font-weight: 650; letter-spacing: -1.2px; display: block; line-height: 1; }
+.brand .tag { display: block; font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 4px; color: var(--primary); margin: 5px 0 0 2px; line-height: 1.5;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Tabs: 44px pills, which is the Click sidebar's row, and a 4px rhythm
+   between them so the selected one reads as a shape, not a stripe. */
+.nav-item { display: flex; align-items: center; gap: 14px; padding: 9px 14px; margin: 4px 0; border-radius: 999px;
   text-decoration: none; color: var(--on-surface-variant); font-size: 13.5px; font-weight: 500;
   transition: background var(--dur) var(--ease), color var(--dur) var(--ease); position: relative; }
-.nav-item:hover { background: color-mix(in srgb, var(--on-surface) 6%, transparent); }
+.nav-item:hover { background: color-mix(in srgb, var(--on-surface) 6%, transparent); color: var(--on-surface); }
 .nav-item.active { background: var(--secondary-container); color: var(--on-secondary-container); font-weight: 600; }
 .nav-item:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .nav-item .nav-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The rail runs at its own, tighter scale: the tinted squares elsewhere lead
    56px list rows, where 40px is right; as navigation they only have to read
-   at a glance. */
-.rail .ic { width: 28px; height: 28px; border-radius: 8px; }
-.rail .ic svg { width: 17px; height: 17px; }
+   at a glance. 26px inside a 9px-padded pill makes the 44px row. */
+.rail .ic { width: 26px; height: 26px; border-radius: 8px; }
+.rail .ic svg { width: 16px; height: 16px; }
 .ic { width: 40px; height: 40px; border-radius: 14px; display: grid; place-items: center; flex: none; }
 .ic svg { width: 21px; height: 21px; }
 .tint-blue { background: var(--blue-bg); color: var(--blue-fg); }
@@ -325,9 +345,9 @@ code, .mono { font-family: var(--mono); }
 .tint-teal { background: var(--teal-bg); color: var(--teal-fg); }
 .tint-red { background: var(--red-bg); color: var(--red-fg); }
 .tint-slate { background: var(--slate-bg); color: var(--slate-fg); }
-.rail-foot { margin-top: auto; padding-top: 10px; position: relative;
+.rail-foot { margin-top: auto; padding-top: 14px; position: relative;
   border-top: 1px solid color-mix(in srgb, var(--outline-variant) 55%, transparent); }
-.who { display: flex; align-items: center; gap: 8px; padding: 8px 6px 2px; }
+.who { display: flex; align-items: center; gap: 8px; padding: 6px 4px 0; }
 .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--primary); color: var(--on-primary);
   display: grid; place-items: center; font-weight: 600; font-size: 13px; flex: none; }
 .who b { font-size: 13px; font-weight: 600; display: block; line-height: 1.2; }
@@ -343,8 +363,11 @@ code, .mono { font-family: var(--mono); }
 .who-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .who-link > div { min-width: 0; }
 .who-link b, .who-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+/* Content runs to 1500px — the Click dashboard's measure — with a gutter
+   that grows with the viewport, so a 27" display gets a wide, evenly
+   framed page rather than an 1120px column marooned in blank surface. */
 .main { flex: 1; min-width: 0; }
-.content { max-width: 1120px; margin: 0 auto; padding: 0 24px 64px; }
+.content { max-width: 1500px; margin: 0 auto; padding: 0 clamp(24px, 3vw, 48px) 64px; }
 .content.narrow { max-width: 640px; }
 
 /* ---- appearance menu ----
@@ -718,9 +741,11 @@ table.tbl td.empty-cell { padding: 32px 16px; text-align: center; color: var(--o
    which are `pointer-events: none` but painted later in the source. */
 .auth-top { position: absolute; top: 16px; right: 16px; z-index: 2; }
 .auth-box { width: min(420px, 100%); position: relative; animation: rise .5s var(--ease) both; }
-.auth-logo { width: 60px; height: 60px; border-radius: 20px; background: var(--primary-container);
-  color: var(--on-primary-container); display: grid; place-items: center; margin: 0 auto 20px; }
-.auth-logo svg { width: 38px; height: 38px; }
+.auth-logo { font-family: Georgia, 'Iowan Old Style', serif; font-style: italic; font-size: 54px; line-height: 1;
+  position: relative; width: 60px; height: 64px; border-radius: 20px 20px 20px 6px;
+  background: var(--primary); color: var(--on-primary); display: grid; place-items: center; margin: 0 auto 20px; }
+.auth-logo span { position: absolute; font-family: var(--font); font-style: normal; font-weight: 600;
+  font-size: 22px; line-height: 1; right: 5px; top: 4px; }
 .auth-box h1 { text-align: center; font-size: 26px; font-weight: 600; margin: 0 0 6px; }
 .auth-box .sub { text-align: center; color: var(--on-surface-variant); font-size: 14px; margin: 0 0 24px; }
 .auth-box .card { padding: 26px; }
@@ -733,7 +758,8 @@ table.tbl td.empty-cell { padding: 32px 16px; text-align: center; color: var(--o
 .topbar { display: flex; align-items: center; gap: 16px; padding: 14px 24px; flex-wrap: wrap;
   border-bottom: 1px solid color-mix(in srgb, var(--outline-variant) 55%, transparent); }
 .topbar .brand { min-height: 0; padding: 4px 8px; }
-.topbar .brand .mark svg { width: 28px; height: 28px; }
+.topbar .brand-mark { width: 30px; height: 32px; font-size: 28px; border-radius: 10px 10px 10px 3px; }
+.topbar .brand-mark span { font-size: 11px; right: 2px; top: 1px; }
 .topbar .brand b { font-size: 17px; }
 .topbar nav { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .topbar nav a { text-decoration: none; color: var(--on-surface-variant); font-size: 13.5px;
@@ -754,28 +780,70 @@ table.tbl td.empty-cell { padding: 32px 16px; text-align: center; color: var(--o
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
-/* ---- responsive: the rail becomes a top strip ---- */
+/* ---- responsive: the rail narrows in three stages ----
+   Same stages as the Click dashboard. Under 1200px the column tightens;
+   under 950px it drops to an 80px icon rail; under 650px it becomes a top
+   strip. The content rules at 919px are kept where they were: losing the
+   rail's width is a gain for the content, not a loss, so they only answer
+   to the viewport. */
+@media (max-width: 1200px) {
+  .shell { --rail-w: 216px; }
+  .rail { padding: 24px 12px 14px; }
+  .brand { padding: 8px 10px; margin-bottom: 32px; gap: 10px; }
+  .brand-mark { width: 36px; height: 39px; font-size: 33px; border-radius: 12px 12px 12px 4px; }
+  .brand-mark span { font-size: 14px; right: 2px; top: 2px; }
+  .brand b { font-size: 23px; }
+  .brand .tag { letter-spacing: 3px; }
+  .nav-item { padding: 9px 12px; gap: 12px; }
+}
 @media (max-width: 919px) {
+  .content { padding: 0 16px 48px; }
+  .page-head { flex-wrap: wrap; }
+  .grid2 { grid-template-columns: 1fr; }
+}
+/* Icon rail: the tabs keep their 44px footprint as round targets, and the
+   labels stay in the accessibility tree — only sighted users lose them. */
+@media (min-width: 651px) and (max-width: 950px) {
+  .shell { --rail-w: 80px; }
+  .rail { padding: 22px 10px 14px; align-items: center; }
+  .rail .nav-scroll { width: 100%; margin: 0; padding: 0; overflow-x: visible; }
+  .brand { padding: 8px; margin: 0 0 24px; gap: 0; justify-content: flex-start; }
+  .brand .brand-name { display: none; }
+  .brand-mark { width: 38px; height: 41px; font-size: 35px; }
+  .nav-item { width: 44px; height: 44px; padding: 0; margin: 4px auto; gap: 0; justify-content: center; }
+  .nav-item .nav-label { position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); white-space: nowrap; }
+  .rail-foot { width: 100%; padding: 14px 0 0; }
+  .who { flex-direction: column; gap: 10px; padding: 6px 0 0; }
+  .who-link { margin: 0; padding: 2px; }
+  .who-link > div { display: none; }
+  /* The popover is wider than the rail here. It opens upward from the
+     foot, as on the full rail, but at its own width over the content. */
+  .rail .theme-menu .pop { left: 0; right: auto; width: 220px; }
+}
+/* Top strip. */
+@media (max-width: 650px) {
   .shell { flex-direction: column; }
   .rail { width: 100%; height: auto; position: static; flex-direction: column; overflow: visible;
-    padding-bottom: 0; border-right: none;
+    padding: 0 0 0; border-right: none;
     border-bottom: 1px solid color-mix(in srgb, var(--outline-variant) 55%, transparent); }
-  .brand { padding: 14px 8px 10px; min-height: 0; }
-  .rail .nav-scroll { display: flex; gap: 4px; overflow-x: auto; padding: 4px 8px 12px;
-    scrollbar-width: none; scroll-snap-type: x proximity; scroll-padding-inline: 8px; }
+  .brand { padding: 14px 10px 10px; margin: 0 6px; min-height: 0; gap: 10px; }
+  .brand-mark { width: 32px; height: 35px; font-size: 30px; border-radius: 10px 10px 10px 3px; }
+  .brand-mark span { font-size: 12px; right: 2px; top: 1px; }
+  .brand b { font-size: 21px; }
+  .brand .tag { font-size: 8px; letter-spacing: 3px; margin-top: 3px; }
+  .rail .nav-scroll { display: flex; flex: none; gap: 4px; margin: 0; overflow-x: auto; overflow-y: hidden;
+    padding: 4px 12px 12px; scrollbar-width: none; scroll-snap-type: x proximity; scroll-padding-inline: 12px; }
   .rail .nav-scroll::-webkit-scrollbar { display: none; }
-  .nav-item { flex: none; padding: 8px 14px 8px 10px; scroll-snap-align: start; }
+  .nav-item { flex: none; margin: 0; padding: 8px 14px 8px 10px; gap: 8px; scroll-snap-align: start; }
   .nav-item .ic { display: none; }
-  .rail-foot { margin: 0; padding: 0 8px 10px; }
+  .rail-foot { margin: 0; padding: 0 12px 10px; }
   /* The rail's appearance menu opens upward, which is right when the rail is a
      tall column whose foot sits at the bottom of the screen. As a top strip the
      same rule would throw the popup off the top of the page, so the strip goes
      back to the shared default: anchored to the button, opening downward. */
   .rail .theme-menu { position: relative; }
   .rail .theme-menu .pop { top: calc(100% + 10px); bottom: auto; left: auto; right: 0; width: 220px; }
-  .content { padding: 0 16px 48px; }
-  .page-head { flex-wrap: wrap; }
-  .grid2 { grid-template-columns: 1fr; }
 }
 @media (max-width: 639px) {
   .tiles, .tiles.c3, .tiles.c2 { grid-template-columns: 1fr; }
@@ -896,15 +964,24 @@ impl<'a> Page<'a> {
     }
 }
 
-/// The brand lockup: Ghost's own mark, the platform's name, and the panel tag.
+/// The platform's own mark: the vuuut-click logo — the italic serif `v` on a
+/// tile with the bottom-left corner squared off and a north-east arrow riding
+/// its top-right. One glyph across the dashboard and the console; the rail's
+/// sub-label is what says which panel you are in.
+const BRAND_GLYPH: &str = "v<span>↗</span>";
+
+/// The brand lockup: the platform's tile, its name, and the panel tag.
 fn brand(platform: &str, tag: Option<&str>, href: &str) -> String {
     format!(
-        r#"<a class="brand" href="{href}"><span class="mark">{mark}</span>
+        r#"<a class="brand" href="{href}"><span class="brand-mark" aria-hidden="true">{mark}</span>
 <span class="brand-name"><b>{platform}</b>{tag}</span></a>"#,
         href = attr(href),
-        mark = svg("ghost"),
+        mark = BRAND_GLYPH,
         platform = esc(platform),
-        tag = tag.map(|t| format!(r#"<span class="tag">{}</span>"#, esc(t))).unwrap_or_default(),
+        // Every panel wears a sub-label under the wordmark, the way the Click
+        // dashboard reads "vuuut / CLICK"; the customer panels say which
+        // product this is.
+        tag = format!(r#"<span class="tag">{}</span>"#, esc(tag.unwrap_or("Pro"))),
     )
 }
 
@@ -1031,7 +1108,7 @@ fn document(title: &str, platform: &str, theme: Theme, inner: &str) -> String {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title} · {platform}</title>
 <meta name="robots" content="noindex">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23984059'%3E%3Cpath d='M12 2a8 8 0 0 0-8 8v10.6c0 .7.85 1.05 1.35.55l1.9-1.9 2.2 2.2c.3.3.78.3 1.08 0L12 20l1.47 1.45c.3.3.78.3 1.08 0l2.2-2.2 1.9 1.9c.5.5 1.35.15 1.35-.55V10a8 8 0 0 0-8-8z'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath d='M14 0H34A14 14 0 0 1 48 14V34A14 14 0 0 1 34 48H4A4 4 0 0 1 0 44V14A14 14 0 0 1 14 0Z' fill='%23984059'/%3E%3Ctext x='22' y='33' font-family='Georgia,serif' font-style='italic' font-size='30' fill='%23fff' text-anchor='middle'%3Ev%3C/text%3E%3Cpath d='M31 17 40 8M32 8H40V16' stroke='%23fff' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&amp;family=Fraunces:opsz,wght@9..144,500..700&amp;family=Roboto+Mono:wght@400;500&amp;display=swap">
@@ -1111,7 +1188,7 @@ pub fn auth_page(
 <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
 <div class="auth-top">{appearance}</div>
 <div class="auth-box">
-<div class="auth-logo">{mark}</div>
+<div class="auth-logo" aria-hidden="true">{mark}</div>
 <h1>{heading}</h1>
 <p class="sub">{sub}</p>
 {flash}
@@ -1119,7 +1196,7 @@ pub fn auth_page(
 {foot}
 </div></div>"#,
         appearance = appearance(theme, ""),
-        mark = svg("ghost"),
+        mark = BRAND_GLYPH,
         heading = esc(heading),
         sub = esc(sub),
         flash = flash.map(flash_banner).unwrap_or_default(),

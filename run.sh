@@ -60,6 +60,12 @@ BIN=$ROOT/target/release/ghost-pro
 # Where pro.json and data/ live. The platform reads its config from the
 # working directory, which is why this is a directory and not a file path.
 PRO_DIR=${PRO_DIR:-$ROOT/run}
+# A relative PRO_DIR — the value .env ships — must not leak into PIDFILE, LOG
+# or the launcher below: they are used both from this directory and from
+# inside $PRO_DIR after the start action's `cd`, and a relative path resolves
+# differently in each. The launcher would otherwise be told to open
+# run/run/server.log. Absolutize once, before anything derives from it.
+case $PRO_DIR in /*) ;; *) PRO_DIR=$ROOT/$PRO_DIR ;; esac
 PIDFILE=$PRO_DIR/.ghost-pro.pid
 LOG=$PRO_DIR/server.log
 

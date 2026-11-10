@@ -1,0 +1,59 @@
+{
+  "database": {
+    "client": "sqlite3",
+    "connection": {
+      "filename": "content/data/ghost.db"
+    }
+  },
+  "hostSettings": {
+    "billing": {
+      "enabled": true,
+      "url": "http://pro.localhost:8080/billing"
+    },
+    "emailQuota": {
+      "autoStop": true
+    },
+    "limits": {
+      "emails": {
+        "error": "Your Starter plan includes {{max}} emails per month. You have sent {{count}}.",
+        "maxPeriodic": 5000
+      },
+      "limitAutomations": {
+        "error": "Your Starter plan includes {{max}} active automations.",
+        "max": 3
+      },
+      "newsletters": {
+        "error": "Your Starter plan includes {{max}} newsletters.",
+        "max": 1
+      },
+      "staff": {
+        "error": "Your Starter plan includes {{max}} staff users. Upgrade to invite more.",
+        "max": 3
+      },
+      "uploads": {
+        "error": "This file is larger than your plan allows.",
+        "max": 10485760
+      }
+    },
+    "plan": {
+      "name": "Starter",
+      "slug": "starter"
+    },
+    "siteId": null,
+    "subscription": {
+      "start": "2026-11-10T20:41:59Z"
+    }
+  },
+  "mail": {
+    "transport": "Direct"
+  },
+  "paths": {
+    "contentPath": "content"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 21001
+  },
+  "ssl": false,
+  "url": "http://test-site.localhost:8080"
+}
