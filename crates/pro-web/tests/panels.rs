@@ -198,13 +198,16 @@ async fn every_dashboard_page_renders() {
     let (state, _dir) = platform().await;
     let (account, cookie) = as_customer(&state).await;
     let tenant = seed_site(&state, &account.id, "adas-journal").await;
+    let builtin = pro_db::domains::primary_for_tenant(&state.db, &tenant.id).await.unwrap().unwrap();
 
     for path in [
         "/dashboard",
         "/dashboard/new",
         "/dashboard/billing",
         "/dashboard/account",
+        "/dashboard/domains",
         &format!("/dashboard/sites/{}", tenant.id),
+        &format!("/dashboard/domains/{}", builtin.id),
     ] {
         let (status, body) = get(&state, path, Some(&cookie)).await;
         assert_eq!(status, StatusCode::OK, "{path} did not render");
@@ -212,6 +215,7 @@ async fn every_dashboard_page_renders() {
         // The rail's own entries, so a page cannot lose its navigation.
         assert!(body.contains(r#"href="/dashboard/billing""#), "{path}: no Billing link");
         assert!(body.contains(r#"href="/dashboard/account""#), "{path}: no Account link");
+        assert!(body.contains(r#"href="/dashboard/domains""#), "{path}: no Domains link");
     }
 }
 
@@ -300,10 +304,13 @@ async fn every_console_page_renders() {
         .await
         .unwrap();
     let tenant = seed_site(&state, &account.id, "somebodys-site").await;
+    let builtin = pro_db::domains::primary_for_tenant(&state.db, &tenant.id).await.unwrap().unwrap();
 
     for path in [
         "/console",
         "/console/sites",
+        "/console/domains",
+        &format!("/console/domains/{}", builtin.id),
         "/console/customers",
         "/console/settings",
         "/console/staff",
@@ -1192,4 +1199,211 @@ async fn site_email_details_show_volume_and_support_individual_auto_stop_policy(
     if let Some(dir)=std::env::var_os("VUUUT_EMAIL_PREVIEW_DIR") {
         let dir=std::path::PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();std::fs::write(dir.join("site.html"),html).unwrap();
     }
+}
+
+
+// ---------------------------------------------------------------------------
+// Domains
+// ---------------------------------------------------------------------------
+
+/// A second customer with a site, for the tests about whose domains are whose.
+async fn someone_else(state: &pro_web::AppState) -> (pro_core::Account, pro_core::Tenant) {
+    let hash = pro_db::accounts::hash_password("another-long-password").unwrap();
+    let other = pro_db::accounts::create(&state.db, "other@example.com", "Someone Else", &hash)
+        .await
+        .unwrap();
+    let tenant = seed_site(state, &other.id, "theirs").await;
+    (other, tenant)
+}
+
+#[tokio::test]
+async fn a_customer_sees_only_their_own_domains() {
+    let (state, _dir) = platform().await;
+    let (account, cookie) = as_customer(&state).await;
+    seed_site(&state, &account.id, "adas-journal").await;
+    let (_, theirs) = someone_else(&state).await;
+    let their_domain =
+        pro_db::domains::primary_for_tenant(&state.db, &theirs.id).await.unwrap().unwrap();
+
+    let (status, list) = get(&state, "/dashboard/domains", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(list.contains("adas-journal.localhost"), "their own built-in address");
+    assert!(!list.contains("theirs.localhost"), "nobody else's");
+    assert!(list.contains("Connect your own domain"), "the starter plan has room for one");
+
+    // Somebody else's domain id is a 404, so ids cannot be probed.
+    let (status, body) =
+        get(&state, &format!("/dashboard/domains/{}", their_domain.id), Some(&cookie)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(!body.contains("theirs.localhost"));
+}
+
+#[tokio::test]
+async fn a_domain_is_connected_managed_and_removed_from_its_own_page() {
+    let (state, _dir) = platform().await;
+    let (account, cookie) = as_customer(&state).await;
+    let tenant = seed_site(&state, &account.id, "adas-journal").await;
+
+    // Added from the Domains screen, which lands on the new domain's page.
+    let (status, headers, _) = send(
+        &state,
+        "POST",
+        "/dashboard/domains",
+        Some(&cookie),
+        Some(&format!("site={}&domain=Blog.Example.com", tenant.id)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let location = headers.get(header::LOCATION).unwrap().to_str().unwrap().to_string();
+    assert!(location.starts_with("/dashboard/domains/"), "goes to the domain: {location}");
+
+    let added = pro_db::domains::find_by_host(&state.db, "blog.example.com")
+        .await
+        .unwrap()
+        .expect("stored, lowercased");
+    let page = format!("/dashboard/domains/{}", added.id);
+    let (status, body) = get(&state, &page, Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_m3_shell(&body, "domain page");
+    assert!(body.contains("Waiting for DNS"), "its state, in words");
+    assert!(body.contains("CNAME"), "the record that routes it");
+    assert!(body.contains(&added.verification_token), "and the ownership token");
+    assert!(body.contains("Check now"));
+    assert!(body.contains("Added"), "its history");
+    assert!(!body.contains("Verification token"), "the raw record is the console's");
+    // Its buttons come back to this page rather than the site's.
+    assert!(body.contains("/check?back=domain"));
+
+    // The plan's one custom domain is used, so the add form stops offering.
+    let (_, list) = get(&state, "/dashboard/domains", Some(&cookie)).await;
+    assert!(list.contains("blog.example.com"));
+    assert!(list.contains("used every custom domain"));
+
+    // Removed from its own page: back to the list, and gone.
+    let (status, headers, _) = send(
+        &state,
+        "POST",
+        &format!("/dashboard/sites/{}/domains/{}/remove?back=domain", tenant.id, added.id),
+        Some(&cookie),
+        Some(""),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let location = headers.get(header::LOCATION).unwrap().to_str().unwrap();
+    assert!(location.starts_with("/dashboard/domains?"), "back to the list: {location}");
+    assert!(pro_db::domains::find_by_host(&state.db, "blog.example.com").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn the_back_parameter_is_not_an_open_redirect() {
+    let (state, _dir) = platform().await;
+    let (account, cookie) = as_customer(&state).await;
+    let tenant = seed_site(&state, &account.id, "adas-journal").await;
+    let builtin = pro_db::domains::primary_for_tenant(&state.db, &tenant.id).await.unwrap().unwrap();
+
+    let (status, headers, _) = send(
+        &state,
+        "POST",
+        &format!(
+            "/dashboard/sites/{}/domains/{}/check?back=https://evil.example",
+            tenant.id, builtin.id
+        ),
+        Some(&cookie),
+        Some(""),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let location = headers.get(header::LOCATION).unwrap().to_str().unwrap();
+    assert!(location.starts_with(&format!("/dashboard/sites/{}", tenant.id)), "{location}");
+}
+
+#[tokio::test]
+async fn the_console_lists_every_domain_and_filters_them() {
+    let (state, _dir) = platform().await;
+    let cookie = as_operator(&state, StaffRole::Owner).await;
+    let (account, _) = as_customer(&state).await;
+    let mine = seed_site(&state, &account.id, "adas-journal").await;
+    someone_else(&state).await;
+    pro_db::domains::add(&state.db, &mine.id, "blog.example.com", pro_core::DomainKind::Custom, false)
+        .await
+        .unwrap();
+
+    let (status, all) = get(&state, "/console/domains", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    for host in ["adas-journal.localhost", "theirs.localhost", "blog.example.com"] {
+        assert!(all.contains(host), "every domain on the platform: {host}");
+    }
+    assert!(all.contains("owner@example.com") && all.contains("other@example.com"), "and whose");
+
+    let (_, pending) = get(&state, "/console/domains?status=pending", Some(&cookie)).await;
+    assert!(pending.contains("blog.example.com"));
+    assert!(!pending.contains("theirs.localhost"), "built-in addresses are never pending");
+
+    let (_, found) = get(&state, "/console/domains?q=other%40example", Some(&cookie)).await;
+    assert!(found.contains("theirs.localhost"), "searchable by owner");
+    assert!(!found.contains("blog.example.com"));
+}
+
+#[tokio::test]
+async fn console_domain_controls_follow_the_staff_role() {
+    let (state, _dir) = platform().await;
+    let hash = pro_db::accounts::hash_password("a-long-enough-password").unwrap();
+    let account = pro_db::accounts::create(&state.db, "cust@example.com", "A Customer", &hash)
+        .await
+        .unwrap();
+    let tenant = seed_site(&state, &account.id, "somebodys-site").await;
+    let custom =
+        pro_db::domains::add(&state.db, &tenant.id, "blog.example.com", pro_core::DomainKind::Custom, false)
+            .await
+            .unwrap();
+    let page = format!("/console/domains/{}", custom.id);
+
+    let support = as_operator(&state, StaffRole::Support).await;
+    let (status, body) = get(&state, &page, Some(&support)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("Verification token"), "the raw record, for debugging");
+    assert!(body.contains("cust@example.com"), "and its owner");
+    assert!(body.contains("Check now"), "support may re-check DNS");
+    assert!(!body.contains(r#"/remove""#), "but not remove a customer's domain");
+
+    // And the route refuses regardless of what the page showed.
+    let (status, _, _) =
+        send(&state, "POST", &format!("{page}/remove"), Some(&support), Some("")).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(pro_db::domains::find_by_host(&state.db, "blog.example.com").await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn an_admin_removes_a_domain_from_the_console() {
+    let (state, _dir) = platform().await;
+    let hash = pro_db::accounts::hash_password("a-long-enough-password").unwrap();
+    let account = pro_db::accounts::create(&state.db, "cust@example.com", "A Customer", &hash)
+        .await
+        .unwrap();
+    let tenant = seed_site(&state, &account.id, "somebodys-site").await;
+    let custom =
+        pro_db::domains::add(&state.db, &tenant.id, "blog.example.com", pro_core::DomainKind::Custom, false)
+            .await
+            .unwrap();
+    let admin = as_operator(&state, StaffRole::Admin).await;
+
+    let (status, body) = get(&state, &format!("/console/domains/{}", custom.id), Some(&admin)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains(&format!("/console/domains/{}/remove", custom.id)));
+
+    let (status, headers, _) = send(
+        &state,
+        "POST",
+        &format!("/console/domains/{}/remove", custom.id),
+        Some(&admin),
+        Some(""),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(headers.get(header::LOCATION).unwrap().to_str().unwrap().starts_with("/console/domains?"));
+    assert!(pro_db::domains::find_by_host(&state.db, "blog.example.com").await.unwrap().is_none());
+
+    // Recorded against the operator, so the customer's history says who.
+    let events = pro_db::audit::list(&state.db, Some(&tenant.id), None, 10, 0).await.unwrap();
+    assert!(events.iter().any(|e| e.action == "domain.removed" && e.actor.starts_with("staff:")));
 }

@@ -238,7 +238,9 @@ pub static REGISTRY: &[SettingDef] = &[
         key: "billing.lemonsqueezy.webhookSecret",
         group: "Lemon Squeezy",
         label: "Webhook signing secret",
-        help: "The signing secret from your webhook, used to verify X-Signature.",
+        help: "The signing secret of the webhook you pointed at /webhooks/lemonsqueezy, \
+               used to verify X-Signature. Send the subscription_* events (all twelve); \
+               order, license, customer, affiliate and dispute events are not used.",
         kind: Kind::Secret,
         min_role: StaffRole::Owner,
         fallback: |c| opt(&c.billing.lemonsqueezy.webhook_secret),

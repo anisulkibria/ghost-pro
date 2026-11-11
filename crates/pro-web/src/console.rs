@@ -31,9 +31,10 @@ use crate::view::{self, attr, esc, BannerKind, Flash, NavItem, Page, PillKind, T
 
 /// Which rail entry is lit.
 #[derive(PartialEq, Clone, Copy)]
-enum Tab {
+pub(crate) enum Tab {
     Overview,
     Sites,
+    Domains,
     Customers,
     Settings,
     Staff,
@@ -44,6 +45,7 @@ fn nav(active: Tab) -> Vec<NavItem> {
     vec![
         NavItem::new("Overview", "/console", "chart", "blue", active == Tab::Overview),
         NavItem::new("Sites", "/console/sites", "sites", "green", active == Tab::Sites),
+        NavItem::new("Domains", "/console/domains", "globe", "teal", active == Tab::Domains),
         NavItem::new("Customers", "/console/customers", "people", "purple", active == Tab::Customers),
         NavItem::new("Settings", "/console/settings", "settings", "pink", active == Tab::Settings),
         NavItem::new("Staff", "/console/staff", "shield", "amber", active == Tab::Staff),
@@ -52,7 +54,7 @@ fn nav(active: Tab) -> Vec<NavItem> {
 }
 
 /// The console shell.
-fn shell(
+pub(crate) fn shell(
     state: &AppState,
     theme: Theme,
     title: &str,
@@ -618,9 +620,10 @@ change what the customer is charged.</p></form></div>"#,
             .iter()
             .map(|d| {
                 format!(
-                    r#"<tr><td class="wrap"><span class="lead mono">{domain}</span>{primary}</td>
+                    r#"<tr><td class="wrap"><a class="lead mono" href="/console/domains/{id}">{domain}</a>{primary}</td>
 <td>{status}</td><td class="muted">{kind}</td><td class="muted">{checked}</td>
 <td class="muted wrap">{error}</td></tr>"#,
+                    id = attr(&d.id),
                     domain = esc(&d.domain),
                     primary = if d.is_primary {
                         r#" <span class="chip tonal">Primary</span>"#

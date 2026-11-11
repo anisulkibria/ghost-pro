@@ -24,6 +24,7 @@ use crate::view::{self, attr, esc, BannerKind, Flash, NavItem, Page, PillKind, T
 #[derive(PartialEq, Clone, Copy)]
 pub(crate) enum Tab {
     Sites,
+    Domains,
     Billing,
     Account,
 }
@@ -32,6 +33,7 @@ pub(crate) enum Tab {
 pub(crate) fn nav(active: Tab) -> Vec<NavItem> {
     vec![
         NavItem::new("Sites", "/dashboard", "sites", "blue", active == Tab::Sites),
+        NavItem::new("Domains", "/dashboard/domains", "globe", "amber", active == Tab::Domains),
         NavItem::new("Billing", "/dashboard/billing", "billing", "green", active == Tab::Billing),
         NavItem::new("Account", "/dashboard/account", "person", "purple", active == Tab::Account),
     ]
@@ -47,7 +49,7 @@ pub(crate) fn who(account: &Account) -> Who {
     }
 }
 
-fn shell(
+pub(crate) fn shell(
     state: &AppState,
     theme: Theme,
     title: &str,
@@ -947,9 +949,10 @@ async fn domains_section(
     for domain in domains {
         let is_subdomain = domain.kind == DomainKind::Subdomain;
         rows.push_str(&format!(
-            r#"<tr><td class="wrap"><span class="lead mono">{domain}</span>{primary}</td>
+            r#"<tr><td class="wrap"><a class="lead mono" href="/dashboard/domains/{id}">{domain}</a>{primary}</td>
 <td>{status}</td><td class="muted">{kind}</td>
 <td class="end">{actions}</td></tr>"#,
+            id = attr(&domain.id),
             domain = esc(&domain.domain),
             primary = if domain.is_primary {
                 r#" <span class="chip tonal">Primary</span>"#
@@ -1087,6 +1090,28 @@ pub struct AddDomainForm {
     pub domain: String,
 }
 
+/// Where a domain action sends the customer afterwards.
+///
+/// The same buttons sit on the site page and on the domain's own page, and
+/// each should come back to whichever one it was pressed on. Only these two
+/// fixed values are honoured, never a path from the query: a redirect target
+/// taken from the request is an open redirect.
+#[derive(Deserialize, Default)]
+pub struct DomainBack {
+    #[serde(default)]
+    pub back: Option<String>,
+}
+
+impl DomainBack {
+    fn path(&self, tenant_id: &str, domain_id: &str) -> String {
+        match self.back.as_deref() {
+            Some("domain") => format!("/dashboard/domains/{domain_id}"),
+            Some("domains") => "/dashboard/domains".into(),
+            _ => format!("/dashboard/sites/{tenant_id}"),
+        }
+    }
+}
+
 pub async fn add_domain(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1095,19 +1120,25 @@ pub async fn add_domain(
 ) -> Response {
     let chrome = state.chrome(&headers);
     let back = format!("/dashboard/sites/{id}");
-    reply::or_redirect(
-        &back,
-        &chrome,
-        add_domain_inner(&state, &headers, &id, &form.domain).await,
-    )
+    reply::or_redirect(&back, &chrome, async {
+        let added = add_domain_inner(&state, &headers, &id, &form.domain).await?;
+        Ok(redirect_with(
+            &format!("/dashboard/domains/{}", added.id),
+            Flash::ok(format!("{} added. Now point its DNS here.", added.domain)),
+        ))
+    }.await)
 }
 
-async fn add_domain_inner(
+/// Attach a customer's own domain to one of their sites.
+///
+/// Shared by the site page's form and the Domains screen's, which differ only
+/// in where the site id comes from.
+pub(crate) async fn add_domain_inner(
     state: &AppState,
     headers: &HeaderMap,
     tenant_id: &str,
     domain: &str,
-) -> Result<Response> {
+) -> Result<pro_core::Domain> {
     auth::require_same_origin(headers, &state.config.host())?;
     let account = auth::account(state, headers).await?;
     let tenant = auth::owned_tenant(state, &account, tenant_id).await?;
@@ -1158,7 +1189,7 @@ async fn add_domain_inner(
         "domain.added",
         Some(&tenant.id),
         Some(&account.id),
-        serde_json::json!({"domain": normalised}),
+        serde_json::json!({"domain": normalised, "domain_id": added.id}),
     )
     .await;
 
@@ -1172,84 +1203,40 @@ async fn add_domain_inner(
     )
     .await?;
 
-    Ok(redirect_with(
-        &format!("/dashboard/sites/{tenant_id}"),
-        Flash::ok(format!("{normalised} added. Now point its DNS here.")),
-    ))
+    Ok(added)
 }
 
 pub async fn check_domain(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((tenant_id, domain_id)): Path<(String, String)>,
+    Query(to): Query<DomainBack>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/dashboard/sites/{tenant_id}");
-    reply::or_redirect(
-        &back,
-        &chrome,
-        check_domain_inner(&state, &headers, &tenant_id, &domain_id).await,
-    )
-}
-
-async fn check_domain_inner(
-    state: &AppState,
-    headers: &HeaderMap,
-    tenant_id: &str,
-    domain_id: &str,
-) -> Result<Response> {
-    auth::require_same_origin(headers, &state.config.host())?;
-    let account = auth::account(state, headers).await?;
-    let tenant = auth::owned_tenant(state, &account, tenant_id).await?;
-
-    let domain = pro_db::domains::get(&state.db, domain_id).await?;
-    if domain.tenant_id != tenant.id {
-        return Err(ProError::NotFound("No such domain on this site.".into()));
-    }
-
-    let verdict = crate::verify_domain_now(state, &domain).await?;
-    let back = format!("/dashboard/sites/{tenant_id}");
-    Ok(if verdict.is_servable() {
-        redirect_with(&back, Flash::ok(format!("{} is live.", domain.domain)))
-    } else {
-        redirect_with(&back, Flash::err(verdict.message()))
-    })
+    let back = to.path(&tenant_id, &domain_id);
+    reply::or_redirect(&back, &chrome, async {
+        auth::require_same_origin(&headers, &state.config.host())?;
+        let account = auth::account(&state, &headers).await?;
+        let tenant = auth::owned_tenant(&state, &account, &tenant_id).await?;
+        let domain = crate::domains::of_tenant(&state, &tenant, &domain_id).await?;
+        Ok(crate::domains::check_and_report(&state, &domain, &back).await?)
+    }.await)
 }
 
 pub async fn set_primary_domain(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((tenant_id, domain_id)): Path<(String, String)>,
+    Query(to): Query<DomainBack>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/dashboard/sites/{tenant_id}");
+    let back = to.path(&tenant_id, &domain_id);
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         let account = auth::account(&state, &headers).await?;
         let tenant = auth::owned_tenant(&state, &account, &tenant_id).await?;
-
-        pro_db::domains::set_primary(&state.db, &tenant.id, &domain_id).await?;
-        // The tenant's `url` is what every link it emits is built from, so it
-        // has to be rewritten and the process restarted.
-        pro_provision::update_primary_domain(
-            &state.db,
-            &state.config,
-            &state.supervisor,
-            &tenant,
-        )
-        .await?;
-        state.hosts.invalidate_all();
-
-        pro_db::audit::record(
-            &state.db,
-            &format!("account:{}", account.id),
-            "domain.primary_changed",
-            Some(&tenant.id),
-            Some(&account.id),
-            serde_json::json!({"domain_id": domain_id}),
-        )
-        .await;
-
+        crate::domains::make_primary(&state, &tenant, &domain_id, &format!("account:{}", account.id))
+            .await?;
         Ok(redirect_with(&back, Flash::ok("Primary address updated.")))
     }.await)
 }
@@ -1258,43 +1245,25 @@ pub async fn remove_domain(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((tenant_id, domain_id)): Path<(String, String)>,
+    Query(to): Query<DomainBack>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/dashboard/sites/{tenant_id}");
+    let back = to.path(&tenant_id, &domain_id);
+    // The domain's own page is gone once it is removed, so a removal started
+    // there lands on the list instead.
+    let after = if to.back.as_deref() == Some("domain") {
+        "/dashboard/domains".to_string()
+    } else {
+        back.clone()
+    };
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         let account = auth::account(&state, &headers).await?;
         let tenant = auth::owned_tenant(&state, &account, &tenant_id).await?;
-
-        let domain = pro_db::domains::get(&state.db, &domain_id).await?;
-        let was_primary = domain.is_primary;
-        pro_db::domains::remove(&state.db, &tenant.id, &domain_id).await?;
-
-        // Removing the canonical hostname moves the site back to its built-in
-        // address, which means rewriting `url`.
-        if was_primary {
-            pro_provision::update_primary_domain(
-                &state.db,
-                &state.config,
-                &state.supervisor,
-                &tenant,
-            )
-            .await?;
-        }
-        state.hosts.invalidate(&domain.domain);
-        state.hosts.invalidate_all();
-
-        pro_db::audit::record(
-            &state.db,
-            &format!("account:{}", account.id),
-            "domain.removed",
-            Some(&tenant.id),
-            Some(&account.id),
-            serde_json::json!({"domain": domain.domain}),
-        )
-        .await;
-
-        Ok(redirect_with(&back, Flash::ok("Domain removed.")))
+        let removed =
+            crate::domains::detach(&state, &tenant, &domain_id, &format!("account:{}", account.id))
+                .await?;
+        Ok(redirect_with(&after, Flash::ok(format!("{} removed.", removed.domain))))
     }.await)
 }
 

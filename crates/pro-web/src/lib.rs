@@ -29,6 +29,7 @@ pub mod client_ip;
 pub mod console;
 pub mod dashboard;
 pub mod dashboard_billing;
+pub mod domains;
 pub mod public;
 pub mod reply;
 pub mod state;
@@ -105,6 +106,11 @@ fn platform_routes() -> Router<AppState> {
             "/dashboard/sites/{id}/domains/{domain_id}/remove",
             post(dashboard::remove_domain),
         )
+        .route(
+            "/dashboard/domains",
+            get(domains::customer_list).post(domains::customer_connect),
+        )
+        .route("/dashboard/domains/{id}", get(domains::customer_detail))
         .route("/dashboard/billing", get(dashboard_billing::billing))
         .route("/dashboard/billing/change", post(dashboard_billing::change_plan))
         .route(
@@ -155,6 +161,11 @@ fn platform_routes() -> Router<AppState> {
             "/console/subscriptions/{id}/attach",
             post(console::attach_subscription),
         )
+        .route("/console/domains", get(domains::console_list))
+        .route("/console/domains/{id}", get(domains::console_detail))
+        .route("/console/domains/{id}/check", post(domains::console_check))
+        .route("/console/domains/{id}/primary", post(domains::console_primary))
+        .route("/console/domains/{id}/remove", post(domains::console_remove))
         .route("/console/customers", get(console::customers))
         .route("/console/customers/{id}", get(console::customer))
         .route("/console/customers/{id}/toggle", post(console::toggle_customer))

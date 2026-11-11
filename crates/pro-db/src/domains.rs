@@ -8,6 +8,7 @@
 //! content on it.
 use pro_core::{
     ids, normalize_host, now_iso, DbErrorExt, Domain, DomainKind, DomainStatus, ProError, Result,
+    TenantStatus,
 };
 use crate::Db;
 use sqlx::any::AnyRow;
@@ -329,6 +330,121 @@ pub async fn remove(pool: &Db, tenant_id: &str, domain_id: &str) -> Result<()> {
     }
     tx.commit().await.db_err()?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Lists that span sites
+// ---------------------------------------------------------------------------
+
+/// A domain together with the site and account it belongs to.
+///
+/// What the Domains screens list: a domain on its own does not say whose it
+/// is, and both panels need to link from it to the site and, in the console,
+/// the customer.
+#[derive(Debug, Clone)]
+pub struct DomainListing {
+    pub domain: Domain,
+    pub tenant_name: String,
+    pub tenant_slug: String,
+    pub tenant_status: TenantStatus,
+    pub account_id: String,
+    pub account_email: String,
+}
+
+/// The domain's columns, qualified for a join. `status` keeps its bare name
+/// so [`map`] reads the domain's own; the tenant's comes back aliased.
+const JOINED: &str = "d.id, d.tenant_id, d.domain, d.kind, d.status, d.is_primary, \
+                      d.verification_token, d.verified_at, d.last_checked_at, d.last_error, \
+                      d.created_at, t.name AS tenant_name, t.slug AS tenant_slug, \
+                      t.status AS tenant_status, a.id AS account_id, a.email AS account_email";
+
+const FROM_JOINED: &str = "FROM domains d JOIN tenants t ON t.id = d.tenant_id \
+                           JOIN accounts a ON a.id = t.account_id \
+                           WHERE t.status <> 'deleted'";
+
+fn map_listing(row: &AnyRow) -> DomainListing {
+    DomainListing {
+        domain: map(row),
+        tenant_name: row.get("tenant_name"),
+        tenant_slug: row.get("tenant_slug"),
+        // Read as `Failed` when unrecognised, as `tenants::map` does: a site
+        // this version cannot interpret is shown as needing attention.
+        tenant_status: TenantStatus::parse(row.get::<String, _>("tenant_status").as_str())
+            .unwrap_or(TenantStatus::Failed),
+        account_id: row.get("account_id"),
+        account_email: row.get("account_email"),
+    }
+}
+
+/// One domain with its site and owner.
+pub async fn listing(pool: &Db, id: &str) -> Result<DomainListing> {
+    let row = sqlx::query(&format!("SELECT {JOINED} {FROM_JOINED} AND d.id = ?"))
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .db_err()?
+        .ok_or_else(|| ProError::NotFound("No such domain.".into()))?;
+    Ok(map_listing(&row))
+}
+
+/// Every domain on every live site an account owns, for the customer's
+/// Domains screen. Grouped by site, primary first within each.
+pub async fn list_for_account(pool: &Db, account_id: &str) -> Result<Vec<DomainListing>> {
+    let rows = sqlx::query(&format!(
+        "SELECT {JOINED} {FROM_JOINED} AND t.account_id = ? \
+         ORDER BY t.name, t.id, d.is_primary DESC, d.created_at"
+    ))
+    .bind(account_id)
+    .fetch_all(pool)
+    .await
+    .db_err()?;
+    Ok(rows.iter().map(map_listing).collect())
+}
+
+/// Every domain on the platform, for the console. Newest first, so a domain a
+/// customer is stuck connecting right now is at the top.
+pub async fn list_all(
+    pool: &Db,
+    status: Option<DomainStatus>,
+    kind: Option<DomainKind>,
+    search: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<DomainListing>> {
+    let mut sql = format!("SELECT {JOINED} {FROM_JOINED}");
+    if status.is_some() {
+        sql.push_str(" AND d.status = ?");
+    }
+    if kind.is_some() {
+        sql.push_str(" AND d.kind = ?");
+    }
+    if search.is_some() {
+        sql.push_str(" AND (d.domain LIKE ? OR t.name LIKE ? OR t.slug LIKE ? OR a.email LIKE ?)");
+    }
+    sql.push_str(" ORDER BY d.created_at DESC, d.id DESC LIMIT ? OFFSET ?");
+
+    let mut q = sqlx::query(&sql);
+    if let Some(s) = status {
+        q = q.bind(s.as_str());
+    }
+    if let Some(k) = kind {
+        q = q.bind(k.as_str());
+    }
+    if let Some(term) = search {
+        let like = format!("%{}%", term.trim());
+        q = q.bind(like.clone()).bind(like.clone()).bind(like.clone()).bind(like);
+    }
+    let rows = q.bind(limit).bind(offset).fetch_all(pool).await.db_err()?;
+    Ok(rows.iter().map(map_listing).collect())
+}
+
+/// How many domains are in each state, across the platform, for the console's
+/// filter tabs.
+pub async fn count_by_status(pool: &Db) -> Result<Vec<(String, i64)>> {
+    sqlx::query_as(&format!("SELECT d.status, COUNT(*) {FROM_JOINED} GROUP BY d.status"))
+        .fetch_all(pool)
+        .await
+        .db_err()
 }
 
 #[cfg(test)]
