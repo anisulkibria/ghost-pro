@@ -120,11 +120,7 @@ pub async fn sync_once(db: &Db, config: &Arc<Config>, supervisor: &Supervisor) -
     } else {
         let domain = pro_db::domains::primary_for_tenant(db, &id).await?;
         let origin = if let Some(d) = domain {
-            let scheme = if config.public_tls() { "https" } else { "http" };
-            match config.edge_port() {
-                80 | 443 => format!("{scheme}://{}", d.domain),
-                p => format!("{scheme}://{}:{p}", d.domain),
-            }
+            config.public_origin(&d.domain)
         } else {
             config.tenant_url(&tenant.slug)
         };

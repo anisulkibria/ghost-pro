@@ -434,7 +434,7 @@ async fn sites_inner(
 <td class="muted">{seen}</td></tr>"#,
             id = attr(&tenant.id),
             name = esc(&tenant.name),
-            host = esc(&state.config.tenant_host(&tenant.slug)),
+            host = esc(&state.config.public_authority(&state.config.tenant_host(&tenant.slug))),
             status = view::tenant_pill(tenant.status),
             running = if running {
                 view::status_pill("Up", PillKind::Ok)
@@ -513,21 +513,22 @@ async fn site_inner(
     let running = state.supervisor.is_running(&tenant.id);
     let can_write = member.can(StaffRole::Admin);
 
-    let scheme = if state.config.public_tls() { "https" } else { "http" };
     let host = domains
         .iter()
         .find(|d| d.is_primary)
         .map(|d| d.domain.clone())
         .unwrap_or_else(|| state.config.tenant_host(&tenant.slug));
+    let address = state.config.public_authority(&host);
+    let origin = state.config.public_origin(&host);
 
     let mut body = view::page_head(
         &tenant.name,
         &format!(
-            r#"<a class="mono" href="{scheme}://{host}" target="_blank" rel="noopener">{host}</a>
+            r#"<a class="mono" href="{origin}" target="_blank" rel="noopener">{address}</a>
 · owned by <a href="/console/customers/{account_id}">{email}</a><br>
 {status} {running} <span class="muted small">port {port} · created {created}</span>"#,
-            scheme = scheme,
-            host = esc(&host),
+            origin = attr(&origin),
+            address = esc(&address),
             account_id = attr(&account.id),
             email = esc(&account.email),
             status = view::tenant_pill(tenant.status),
@@ -540,9 +541,8 @@ async fn site_inner(
             created = esc(&view::when(Some(&tenant.created_at))),
         ),
         &format!(
-            r#"<a class="btn outlined" href="{scheme}://{host}/ghost/" target="_blank" rel="noopener">{open} Open admin</a>"#,
-            scheme = scheme,
-            host = attr(&host),
+            r#"<a class="btn outlined" href="{origin}/ghost/" target="_blank" rel="noopener">{open} Open admin</a>"#,
+            origin = attr(&origin),
             open = view::svg("open"),
         ),
     );

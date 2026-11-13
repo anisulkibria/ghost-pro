@@ -453,11 +453,7 @@ pub async fn update_primary_domain(
         .await?
         .ok_or_else(|| ProError::Internal("tenant has no primary domain".into()))?;
 
-    let scheme = if config.public_tls() { "https" } else { "http" };
-    let url = match config.edge_port() {
-        443 | 80 => format!("{scheme}://{}", primary.domain),
-        port => format!("{scheme}://{}:{port}", primary.domain),
-    };
+    let url = config.public_origin(&primary.domain);
 
     let dir = config.tenant_dir(&tenant.id);
     let changed = config_file::update(&dir, &config.tenants.env, |body| {

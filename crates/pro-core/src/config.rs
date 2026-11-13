@@ -1064,17 +1064,34 @@ impl Config {
         format!("{slug}.{}", self.subdomain_base.trim_matches('.'))
     }
 
+    /// The origin a browser reaches `host` at through this edge.
+    ///
+    /// Every tenant address — a `*.subdomain_base` host and a customer's own
+    /// domain alike — arrives at the same edge, so the same scheme and port
+    /// apply to all of them. In development the edge is on a port that is not
+    /// the scheme's default, and an origin without it points nowhere: a link
+    /// to `http://site.localhost/` reaches no server at all. Anything building
+    /// a link to a tenant goes through here rather than pasting
+    /// `scheme://host` together, because that spelling silently drops the port.
+    pub fn public_origin(&self, host: &str) -> String {
+        let scheme = if self.public_tls() { "https" } else { "http" };
+        format!("{scheme}://{}", self.public_authority(host))
+    }
+
+    /// `host`, carrying the edge's port when that is not the scheme's default
+    /// — the address as a visitor would type it. This is what to *show*; use
+    /// [`Config::public_origin`] for what to link to.
+    pub fn public_authority(&self, host: &str) -> String {
+        match self.edge_port() {
+            443 | 80 => host.to_string(),
+            port => format!("{host}:{port}"),
+        }
+    }
+
     /// The url a tenant's site is reachable at, which becomes the `url` in its
     /// own Ghost config and therefore the base of every link it emits.
     pub fn tenant_url(&self, slug: &str) -> String {
-        let scheme = if self.public_tls() { "https" } else { "http" };
-        let host = self.tenant_host(slug);
-        // In development the edge is on a port that is not the scheme's
-        // default, and a tenant url without it points nowhere.
-        match self.edge_port() {
-            443 | 80 => format!("{scheme}://{host}"),
-            port => format!("{scheme}://{host}:{port}"),
-        }
+        self.public_origin(&self.tenant_host(slug))
     }
 
     /// Whether visitors reach this platform over HTTPS — true when the edge

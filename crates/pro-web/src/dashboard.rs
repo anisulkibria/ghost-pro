@@ -140,21 +140,22 @@ async fn sites_inner(
                 .plan(&tenant.plan_slug)
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| tenant.plan_slug.clone());
-            let scheme = if state.config.public_tls() { "https" } else { "http" };
+            let origin = state.config.public_origin(&host);
+            let address = state.config.public_authority(&host);
 
             rows.push_str(&format!(
                 r#"<tr>
 <td><a class="lead" href="/dashboard/sites/{id}">{name}</a>
-<span class="sub mono">{host}</span></td>
+<span class="sub mono">{address}</span></td>
 <td>{status} {sleeping}</td>
 <td>{plan}</td>
 <td class="muted">{seen}</td>
-<td class="end"><a class="btn tonal small" href="{scheme}://{host}/ghost/" rel="noopener" target="_blank">{open} Admin</a></td>
+<td class="end"><a class="btn tonal small" href="{origin}/ghost/" rel="noopener" target="_blank">{open} Admin</a></td>
 </tr>"#,
                 id = view::attr(&tenant.id),
                 name = esc(&tenant.name),
-                host = esc(&host),
-                scheme = scheme,
+                address = esc(&address),
+                origin = view::attr(&origin),
                 open = view::svg("open"),
                 status = view::tenant_pill(tenant.status),
                 sleeping = if tenant.status != TenantStatus::Active {
@@ -684,7 +685,10 @@ async fn site_inner(
     let host = primary
         .map(|d| d.domain.clone())
         .unwrap_or_else(|| state.config.tenant_host(&tenant.slug));
-    let scheme = if state.config.public_tls() { "https" } else { "http" };
+    // The address as the customer would type it, and the origin to link to —
+    // both carry the edge's port, which in development is not 80.
+    let address = state.config.public_authority(&host);
+    let origin = state.config.public_origin(&host);
     let usage = pro_db::usage::latest(&state.db, &tenant.id).await.unwrap_or(None);
     let running = state.supervisor.is_running(&tenant.id);
     let subscription = pro_db::subscriptions::for_tenant(&state.db, &tenant.id).await?;
@@ -693,10 +697,10 @@ async fn site_inner(
     let mut body = view::page_head(
         &tenant.name,
         &format!(
-            r#"<a href="{scheme}://{host}" rel="noopener" target="_blank" class="mono">{host}</a>
+            r#"<a href="{origin}" rel="noopener" target="_blank" class="mono">{address}</a>
 &nbsp;{status} {sleeping}"#,
-            scheme = scheme,
-            host = esc(&host),
+            origin = attr(&origin),
+            address = esc(&address),
             status = view::tenant_pill(tenant.status),
             sleeping = if tenant.status != TenantStatus::Active {
                 String::new()
@@ -707,9 +711,8 @@ async fn site_inner(
             },
         ),
         &format!(
-            r#"<a class="btn" href="{scheme}://{host}/ghost/" rel="noopener" target="_blank">{open} Open admin</a>"#,
-            scheme = scheme,
-            host = attr(&host),
+            r#"<a class="btn" href="{origin}/ghost/" rel="noopener" target="_blank">{open} Open admin</a>"#,
+            origin = attr(&origin),
             open = view::svg("open"),
         ),
     );
@@ -873,7 +876,7 @@ creating a site.</p>"#
                 if let Some(token)=verification {body.push_str(&format!("<p>Add a TXT record at <code>_vuuut-click.{}</code> with value <code>vuuut-click={}</code>.</p>",esc(&host),esc(&token)));}
             }
         }
-        body.push_str(&format!(r#"<p><a href="{scheme}://{host}/ghost/analytics/click/" target="_blank" rel="noopener">Open native analytics in your site's Admin</a></p><form method="post" action="/dashboard/sites/{id}/click"><button class="btn outlined small" name="action" value="retry">Retry sync</button> <button class="btn outlined small" name="action" value="rotate">Rotate credential</button> <button class="btn outlined small" name="action" value="disconnect">Disconnect</button> <button class="btn outlined small" name="action" value="connect">Reconnect</button></form>"#,host=attr(&host),id=attr(&tenant.id)));
+        body.push_str(&format!(r#"<p><a href="{origin}/ghost/analytics/click/" target="_blank" rel="noopener">Open native analytics in your site's Admin</a></p><form method="post" action="/dashboard/sites/{id}/click"><button class="btn outlined small" name="action" value="retry">Retry sync</button> <button class="btn outlined small" name="action" value="rotate">Rotate credential</button> <button class="btn outlined small" name="action" value="disconnect">Disconnect</button> <button class="btn outlined small" name="action" value="connect">Reconnect</button></form>"#,origin=attr(&origin),id=attr(&tenant.id)));
     }
     body.push_str(&backups_section(state, &tenant).await?);
 

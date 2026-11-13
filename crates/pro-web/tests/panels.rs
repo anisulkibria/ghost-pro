@@ -261,6 +261,53 @@ async fn a_brand_new_site_page_renders() {
     assert!(body.contains("Create backup"));
 }
 
+/// Every link to a tenant goes through the same edge as the panel itself, so
+/// it has to carry that edge's port. On this platform — and on any development
+/// machine — that port is 8080, and a link to `http://fresh.localhost/ghost/`
+/// reaches nothing at all: the customer clicks "Open admin" and the browser
+/// fails to connect. The address shown beside the link is the same promise in
+/// text, so it carries the port too.
+#[tokio::test]
+async fn links_to_a_site_carry_the_edge_port() {
+    let (state, _dir) = platform().await;
+    let (account, cookie) = as_customer(&state).await;
+    let tenant = seed_site(&state, &account.id, "fresh").await;
+    let operator = as_operator(&state, StaffRole::Owner).await;
+    let builtin = pro_db::domains::primary_for_tenant(&state.db, &tenant.id).await.unwrap().unwrap();
+
+    for (path, who) in [
+        ("/dashboard".to_string(), &cookie),
+        (format!("/dashboard/sites/{}", tenant.id), &cookie),
+        (format!("/dashboard/domains/{}", builtin.id), &cookie),
+        ("/console/sites".to_string(), &operator),
+        (format!("/console/sites/{}", tenant.id), &operator),
+        (format!("/console/domains/{}", builtin.id), &operator),
+    ] {
+        let (status, body) = get(&state, &path, Some(who)).await;
+        assert_eq!(status, StatusCode::OK, "{path} did not render");
+        assert!(body.contains("fresh.localhost:8080"), "{path}: the port is missing");
+        // Not one url anywhere on the page keeps the portless spelling. The
+        // bare domain on its own is fine and expected — it is a DNS name in
+        // the domains table and in the records to add — so this looks only at
+        // what follows a scheme.
+        for portless in ["://fresh.localhost/", "://fresh.localhost\"", "://fresh.localhost<"] {
+            assert!(!body.contains(portless), "{path}: a url drops the port ({portless})");
+        }
+    }
+
+    // And the button itself, on both panels.
+    for (path, who) in [
+        (format!("/dashboard/sites/{}", tenant.id), &cookie),
+        (format!("/console/sites/{}", tenant.id), &operator),
+    ] {
+        let (_, body) = get(&state, &path, Some(who)).await;
+        assert!(
+            body.contains(r#"href="http://fresh.localhost:8080/ghost/""#),
+            "{path}: Open admin does not point at the admin"
+        );
+    }
+}
+
 /// Another customer's site id must be a 404, not somebody else's dashboard.
 #[tokio::test]
 async fn one_customer_cannot_open_anothers_site() {

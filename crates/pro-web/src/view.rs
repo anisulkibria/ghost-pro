@@ -351,7 +351,10 @@ code, .mono { font-family: var(--mono); }
 .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--primary); color: var(--on-primary);
   display: grid; place-items: center; font-weight: 600; font-size: 13px; flex: none; }
 .who b { font-size: 13px; font-weight: 600; display: block; line-height: 1.2; }
-.who span { font-size: 11px; color: var(--on-surface-variant); }
+/* The name and the address, not the avatar — which is a span too, and sits
+   in the same block. Catching it here left the initial 11px and painted in
+   the muted text colour, which on the primary disc is all but invisible. */
+.who span:not(.avatar) { font-size: 11px; color: var(--on-surface-variant); }
 .rail .icon-btn { width: 32px; height: 32px; }
 .rail .icon-btn svg.i { width: 18px; height: 18px; }
 /* The account block is a link to your own profile; long names and addresses
@@ -362,7 +365,10 @@ code, .mono { font-family: var(--mono); }
 .who-link:hover { background: color-mix(in srgb, var(--on-surface) 6%, transparent); }
 .who-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .who-link > div { min-width: 0; }
-.who-link b, .who-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+/* Clipping applies to the two lines of text. The avatar is excluded because
+   it is not text: `display: block` would override the grid that centres the
+   initial in its disc, and drop the letter into the top-left corner. */
+.who-link b, .who-link span:not(.avatar) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 /* Content runs to 1500px — the Click dashboard's measure — with a gutter
    that grows with the viewport, so a 27" display gets a wide, evenly
    framed page rather than an 1120px column marooned in blank surface. */
@@ -536,6 +542,11 @@ form.inline { display: inline-flex; margin: 0; }
 .confirm .pop .pop-title { margin: 0 0 6px; font-size: 14.5px; font-weight: 600;
   color: var(--on-surface); text-transform: none; letter-spacing: 0; padding: 0; }
 .confirm .pop .btn { width: 100%; }
+/* A card clips itself to its rounded corners, which clips the popover away
+   entirely when the confirmation sits in the card's last row — the Delete
+   row of a site's Maintenance card, where it matters most. Lift the clip
+   only while a confirmation is open, so the corners stay crisp otherwise. */
+.card:has(.confirm[open]) { overflow: visible; }
 
 /* ---- text fields (M3 outlined, floating label) ---- */
 .field { position: relative; display: block; margin-bottom: 16px; }
@@ -857,6 +868,12 @@ table.tbl td.empty-cell { padding: 32px 16px; text-align: center; color: var(--o
   .rows .row:not(:has(> .ic)):not(:has(> .avatar)) .trailing { padding-left: 0; }
   .rows .row + .row::before { left: 20px; }
   .confirm .pop { right: auto; left: 0; }
+  /* In a row the trailing buttons wrap to their own line, and a 320px popover
+     anchored to one of them runs off the right of a phone screen. Anchor it to
+     the row instead — the row is already the positioning context, and its width
+     is the card's. */
+  .rows .row .confirm { position: static; }
+  .rows .row .confirm .pop { left: 16px; right: 16px; width: auto; }
   .plans { grid-template-columns: 1fr; }
 }
 /* Settings follow the CMS directory: compact links, then one focused editor. */
@@ -2066,6 +2083,78 @@ mod tests {
         assert!(!html.contains("onsubmit"), "an inline handler would be blocked by the CSP");
         // Exactly one button actually posts; the summary only opens the box.
         assert_eq!(html.matches(r#"type="submit""#).count(), 1);
+    }
+
+    /// The account block in the rail is `<span class="avatar">A</span>` next
+    /// to a `<div>` of name and address. Both rules that style that text were
+    /// written as descendant selectors — `.who span`, `.who-link span` — and a
+    /// span is what the avatar is, so they reached into the disc and overrode
+    /// it: the initial lost the grid that centres it and went to the top-left
+    /// corner, at the muted text colour, which on the primary disc is all but
+    /// invisible.
+    #[test]
+    fn the_avatar_initial_is_not_styled_as_a_line_of_text() {
+        let css = style();
+        for rule in [".who span", ".who-link b, .who-link span"] {
+            assert!(
+                !css.contains(&format!("\n{rule} {{")),
+                "{rule} styles the avatar as text; exclude it with :not(.avatar)"
+            );
+        }
+        let text = declarations(css, ".who-link b, .who-link span:not(.avatar) {");
+        assert!(text.contains("text-overflow: ellipsis"), "a long name is still clipped");
+        assert!(declarations(css, ".who span:not(.avatar) {").contains("font-size: 11px"));
+        // The disc still centres whatever it holds.
+        let avatar = declarations(css, ".avatar {");
+        assert!(avatar.contains("display: grid") && avatar.contains("place-items: center"), "{avatar}");
+        // The markup those selectors are aimed at: the avatar is a sibling of
+        // the text block, not inside it, which is why excluding it is the fix.
+        let who = Who {
+            name: "Ada Lovelace".into(),
+            detail: "ada@example.com".into(),
+            href: Some("/dashboard/account".into()),
+            signout: "/signout".into(),
+        };
+        let rail = page(Page {
+            title: "Sites",
+            platform: "Vuuut",
+            tag: None,
+            brand_href: "/dashboard",
+            nav: &[],
+            who: Some(&who),
+            flash: None,
+            theme: Theme::Light,
+            body: "",
+        });
+        assert!(
+            rail.contains(r#"<span class="avatar">A</span><div><b>Ada Lovelace</b>"#),
+            "the account block's shape changed; re-check the selectors above"
+        );
+    }
+
+    /// The popover hangs below the row it belongs to, and a card clips itself
+    /// to its rounded corners — so the one confirmation that matters most, the
+    /// Delete row at the bottom of a site's Maintenance card, fell entirely
+    /// outside the clip and the customer saw nothing happen. The card has to
+    /// stop clipping while a confirmation is open.
+    #[test]
+    fn an_open_confirmation_is_not_clipped_by_its_card() {
+        let css = style();
+        assert!(
+            declarations(css, ".card {").contains("overflow: hidden"),
+            "if the card stopped clipping, the rule below is dead weight"
+        );
+        assert!(
+            declarations(css, ".card:has(.confirm[open]) {").contains("overflow: visible"),
+            "an open confirmation must be able to leave the card"
+        );
+        // On a phone the trailing buttons wrap, and a popover anchored to one
+        // of them would hang off the right of the screen now that nothing
+        // clips it. It is anchored to the row, which is the card's width.
+        assert!(declarations(css, ".rows .row .confirm {").contains("position: static"));
+        let mobile = declarations(css, ".rows .row .confirm .pop {");
+        assert!(mobile.contains("left: 16px") && mobile.contains("right: 16px"), "got {mobile}");
+        assert!(mobile.contains("width: auto"), "left+right+width is over-constrained");
     }
 
     /// Everything destructive is a POST, so nothing dangerous sits behind a

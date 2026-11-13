@@ -202,7 +202,7 @@ fn status_banner(state: &AppState, panel: Panel, l: &DomainListing) -> String {
         .as_deref()
         .map(|e| format!(" <span class=\"muted\">Last check: {}</span>", esc(e)))
         .unwrap_or_default();
-    let scheme = if state.config.public_tls() { "https" } else { "http" };
+    let origin = state.config.public_origin(&d.domain);
 
     if !l.tenant_status.serves_public() && d.status == DomainStatus::Active {
         return view::banner(
@@ -221,10 +221,11 @@ fn status_banner(state: &AppState, panel: Panel, l: &DomainListing) -> String {
             BannerKind::Ok,
             &format!(
                 "Connected. Visitors reach <a href=\"{site}\">{name}</a> at \
-                 <a class=\"mono\" href=\"{scheme}://{host}\" target=\"_blank\" rel=\"noopener\">{scheme}://{host}</a>.",
+                 <a class=\"mono\" href=\"{href}\" target=\"_blank\" rel=\"noopener\">{origin}</a>.",
                 site = attr(&panel.site_href(&d.tenant_id)),
                 name = esc(&l.tenant_name),
-                host = esc(&d.domain),
+                href = attr(&origin),
+                origin = esc(&origin),
             ),
         ),
         DomainStatus::Pending => view::banner(
@@ -548,7 +549,6 @@ async fn detail_body(
     can_write: bool,
 ) -> Result<String> {
     let d = &l.domain;
-    let scheme = if state.config.public_tls() { "https" } else { "http" };
 
     let owner = match panel {
         Panel::Customer => String::new(),
@@ -569,8 +569,8 @@ async fn detail_body(
     );
     let visit = if d.status == DomainStatus::Active && l.tenant_status.serves_public() {
         format!(
-            r#"<a class="btn outlined" href="{scheme}://{host}" target="_blank" rel="noopener">{open} Visit</a>"#,
-            host = attr(&d.domain),
+            r#"<a class="btn outlined" href="{origin}" target="_blank" rel="noopener">{open} Visit</a>"#,
+            origin = attr(&state.config.public_origin(&d.domain)),
             open = view::svg("open"),
         )
     } else {
