@@ -3,163 +3,210 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Vuuut — managed Ghost hosting for publications</title>
 <meta name="description" content="Managed Ghost hosting. Your publication on your own domain, with certificates, backups, upgrades and email delivery handled. One isolated process per site. From $7 a month, billed yearly.">
 <link rel="canonical" href="/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Vuuut — managed Ghost hosting for publications">
 <meta property="og:description" content="Everything but the writing. Your publication on your own domain, with certificates, backups, upgrades and delivery handled.">
-<meta name="theme-color" content="#FBF7F2">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 31 24' fill='none' stroke='%23FF1A75' stroke-width='2.6' stroke-linecap='round'%3E%3Cpath d='M3 7v5.5a3.6 3.6 0 0 0 7.2 0V7'/%3E%3Cpath d='M12.4 7v5.5a3.6 3.6 0 0 0 7.2 0V7'/%3E%3Cpath d='M21.8 7v5.5a3.6 3.6 0 0 0 7.2 0V7'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#FFF8F8">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M10 0h12a10 10 0 0 1 10 10v12a10 10 0 0 1-10 10H3a3 3 0 0 1-3-3V10A10 10 0 0 1 10 0z' fill='%23984059'/%3E%3Ctext x='14' y='25' font-family='Georgia,serif' font-style='italic' font-size='25' fill='white' text-anchor='middle'%3Ev%3C/text%3E%3Cpath d='M21 11l5-5m-4 0h4v4' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,400..900,0..100,0..1;1,9..144,400..900,0..100,0..1&family=Outfit:wght@300..700&family=Roboto+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Outfit:wght@300..700&family=Roboto+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="/assets/landing.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
+<div class="lp">
 
-<!-- ─────────────────────────────────────────── masthead ─────── -->
-<header class="masthead" id="top">
-  <div class="shell masthead-in">
-    <a class="logo" href="/" aria-label="Vuuut, home">
-      <svg class="mark" viewBox="0 0 31 24" aria-hidden="true"><path d="M3 7v5.5a3.6 3.6 0 0 0 7.2 0V7"/><path d="M12.4 7v5.5a3.6 3.6 0 0 0 7.2 0V7"/><path d="M21.8 7v5.5a3.6 3.6 0 0 0 7.2 0V7"/></svg>
-      <span>Vuu<em>u</em>t</span>
-    </a>
-    <nav class="mast-nav" aria-label="Primary">
-      <a href="#what">What you get</a>
-      <a href="#isolation">Architecture</a>
-      <a href="#plans">Plans</a>
-    </nav>
-    <div class="mast-act">
-      <a class="lnk" href="/dashboard/signin">Sign in</a>
-      <a class="btn btn-ink" href="/signup">Get started</a>
-    </div>
+<!-- ─────────────────────────────────────────── nav ─────── -->
+<header class="lp-nav lp-glass" id="top">
+  <a class="lp-brand" href="/" aria-label="Vuuut Pro, home"><span class="lp-brand-mark" aria-hidden="true">v<span>↗</span></span><span>vuuut<span class="lp-brand-sub">PRO</span></span></a>
+  <nav class="lp-nav-links" aria-label="Primary">
+    <a href="#what">What you get</a>
+    <a href="#isolation">How it runs</a>
+    <a href="#plans">Plans</a>
+    <a href="#questions">Questions</a>
+  </nav>
+  <div class="lp-nav-act">
+    <a class="lp-login" href="/dashboard/signin">Sign in</a>
+    <a class="lp-btn lp-btn-sm" href="/signup">Get started<svg class="lp-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg></a>
   </div>
 </header>
 
 <main id="main">
 
   <!-- ─────────────────────────────────────────── hero ─────── -->
-  <section class="hero">
-    <div class="shell hero-in">
+  <section class="pro-hero lp-wrap">
+    <span class="lp-eyebrow lp-in"><span class="lp-dot"></span>Managed Ghost hosting</span>
+    <h1 class="lp-in lp-in-2">Everything<br>but the <em>writing.</em></h1>
+    <p class="lp-lede lp-in lp-in-3">
+      Your publication on your own domain — certificates, backups, upgrades
+      and uptime all handled, with no cap on your members. You open the editor
+      and start.
+    </p>
+    <div class="lp-actions lp-in lp-in-4">
+      <a class="lp-btn lp-btn-lg" href="/signup?plan=starter-yearly">Create your publication<svg class="lp-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg></a>
+      <a class="lp-btn lp-btn-lg lp-btn-glass" href="#plans">See the plans</a>
+    </div>
+    <dl class="pro-meta lp-glass lp-in lp-in-4">
+      <div><dt>From</dt><dd>$7 / month<span class="billing-note">Billed yearly</span></dd></div>
+      <div><dt>Members</dt><dd>No ceiling<span class="billing-note">On every plan</span></dd></div>
+      <div><dt>Setup</dt><dd>Under a minute<span class="billing-note">Sign-up to live</span></dd></div>
+    </dl>
 
-      <div class="hero-text">
-        <p class="eyebrow r1">Managed Ghost hosting <span class="tick"></span> Issue Nº1</p>
-        <h1 class="r2">
-          Everything<br>
-          but the <em>writing.</em>
-        </h1>
-        <p class="lede r3">
-          Your publication on your own domain — certificates, backups, upgrades
-          and uptime all handled, with no cap on your members. You open the editor
-          and start.
-        </p>
-        <div class="cta r4">
-          <a class="btn btn-spot" href="/signup?plan=starter-yearly">Create your publication<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h12M13 6l6 6-6 6"/></svg></a>
-          <a class="lnk lnk-u" href="#plans">See the plans</a>
+    <!-- The stage: an illustrative publication behind glass, and the receipt
+         for how it got there. The window is decoration; the receipt is
+         content. -->
+    <div class="pro-stage lp-in lp-in-5">
+      <div class="pro-win lp-glass" aria-hidden="true">
+        <div class="pro-win-in">
+          <div class="pro-win-bar">
+            <span class="pro-win-dots"><i></i><i></i><i></i></span>
+            <span class="pro-win-url"><svg class="lp-i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>yourpublication.com</span>
+          </div>
+          <div class="pro-pub">
+            <div class="pro-pub-mast">
+              <span class="pro-pub-name">The Long Weekend</span>
+              <span class="pro-pub-nav"><span>Essays</span><span>Letters</span><span>Archive</span><span>About</span></span>
+              <span class="pro-pub-sub">Subscribe</span>
+            </div>
+            <div class="pro-pub-lead">
+              <div class="pro-pub-img"><span class="sun"></span><span class="hill hill-a"></span><span class="hill hill-b"></span></div>
+              <div class="pro-pub-copy">
+                <span class="pro-kicker">Essay · 8 min read</span>
+                <p class="pro-pub-h">On keeping a notebook nobody asked for</p>
+                <span class="ln"></span><span class="ln"></span><span class="ln"></span><span class="ln ln-s"></span>
+                <span class="pro-pub-by"><span class="av"></span>Members only</span>
+              </div>
+            </div>
+            <div class="pro-pub-row">
+              <div><span class="pro-kicker">Letter</span><p>What the garden knew in March</p></div>
+              <div><span class="pro-kicker">Essay</span><p>A short defence of slow mail</p></div>
+              <div><span class="pro-kicker">Notes</span><p>Seven things worth rereading</p></div>
+            </div>
+          </div>
         </div>
-        <dl class="hero-meta r5">
-          <div><dt>From</dt><dd>$7 / month<span class="billing-note">Billed yearly</span></dd></div>
-          <div><dt>Members</dt><dd>No ceiling</dd></div>
-          <div><dt>Setup</dt><dd>Under a minute</dd></div>
-        </dl>
       </div>
 
-      <!-- The provisioning receipt: what actually happens when you sign up. -->
-      <aside class="receipt r3" aria-label="What happens when a site is created">
-        <div class="receipt-head">
-          <span class="mono">PROVISIONING</span>
-          <span class="mono dim">vuuut</span>
-        </div>
-        <ol class="steps">
-          <li><span class="st">account created</span><span class="ms mono">0.0s</span></li>
-          <li><span class="st">database migrated</span><span class="ms mono">0.4s</span></li>
-          <li><span class="st">theme copied</span><span class="ms mono">0.6s</span></li>
-          <li><span class="st">certificate issued</span><span class="ms mono">1.2s</span></li>
-          <li><span class="st">process started</span><span class="ms mono">1.8s</span></li>
+      <aside class="pro-receipt lp-glass lp-floaty" aria-label="What happens when a site is created">
+        <div class="pro-receipt-head"><span class="lp-mono">Provisioning</span><span class="lp-mono">1.8s</span></div>
+        <ol class="pro-steps">
+          <li><span>account created</span><span class="ms">0.0s</span></li>
+          <li><span>database migrated</span><span class="ms">0.4s</span></li>
+          <li><span>theme copied</span><span class="ms">0.6s</span></li>
+          <li><span>certificate issued</span><span class="ms">1.2s</span></li>
+          <li><span>process started</span><span class="ms">1.8s</span></li>
         </ol>
-        <p class="receipt-live">
-          <span class="dot" aria-hidden="true"></span>
-          <span class="mono">LIVE</span> yourpublication.com
-        </p>
-        <div class="perf" aria-hidden="true"></div>
+        <p class="pro-live"><span class="lp-dot" aria-hidden="true"></span><b>Live</b> yourpublication.com</p>
       </aside>
 
+      <p class="pro-float-chip lp-chip lp-floaty lp-floaty-2" aria-hidden="true"><svg class="lp-i" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.4 2.9 8.3 7 10 4.1-1.7 7-5.6 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg>HTTPS · renews itself</p>
+
+      <div class="pro-float-members lp-glass lp-floaty lp-floaty-2" aria-hidden="true">
+        <span class="lp-mono">Members</span>
+        <span class="pro-avs"><i></i><i></i><i></i><i></i><b>∞</b></span>
+        <span class="pro-float-note">No ceiling, no per-reader fee</span>
+      </div>
     </div>
-    <div class="shell"><hr class="rule"></div>
   </section>
 
   <!-- ─────────────────────────────────────────── marquee ─────── -->
-  <div class="marquee" aria-hidden="true">
-    <div class="marquee-in">
-      <span>Automatic HTTPS</span><i>✦</i><span>Nightly backups</span><i>✦</i><span>Zero-downtime upgrades</span><i>✦</i>
-      <span>Stripe memberships</span><i>✦</i><span>Unlimited members</span><i>✦</i><span>Built-in analytics</span><i>✦</i>
-      <span>Custom themes</span><i>✦</i><span>Admin API</span><i>✦</i>
-      <span>Automatic HTTPS</span><i>✦</i><span>Nightly backups</span><i>✦</i><span>Zero-downtime upgrades</span><i>✦</i>
-      <span>Stripe memberships</span><i>✦</i><span>Unlimited members</span><i>✦</i><span>Built-in analytics</span><i>✦</i>
-      <span>Custom themes</span><i>✦</i><span>Admin API</span><i>✦</i>
+  <div class="pro-marquee" aria-hidden="true">
+    <div class="pro-marquee-in">
+      <span class="lp-chip">Automatic HTTPS</span><span class="lp-chip">Nightly backups</span><span class="lp-chip">Zero-downtime upgrades</span><span class="lp-chip">Stripe memberships</span><span class="lp-chip">Unlimited members</span><span class="lp-chip">Built-in analytics</span><span class="lp-chip">Custom themes</span><span class="lp-chip">Admin API</span>
+      <span class="lp-chip">Automatic HTTPS</span><span class="lp-chip">Nightly backups</span><span class="lp-chip">Zero-downtime upgrades</span><span class="lp-chip">Stripe memberships</span><span class="lp-chip">Unlimited members</span><span class="lp-chip">Built-in analytics</span><span class="lp-chip">Custom themes</span><span class="lp-chip">Admin API</span>
     </div>
   </div>
 
-  <!-- ─────────────────────────────────────────── 01 what ─────── -->
-  <section class="sec" id="what">
-    <div class="shell">
-      <div class="sec-head reveal">
-        <p class="num mono">01</p>
-        <h2>The parts you would<br>rather not run yourself.</h2>
-        <p class="sec-sub">A Ghost install is a server, a certificate, a mail route, a
-          backup job and an upgrade path. All of it is ours.</p>
-      </div>
+  <!-- ─────────────────────────────────────────── what ─────── -->
+  <section class="lp-sec lp-wrap" id="what">
+    <div class="lp-head lp-rise">
+      <span class="lp-eyebrow">What you get</span>
+      <h2>The parts you would<br>rather <em>not run yourself.</em></h2>
+      <p>A Ghost install is a server, a certificate, a mail route, a
+        backup job and an upgrade path. All of it is ours.</p>
+    </div>
 
-      <div class="grid">
-        <article class="cell reveal">
-          <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18"/></svg></span>
+    <div class="lp-bento">
+      <article class="lp-card lp-card-row lp-glass lp-s7 lp-rise">
+        <div>
+          <span class="lp-ic t-blue" aria-hidden="true"><svg class="lp-i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18"/></svg></span>
           <h3>Your own domain</h3>
           <p>Point a CNAME at us. The certificate is issued and renewed on its own,
             and <code>www</code> and the apex both resolve.</p>
-        </article>
-        <article class="cell reveal">
-          <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span>
-          <h3>Backups you can take</h3>
-          <p>Taken on a schedule and kept off-box — and you can pull one yourself
-            from the dashboard, whenever you like.</p>
-        </article>
-        <article class="cell reveal">
-          <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19h16"/></svg></span>
-          <h3>Upgrades, handled</h3>
-          <p>New Ghost releases are rolled out for you. Your theme and your content
-            are untouched; nothing asks you to run a command.</p>
-        </article>
-        <article class="cell reveal">
-          <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span>
-          <h3>Email sending included</h3>
-          <p>Newsletters and everyday email run through Amazon SES or Mailgun.
-            Every plan includes a monthly sending allowance, clear usage tracking,
-            and protection against unexpected sends beyond your volume.</p>
-        </article>
-        <article class="cell reveal">
-          <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 20V9m5 11V4m5 16v-7m5 7V7"/></svg></span>
-          <h3>Members without a meter</h3>
-          <p>No ceiling on your list, on any plan — we do not charge per reader.
-            Paid tiers run through your own Stripe account, and the numbers that
-            matter are built in.</p>
-        </article>
-        <article class="cell reveal">
-          <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 18-6-6 6-6M15 6l6 6-6 6"/></svg></span>
+        </div>
+        <div class="pro-domain" aria-hidden="true">
+          <div class="bar"><svg class="lp-i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span>https://<b>yourpublication.com</b></span></div>
+          <ul>
+            <li><span class="lp-mono">www</span><span class="ok">resolves</span></li>
+            <li><span class="lp-mono">apex</span><span class="ok">resolves</span></li>
+            <li><span class="lp-mono">certificate</span><span class="ok">renews itself</span></li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="lp-card lp-glass lp-s5 lp-rise">
+        <span class="lp-ic t-teal" aria-hidden="true"><svg class="lp-i" viewBox="0 0 24 24"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span>
+        <h3>Backups you can take</h3>
+        <p>Taken on a schedule and kept off-box — and you can pull one yourself
+          from the dashboard, whenever you like.</p>
+        <div class="lp-art pro-nights" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i class="now"></i></div>
+      </article>
+
+      <article class="lp-card lp-glass lp-s4 lp-rise">
+        <span class="lp-ic t-purple" aria-hidden="true"><svg class="lp-i" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/><path d="M5 21h14"/></svg></span>
+        <h3>Upgrades, handled</h3>
+        <p>New Ghost releases are rolled out for you. Your theme and your content
+          are untouched; nothing asks you to run a command.</p>
+        <div class="lp-art pro-upgrade" aria-hidden="true"><span>current</span><span class="track"><i></i></span><span class="next">next</span></div>
+      </article>
+
+      <article class="lp-card lp-glass lp-s4 lp-rise">
+        <span class="lp-ic t-amber" aria-hidden="true"><svg class="lp-i" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="m4 8 8 5.5L20 8"/></svg></span>
+        <h3>Email sending included</h3>
+        <p>Newsletters and everyday email run through Amazon SES or Mailgun.
+          Every plan includes a monthly sending allowance, clear usage tracking,
+          and protection against unexpected sends beyond your volume.</p>
+        <div class="lp-art pro-meter" aria-hidden="true"><span class="track"><i></i></span><span class="cap"><span>{{email_creator}} / month on Creator</span><span>resets monthly</span></span></div>
+      </article>
+
+      <article class="lp-card lp-glass lp-s4 lp-rise">
+        <span class="lp-ic t-green" aria-hidden="true"><svg class="lp-i" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.500-5.500s5.900 1.900 6.500 5.500"/><path d="M16 4.800a3.500 3.500 0 0 1 0 6.400M18.500 14.900c1.700.8 2.700 2.500 3 5.100"/></svg></span>
+        <h3>Members without a meter</h3>
+        <p>No ceiling on your list, on any plan — we do not charge per reader.
+          Paid tiers run through your own Stripe account, and the numbers that
+          matter are built in.</p>
+        <div class="lp-art pro-inf" aria-hidden="true"><b>∞</b><span>members,<br>on every plan</span></div>
+      </article>
+
+      <article class="lp-card lp-card-row lp-glass lp-s12 lp-rise">
+        <div>
+          <span class="lp-ic" aria-hidden="true"><svg class="lp-i" viewBox="0 0 24 24"><path d="m9 18-6-6 6-6M15 6l6 6-6 6"/></svg></span>
           <h3>Still your Ghost</h3>
           <p>Custom themes, the Admin and Content APIs, webhooks and integrations.
             Nothing is locked down, and your content exports whole.</p>
-        </article>
-      </div>
+          <ul class="pro-tags" aria-hidden="true"><li class="lp-chip">Themes</li><li class="lp-chip">Admin API</li><li class="lp-chip">Content API</li><li class="lp-chip">Webhooks</li><li class="lp-chip">Integrations</li></ul>
+        </div>
+        <div class="pro-code" aria-hidden="true">
+          <span class="pro-code-head"><i></i><i></i><i></i><span class="lp-mono">content api</span></span>
+          <pre><span class="k">GET</span> /ghost/api/content/posts/
+<span class="d">  ?key=</span><span class="s">••••••••••••</span>
+<span class="d">  &amp;include=</span>tags,authors
+
+<span class="k">200</span> <span class="d">{ "posts": [ … ] }</span></pre>
+        </div>
+      </article>
     </div>
   </section>
 
-  <!-- ─────────────────────────────────────────── 02 isolation ─────── -->
-  <section class="slab" id="isolation">
-    <div class="shell slab-in">
-      <div class="slab-text reveal">
-        <p class="num mono">02</p>
+  <!-- ─────────────────────────────────────────── isolation ─────── -->
+  <section class="lp-wrap" id="isolation">
+    <div class="lp-night pro-iso lp-rise">
+      <div class="pro-iso-text">
+        <span class="lp-eyebrow">How it runs</span>
         <h2>One process per<br><em>publication.</em></h2>
         <p>
           Most hosts put a hundred sites in one application and hope. Here, your
@@ -171,174 +218,228 @@
           rolled one site at a time. And because the edge proxy only routes, a
           site that is asleep costs nothing and wakes on the first request.
         </p>
-        <a class="lnk lnk-u light" href="/signup">Start a site and watch it come up</a>
+        <a class="lp-btn lp-btn-tonal" href="/signup">Start a site and watch it come up<svg class="lp-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg></a>
       </div>
 
-      <figure class="diagram reveal" aria-label="Diagram: one edge proxy routing to isolated site processes">
-        <div class="edge">
-          <span class="mono">EDGE PROXY</span>
-          <span class="edge-sub mono">:443 · TLS · routes by host</span>
-        </div>
+      <figure class="pro-diagram lp-night-glass" aria-label="Diagram: one edge proxy routing requests by hostname to four isolated site processes — two running, one asleep, one being upgraded">
+        <div class="reqs" aria-hidden="true"><span>yourpublication.com</span><span>a-neighbour.com</span></div>
+        <div class="edge"><b>Edge proxy</b><span class="lp-mono">:443 · TLS · routes by host</span></div>
         <div class="fan" aria-hidden="true">
           <svg viewBox="0 0 300 54" preserveAspectRatio="none">
-            <path d="M150 0 V18 H40 V54" /><path d="M150 0 V18 H113 V54" />
-            <path d="M150 0 V18 H187 V54" /><path d="M150 0 V18 H260 V54" />
+            <path d="M150 0 V18 H38 V54"/><path d="M150 0 V18 H113 V54"/>
+            <path d="M150 0 V18 H187 V54"/><path d="M150 0 V18 H262 V54"/>
           </svg>
         </div>
-        <div class="nodes">
-          <div class="node"><b>ghost</b><span class="mono">site-01</span></div>
-          <div class="node"><b>ghost</b><span class="mono">site-02</span></div>
-          <div class="node"><b>ghost</b><span class="mono">site-03</span></div>
-          <div class="node"><b>ghost</b><span class="mono">site-04</span></div>
+        <div class="nodes" aria-hidden="true">
+          <div class="node up"><b>site-01</b><span>own db · own memory</span><em><i></i>running</em></div>
+          <div class="node up"><b>site-02</b><span>own db · own memory</span><em><i></i>running</em></div>
+          <div class="node asleep"><b>site-03</b><span>costs nothing</span><em><i></i>asleep</em></div>
+          <div class="node upgrading"><b>site-04</b><span>one at a time</span><em><i></i>upgrading</em></div>
         </div>
-        <figcaption class="mono">isolated · supervised · independently upgraded</figcaption>
+        <figcaption class="lp-mono">isolated · supervised · independently upgraded</figcaption>
       </figure>
     </div>
   </section>
 
-  <!-- ─────────────────────────────────────────── 03 plans ─────── -->
-  <section class="sec" id="plans">
-    <div class="shell">
-      <div class="sec-head reveal">
-        <p class="num mono">03</p>
-        <h2>Plans</h2>
-        <p class="sec-sub">Every plan is the whole of Ghost, custom themes included. What
-          changes is your storage, team size, and monthly email allowance. Cancel whenever.</p>
+  <!-- ─────────────────────────────────────────── plans ─────── -->
+  <section class="lp-sec lp-wrap" id="plans">
+    <div class="lp-head lp-head-center lp-rise">
+      <span class="lp-eyebrow">Plans</span>
+      <h2>One price list.<br><em>No per-reader maths.</em></h2>
+      <p>Every plan is the whole of Ghost, custom themes included. What
+        changes is your storage, team size, and monthly email allowance. Cancel whenever.</p>
+    </div>
+
+    <!-- The billing switch is two radios and a sibling selector: no script,
+         so it works before landing.js loads and under a policy that allows
+         no inline styles. Mirrors pro_core::plans::default_plans(), where
+         each tier is sold as a monthly and a yearly plan. -->
+    <div class="pro-billing lp-rise">
+      <input class="lp-sr" type="radio" name="billing" id="bill-monthly">
+      <input class="lp-sr" type="radio" name="billing" id="bill-yearly" checked>
+      <div class="pro-seg lp-glass" role="group" aria-label="Billing period">
+        <label for="bill-monthly">Monthly</label>
+        <label for="bill-yearly">Yearly<span class="save">Save up to 33%</span></label>
       </div>
 
-      <!-- The billing switch is two radios and a sibling selector: no script,
-           so it works before landing.js loads and under a policy that allows
-           no inline styles. Mirrors pro_core::plans::default_plans(), where
-           each tier is sold as a monthly and a yearly plan. -->
-      <div class="billing reveal">
-        <input class="sr-only" type="radio" name="billing" id="bill-monthly">
-        <input class="sr-only" type="radio" name="billing" id="bill-yearly" checked>
-        <div class="billing-tabs" role="group" aria-label="Billing period">
-          <label for="bill-monthly">Monthly</label>
-          <label for="bill-yearly">Yearly<span class="save">Save up to 33%</span></label>
-        </div>
+      <div class="pro-plans">
+        <article class="pro-plan lp-glass">
+          <header><h3>Starter</h3><p class="plan-desc">A publication for one person, on your own domain.</p></header>
+          <p class="price p-month"><span class="cur">$</span>9<span class="per">/month</span></p>
+          <p class="price p-year"><span class="cur">$</span>7<span class="per">/month</span></p>
+          <p class="price-note p-month">$108 a year, billed monthly</p>
+          <p class="price-note p-year">$84 billed yearly · you keep $24</p>
+          <ul class="feat">
+            <li>5 GB storage</li>
+            <li>Unlimited members</li>
+            <li class="p-month"><strong>{{email_starter}} emails / month</strong></li>
+            <li class="p-year"><strong>{{email_starter-yearly}} emails / month</strong></li>
+            <li>3 staff users</li>
+            <li>Custom domain</li>
+            <li><strong>Custom themes</strong></li>
+            <li><strong>Custom integrations &amp; API access</strong></li>
+            <li>Social web &amp; custom fields</li>
+            <li>Paid memberships via Stripe</li>
+            <li>Analytics</li>
+          </ul>
+          <p class="trial">Cancel anytime</p>
+          <a class="lp-btn lp-btn-tonal p-month" href="/signup?plan=starter">Choose Starter</a>
+          <a class="lp-btn lp-btn-tonal p-year" href="/signup?plan=starter-yearly">Choose Starter</a>
+        </article>
 
-        <div class="plans">
-          <article class="plan">
-            <header><h3>Starter</h3><p class="plan-desc">A publication for one person, on your own domain.</p></header>
-            <p class="price p-month"><span class="cur">$</span>9<span class="per">/month</span></p>
-            <p class="price p-year"><span class="cur">$</span>7<span class="per">/month</span></p>
-            <p class="price-note p-month">$108 a year, billed monthly</p>
-            <p class="price-note p-year">$84 billed yearly · you keep $24</p>
-            <ul class="feat">
-              <li>5 GB storage</li>
-              <li>Unlimited members</li>
-              <li class="p-month"><strong>{{email_starter}} emails / month</strong></li>
-              <li class="p-year"><strong>{{email_starter-yearly}} emails / month</strong></li>
-              <li>3 staff users</li>
-              <li>Custom domain</li>
-              <li><strong>Custom themes</strong></li>
-              <li><strong>Custom integrations &amp; API access</strong></li>
-              <li>Social web &amp; custom fields</li>
-              <li>Paid memberships via Stripe</li>
-              <li>Analytics</li>
-            </ul>
-            <p class="trial mono">Cancel anytime</p>
-            <a class="btn btn-ghost p-month" href="/signup?plan=starter">Choose Starter</a>
-            <a class="btn btn-ghost p-year" href="/signup?plan=starter-yearly">Choose Starter</a>
-          </article>
+        <article class="pro-plan feature">
+          <span class="flag">Most chosen</span>
+          <header><h3>Creator</h3><p class="plan-desc">A growing publication with a small team behind it.</p></header>
+          <p class="price p-month"><span class="cur">$</span>15<span class="per">/month</span></p>
+          <p class="price p-year"><span class="cur">$</span>11<span class="per">/month</span></p>
+          <p class="price-note p-month">$180 a year, billed monthly</p>
+          <p class="price-note p-year">$132 billed yearly · you keep $48</p>
+          <ul class="feat">
+            <li>15 GB storage</li>
+            <li>Unlimited members</li>
+            <li class="p-month"><strong>{{email_creator}} emails / month</strong></li>
+            <li class="p-year"><strong>{{email_creator-yearly}} emails / month</strong></li>
+            <li>7 staff users</li>
+            <li>2 custom domains</li>
+            <li>Custom themes</li>
+            <li><strong>Custom integrations &amp; API access</strong></li>
+            <li>Social web &amp; custom fields</li>
+            <li>Paid memberships via Stripe</li>
+            <li>Analytics</li>
+          </ul>
+          <p class="trial">Cancel anytime</p>
+          <a class="lp-btn p-month" href="/signup?plan=creator">Choose Creator</a>
+          <a class="lp-btn p-year" href="/signup?plan=creator-yearly">Choose Creator</a>
+        </article>
 
-          <article class="plan feature">
-            <span class="flag mono">Most chosen</span>
-            <header><h3>Creator</h3><p class="plan-desc">A growing publication with a small team behind it.</p></header>
-            <p class="price p-month"><span class="cur">$</span>15<span class="per">/month</span></p>
-            <p class="price p-year"><span class="cur">$</span>11<span class="per">/month</span></p>
-            <p class="price-note p-month">$180 a year, billed monthly</p>
-            <p class="price-note p-year">$132 billed yearly · you keep $48</p>
-            <ul class="feat">
-              <li>15 GB storage</li>
-              <li>Unlimited members</li>
-              <li class="p-month"><strong>{{email_creator}} emails / month</strong></li>
-              <li class="p-year"><strong>{{email_creator-yearly}} emails / month</strong></li>
-              <li>7 staff users</li>
-              <li>2 custom domains</li>
-              <li>Custom themes</li>
-              <li><strong>Custom integrations &amp; API access</strong></li>
-              <li>Social web &amp; custom fields</li>
-              <li>Paid memberships via Stripe</li>
-              <li>Analytics</li>
-            </ul>
-            <p class="trial mono">Cancel anytime</p>
-            <a class="btn btn-spot p-month" href="/signup?plan=creator">Choose Creator</a>
-            <a class="btn btn-spot p-year" href="/signup?plan=creator-yearly">Choose Creator</a>
-          </article>
-
-          <article class="plan">
-            <header><h3>Business</h3><p class="plan-desc">Unlimited hands, every feature, priority support.</p></header>
-            <p class="price p-month"><span class="cur">$</span>49<span class="per">/month</span></p>
-            <p class="price p-year"><span class="cur">$</span>33<span class="per">/month</span></p>
-            <p class="price-note p-month">$588 a year, billed monthly</p>
-            <p class="price-note p-year">$396 billed yearly · you keep $192</p>
-            <ul class="feat">
-              <li>50 GB storage</li>
-              <li>Unlimited members</li>
-              <li class="p-month"><strong>{{email_business}} emails / month</strong></li>
-              <li class="p-year"><strong>{{email_business-yearly}} emails / month</strong></li>
-              <li>Unlimited staff users</li>
-              <li>10 custom domains</li>
-              <li>Custom themes</li>
-              <li><strong>Custom integrations &amp; API access</strong></li>
-              <li>Social web &amp; custom fields</li>
-              <li>Paid memberships via Stripe</li>
-              <li>Analytics</li>
-              <li><strong>Priority support</strong></li>
-            </ul>
-            <p class="trial mono">Cancel anytime</p>
-            <a class="btn btn-ghost p-month" href="/signup?plan=business">Choose Business</a>
-            <a class="btn btn-ghost p-year" href="/signup?plan=business-yearly">Choose Business</a>
-          </article>
-        </div>
+        <article class="pro-plan lp-glass">
+          <header><h3>Business</h3><p class="plan-desc">Unlimited hands, every feature, priority support.</p></header>
+          <p class="price p-month"><span class="cur">$</span>49<span class="per">/month</span></p>
+          <p class="price p-year"><span class="cur">$</span>33<span class="per">/month</span></p>
+          <p class="price-note p-month">$588 a year, billed monthly</p>
+          <p class="price-note p-year">$396 billed yearly · you keep $192</p>
+          <ul class="feat">
+            <li>50 GB storage</li>
+            <li>Unlimited members</li>
+            <li class="p-month"><strong>{{email_business}} emails / month</strong></li>
+            <li class="p-year"><strong>{{email_business-yearly}} emails / month</strong></li>
+            <li>Unlimited staff users</li>
+            <li>10 custom domains</li>
+            <li>Custom themes</li>
+            <li><strong>Custom integrations &amp; API access</strong></li>
+            <li>Social web &amp; custom fields</li>
+            <li>Paid memberships via Stripe</li>
+            <li>Analytics</li>
+            <li><strong>Priority support</strong></li>
+          </ul>
+          <p class="trial">Cancel anytime</p>
+          <a class="lp-btn lp-btn-tonal p-month" href="/signup?plan=business">Choose Business</a>
+          <a class="lp-btn lp-btn-tonal p-year" href="/signup?plan=business-yearly">Choose Business</a>
+        </article>
       </div>
+    </div>
 
-      <p class="plans-foot reveal">
-        Prices in USD. Memberships are billed through <strong>your</strong> Stripe
-        account — we never take a cut of what your readers pay you.
-        Email allowances reset monthly, including on yearly plans. Each newsletter
-        recipient and transactional message counts as one email. Upgrade for more volume.
-      </p>
+    <p class="pro-plans-foot lp-rise">
+      Prices in USD. Memberships are billed through <strong>your</strong> Stripe
+      account — we never take a cut of what your readers pay you.
+      Email allowances reset monthly, including on yearly plans. Each newsletter
+      recipient and transactional message counts as one email. Upgrade for more volume.
+    </p>
+  </section>
+
+  <!-- ─────────────────────────────────────────── questions ─────── -->
+  <section class="lp-sec lp-wrap lp-faq" id="questions">
+    <div class="lp-head lp-rise">
+      <span class="lp-eyebrow">Questions</span>
+      <h2>Fair <em>questions.</em></h2>
+      <p>The things people ask before they move a publication.</p>
+    </div>
+    <div class="lp-qa lp-rise">
+      <details class="lp-glass" open>
+        <summary>Do you take a cut of my membership revenue?<span aria-hidden="true"></span></summary>
+        <p>No. Paid tiers are billed through your own Stripe account, so what your
+          readers pay goes to you. We charge for the plan and nothing per reader.</p>
+      </details>
+      <details class="lp-glass">
+        <summary>How does a custom domain work?<span aria-hidden="true"></span></summary>
+        <p>Point a CNAME at us. The certificate is issued and renewed on its own, and
+          both <code>www</code> and the apex resolve. Starter includes one custom
+          domain, Creator two and Business ten.</p>
+      </details>
+      <details class="lp-glass">
+        <summary>What counts toward the email allowance?<span aria-hidden="true"></span></summary>
+        <p>Each newsletter recipient and each transactional message counts as one
+          email. The allowance resets every month, including on yearly plans, and
+          usage is tracked so a send never surprises you.</p>
+      </details>
+      <details class="lp-glass">
+        <summary>Is anything about Ghost locked down?<span aria-hidden="true"></span></summary>
+        <p>No. Every plan includes custom themes, the Admin and Content APIs,
+          webhooks and custom integrations.</p>
+      </details>
+      <details class="lp-glass">
+        <summary>What does one process per publication change for me?<span aria-hidden="true"></span></summary>
+        <p>Your site has its own process, database and memory. A neighbour's
+          traffic spike stays a neighbour's problem, and upgrades are rolled out
+          one site at a time rather than to everybody at once.</p>
+      </details>
+      <details class="lp-glass">
+        <summary>Can I leave?<span aria-hidden="true"></span></summary>
+        <p>Whenever you like. Cancel anytime, your content exports whole, and you
+          can pull a backup yourself from the dashboard.</p>
+      </details>
     </div>
   </section>
 
   <!-- ─────────────────────────────────────────── close ─────── -->
-  <section class="close">
-    <div class="shell close-in reveal">
-      <p class="eyebrow">Ready when you are</p>
-      <h2>Start writing<br>this afternoon.</h2>
-      <a class="btn btn-spot big" href="/signup">Create your publication<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h12M13 6l6 6-6 6"/></svg></a>
-      <p class="close-note mono">Cancel anytime · your Stripe, your revenue · export anytime</p>
+  <section class="lp-wrap pro-close">
+    <div class="pro-close-in lp-glass lp-rise">
+      <div>
+        <span class="lp-eyebrow"><span class="lp-dot"></span>Ready when you are</span>
+        <h2>Start writing<br><em>this afternoon.</em></h2>
+        <a class="lp-btn lp-btn-lg" href="/signup">Create your publication<svg class="lp-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg></a>
+        <p class="pro-close-note">Cancel anytime · your Stripe, your revenue · export anytime</p>
+      </div>
+
+      <!-- The page's argument, as a list: everything on it is ours but the
+           last line. -->
+      <div class="pro-todo" role="group" aria-label="Launch-day to-do list: everything handled except the writing">
+        <p class="pro-todo-head"><b>Launch day</b><span class="lp-mono">5 of 6 handled</span></p>
+        <ul>
+          <li class="done"><span class="t">Rent and patch a server</span></li>
+          <li class="done"><span class="t">Issue the certificate</span></li>
+          <li class="done"><span class="t">Wire up email delivery</span></li>
+          <li class="done"><span class="t">Schedule the backups</span></li>
+          <li class="done"><span class="t">Plan the next upgrade</span></li>
+          <li class="yours"><span class="t">Write something worth reading</span><span class="who">yours</span></li>
+        </ul>
+      </div>
     </div>
   </section>
 
 </main>
 
 <!-- ─────────────────────────────────────────── footer ─────── -->
-<footer class="foot">
-  <div class="shell foot-in">
-    <div class="foot-brand">
-      <a class="logo" href="/" aria-label="Vuuut, home">
-        <svg class="mark" viewBox="0 0 31 24" aria-hidden="true"><path d="M3 7v5.5a3.6 3.6 0 0 0 7.2 0V7"/><path d="M12.4 7v5.5a3.6 3.6 0 0 0 7.2 0V7"/><path d="M21.8 7v5.5a3.6 3.6 0 0 0 7.2 0V7"/></svg>
-        <span>Vuu<em>u</em>t</span>
-      </a>
+<footer class="lp-foot lp-wrap">
+  <div class="lp-foot-in">
+    <div class="lp-foot-brand">
+      <a class="lp-brand" href="/" aria-label="Vuuut Pro, home"><span class="lp-brand-mark" aria-hidden="true">v<span>↗</span></span><span>vuuut<span class="lp-brand-sub">PRO</span></span></a>
       <p>Managed Ghost hosting. Your publication, on your own domain.</p>
     </div>
     <nav aria-label="Footer">
       <div><h4>Platform</h4>
-        <a href="#what">What you get</a><a href="#isolation">Architecture</a><a href="/pricing">Pricing</a></div>
+        <a href="#what">What you get</a><a href="#isolation">How it runs</a><a href="/pricing">Pricing</a><a href="#questions">Questions</a></div>
       <div><h4>Account</h4>
         <a href="/signup">Create a site</a><a href="/dashboard/signin">Sign in</a><a href="/forgot">Reset password</a></div>
     </nav>
   </div>
-  <div class="shell foot-end">
-    <p class="mono">© <span id="yr">2026</span> Vuuut · vuuut.com</p>
-    <p class="mono dim">Built on Ghost</p>
+  <div class="lp-foot-end">
+    <span>© <span id="yr">2026</span> Vuuut · vuuut.com</span>
+    <span>Built on Ghost</span>
   </div>
 </footer>
 
+</div>
 <script src="/assets/landing.js" defer></script>
 </body>
 </html>
