@@ -18,7 +18,33 @@ use pro_core::{Config, StaffRole};
 use std::sync::Arc;
 use tower::ServiceExt;
 
-const HOST: &str = "pro.localhost:8080";
+const HOST: &str = "localhost:8080";
+
+#[tokio::test]
+async fn old_console_urls_redirect_to_owner_without_losing_queries_or_post_methods() {
+    let (state, _dir) = platform().await;
+    for (old, new) in [
+        ("/console", "/owner/dashboard"),
+        ("/console/", "/owner/dashboard"),
+        ("/console?theme=dark", "/owner/dashboard?theme=dark"),
+        ("/console/signin", "/owner/signin"),
+        ("/console/customers?page=2", "/owner/customers?page=2"),
+        ("/console/sites/site-id/suspend", "/owner/sites/site-id/suspend"),
+    ] {
+        for method in ["GET", "POST"] {
+            let (status, headers, _) = send(&state, method, old, None, None).await;
+            assert_eq!(status, StatusCode::PERMANENT_REDIRECT, "{method} {old}");
+            assert_eq!(headers[header::LOCATION], new);
+        }
+    }
+    let (status, headers, _) = send(&state, "GET", "/owner/dashboard", None, None).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(headers[header::LOCATION], "/owner/signin");
+    let (status, body) = get(&state, "/owner/signin", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains(r#"action="/owner/signin""#));
+    assert!(!body.contains("/console"));
+}
 
 /// A platform with one plan catalogue, in a temporary directory.
 async fn platform() -> (pro_web::AppState, tempdir::Dir) {
@@ -139,12 +165,13 @@ async fn as_operator(state: &pro_web::AppState, role: StaffRole) -> String {
     let (status, headers, _) = send(
         state,
         "POST",
-        "/console/signin",
+        "/owner/signin",
         None,
         Some("email=ops@example.com&password=a-very-long-operator-password"),
     )
     .await;
     assert_eq!(status, StatusCode::SEE_OTHER, "a good password signs in");
+    assert_eq!(headers[header::LOCATION], "/owner/dashboard");
     session_from(&headers)
 }
 
@@ -279,9 +306,9 @@ async fn links_to_a_site_carry_the_edge_port() {
         ("/dashboard".to_string(), &cookie),
         (format!("/dashboard/sites/{}", tenant.id), &cookie),
         (format!("/dashboard/domains/{}", builtin.id), &cookie),
-        ("/console/sites".to_string(), &operator),
-        (format!("/console/sites/{}", tenant.id), &operator),
-        (format!("/console/domains/{}", builtin.id), &operator),
+        ("/owner/sites".to_string(), &operator),
+        (format!("/owner/sites/{}", tenant.id), &operator),
+        (format!("/owner/domains/{}", builtin.id), &operator),
     ] {
         let (status, body) = get(&state, &path, Some(who)).await;
         assert_eq!(status, StatusCode::OK, "{path} did not render");
@@ -298,7 +325,7 @@ async fn links_to_a_site_carry_the_edge_port() {
     // And the button itself, on both panels.
     for (path, who) in [
         (format!("/dashboard/sites/{}", tenant.id), &cookie),
-        (format!("/console/sites/{}", tenant.id), &operator),
+        (format!("/owner/sites/{}", tenant.id), &operator),
     ] {
         let (_, body) = get(&state, &path, Some(who)).await;
         assert!(
@@ -332,7 +359,7 @@ async fn a_signed_out_visitor_is_sent_to_sign_in() {
         let (status, _) = get(&state, path, None).await;
         assert_eq!(status, StatusCode::SEE_OTHER, "{path} must detour, not 401");
     }
-    for path in ["/console", "/console/sites", "/console/settings"] {
+    for path in ["/owner/dashboard", "/owner/sites", "/owner/settings"] {
         let (status, _) = get(&state, path, None).await;
         assert_eq!(status, StatusCode::SEE_OTHER, "{path} must detour, not 401");
     }
@@ -354,16 +381,16 @@ async fn every_console_page_renders() {
     let builtin = pro_db::domains::primary_for_tenant(&state.db, &tenant.id).await.unwrap().unwrap();
 
     for path in [
-        "/console",
-        "/console/sites",
-        "/console/domains",
-        &format!("/console/domains/{}", builtin.id),
-        "/console/customers",
-        "/console/settings",
-        "/console/staff",
-        "/console/activity",
-        &format!("/console/sites/{}", tenant.id),
-        &format!("/console/customers/{}", account.id),
+        "/owner/dashboard",
+        "/owner/sites",
+        "/owner/domains",
+        &format!("/owner/domains/{}", builtin.id),
+        "/owner/customers",
+        "/owner/settings",
+        "/owner/staff",
+        "/owner/activity",
+        &format!("/owner/sites/{}", tenant.id),
+        &format!("/owner/customers/{}", account.id),
     ] {
         let (status, body) = get(&state, path, Some(&cookie)).await;
         assert_eq!(status, StatusCode::OK, "{path} did not render");
@@ -380,18 +407,18 @@ async fn every_console_page_renders() {
 async fn settings_directory_and_pages_cover_the_registry() {
     let (state, _dir) = platform().await;
     let cookie = as_operator(&state, StaffRole::Owner).await;
-    let (status, directory) = get(&state, "/console/settings", Some(&cookie)).await;
+    let (status, directory) = get(&state, "/owner/settings", Some(&cookie)).await;
     assert_eq!(status, StatusCode::OK);
     assert!(directory.contains("Search all settings"));
-    assert!(directory.contains(r#"href="/console/staff""#));
-    assert!(directory.contains(r#"href="/console/plans""#));
+    assert!(directory.contains(r#"href="/owner/staff""#));
+    assert!(directory.contains(r#"href="/owner/plans""#));
     let mut preview = Vec::new();
     for (slug, group) in [
         ("general", "Platform"), ("signup", "Signup"), ("billing", "Billing"),
         ("stripe", "Stripe"), ("paddle", "Paddle"), ("lemon-squeezy", "Lemon Squeezy"),
         ("gumroad", "Gumroad"), ("email", "Mail"), ("ses", "Amazon SES"), ("mailgun", "Mailgun"),
     ] {
-        let path = format!("/console/settings/{slug}");
+        let path = format!("/owner/settings/{slug}");
         assert!(directory.contains(&format!(r#"href="{path}""#)));
         let (status, page) = get(&state, &path, Some(&cookie)).await;
         assert_eq!(status, StatusCode::OK, "{path}");
@@ -419,12 +446,12 @@ async fn settings_directory_and_pages_cover_the_registry() {
 async fn settings_search_finds_fields_and_escapes_the_query() {
     let (state, _dir) = platform().await;
     let cookie = as_operator(&state, StaffRole::Owner).await;
-    let (status, body) = get(&state, "/console/settings?q=SMTP%20password", Some(&cookie)).await;
+    let (status, body) = get(&state, "/owner/settings?q=SMTP%20password", Some(&cookie)).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("/console/settings/ses#setting-mail_ses_pass"));
-    assert!(body.contains("/console/settings/email#setting-mail_pass"));
-    assert!(!body.contains("/console/settings/stripe#"));
-    let (_, body) = get(&state, "/console/settings?q=%3Cscript%3E", Some(&cookie)).await;
+    assert!(body.contains("/owner/settings/ses#setting-mail_ses_pass"));
+    assert!(body.contains("/owner/settings/email#setting-mail_pass"));
+    assert!(!body.contains("/owner/settings/stripe#"));
+    let (_, body) = get(&state, "/owner/settings?q=%3Cscript%3E", Some(&cookie)).await;
     assert!(body.contains("Nothing matches"));
     assert!(body.contains("&lt;script&gt;"));
     assert!(!body.contains("<script>"));
@@ -434,22 +461,22 @@ async fn settings_search_finds_fields_and_escapes_the_query() {
 async fn section_saves_stay_on_the_page_and_cannot_write_other_sections() {
     let (state, _dir) = platform().await;
     let cookie = as_operator(&state, StaffRole::Owner).await;
-    let (status, headers, _) = send(&state, "POST", "/console/settings/general", Some(&cookie), Some("platform.name=Acme")).await;
+    let (status, headers, _) = send(&state, "POST", "/owner/settings/general", Some(&cookie), Some("platform.name=Acme")).await;
     assert_eq!(status, StatusCode::SEE_OTHER);
-    assert!(headers["location"].to_str().unwrap().starts_with("/console/settings/general?"));
+    assert!(headers["location"].to_str().unwrap().starts_with("/owner/settings/general?"));
     assert_eq!(state.live().platform_name(), "Acme");
     assert!(state.live().signup_enabled());
-    let (_, headers, _) = send(&state, "POST", "/console/settings/general", Some(&cookie), Some("platform.name=MustNotSave&__present.signup.enabled=1")).await;
-    assert!(headers["location"].to_str().unwrap().starts_with("/console/settings/general?"));
+    let (_, headers, _) = send(&state, "POST", "/owner/settings/general", Some(&cookie), Some("platform.name=MustNotSave&__present.signup.enabled=1")).await;
+    assert!(headers["location"].to_str().unwrap().starts_with("/owner/settings/general?"));
     assert_eq!(state.live().platform_name(), "Acme", "a forged cross-section submission must be atomic");
     assert!(state.live().signup_enabled());
-    let (_, headers, _) = send(&state, "POST", "/console/settings/signup", Some(&cookie), Some("__present.signup.enabled=1")).await;
-    assert!(headers["location"].to_str().unwrap().starts_with("/console/settings/signup?"));
+    let (_, headers, _) = send(&state, "POST", "/owner/settings/signup", Some(&cookie), Some("__present.signup.enabled=1")).await;
+    assert!(headers["location"].to_str().unwrap().starts_with("/owner/settings/signup?"));
     assert!(!state.live().signup_enabled());
-    let (_, headers, _) = send(&state, "POST", "/console/settings/signup", Some(&cookie), Some("__present.signup.enabled=1&signup.enabled=1")).await;
-    assert!(headers["location"].to_str().unwrap().starts_with("/console/settings/signup?"));
+    let (_, headers, _) = send(&state, "POST", "/owner/settings/signup", Some(&cookie), Some("__present.signup.enabled=1&signup.enabled=1")).await;
+    assert!(headers["location"].to_str().unwrap().starts_with("/owner/settings/signup?"));
     assert!(state.live().signup_enabled());
-    let (status, _) = get(&state, "/console/settings/not-a-section", Some(&cookie)).await;
+    let (status, _) = get(&state, "/owner/settings/not-a-section", Some(&cookie)).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
@@ -457,18 +484,18 @@ async fn section_saves_stay_on_the_page_and_cannot_write_other_sections() {
 async fn section_secrets_are_write_only_and_survive_blank_saves() {
     let (state, _dir) = platform().await;
     let cookie = as_operator(&state, StaffRole::Admin).await;
-    let (status, headers, _) = send(&state, "POST", "/console/settings/ses", Some(&cookie), Some("mail.ses.region=us-east-1&mail.ses.user=ses-private-user&mail.ses.pass=ses-private-password&mail.ses.endpoint=example.fips.region.mail-manager-smtp.amazonaws.com")).await;
+    let (status, headers, _) = send(&state, "POST", "/owner/settings/ses", Some(&cookie), Some("mail.ses.region=us-east-1&mail.ses.user=ses-private-user&mail.ses.pass=ses-private-password&mail.ses.endpoint=example.fips.region.mail-manager-smtp.amazonaws.com")).await;
     assert_eq!(status, StatusCode::SEE_OTHER);
-    assert!(headers["location"].to_str().unwrap().starts_with("/console/settings/ses?"));
-    let (_, html) = get(&state, "/console/settings/ses", Some(&cookie)).await;
+    assert!(headers["location"].to_str().unwrap().starts_with("/owner/settings/ses?"));
+    let (_, html) = get(&state, "/owner/settings/ses", Some(&cookie)).await;
     assert!(!html.contains("ses-private-user"));
     assert!(!html.contains("ses-private-password"));
     assert!(html.contains("example.fips.region.mail-manager-smtp.amazonaws.com"));
     assert_eq!(state.live().mail().ses_smtp_host().as_deref(), Some("example.fips.region.mail-manager-smtp.amazonaws.com"));
-    let _ = send(&state, "POST", "/console/settings/ses", Some(&cookie), Some("mail.ses.user=&mail.ses.pass=&mail.ses.region=eu-west-1")).await;
+    let _ = send(&state, "POST", "/owner/settings/ses", Some(&cookie), Some("mail.ses.user=&mail.ses.pass=&mail.ses.region=eu-west-1")).await;
     assert_eq!(state.live().mail().ses.pass.as_deref(), Some("ses-private-password"));
     assert_eq!(state.live().mail().ses.region.as_deref(), Some("eu-west-1"));
-    let (_, html) = get(&state, "/console/settings/billing", Some(&cookie)).await;
+    let (_, html) = get(&state, "/owner/settings/billing", Some(&cookie)).await;
     assert!(!html.contains(r#"form="settings-form""#), "admin must not receive an owner-only Save button");
     assert!(html.contains("Owner only"));
 }
@@ -506,9 +533,9 @@ async fn plan_product_ids_are_settable_without_a_restart() {
         "nothing can be bought until a variant id is set"
     );
 
-    let (status, body) = get(&state, "/console/plans", Some(&cookie)).await;
+    let (status, body) = get(&state, "/owner/plans", Some(&cookie)).await;
     assert_eq!(status, StatusCode::OK);
-    assert_m3_shell(&body, "/console/settings");
+    assert_m3_shell(&body, "/owner/settings");
     // It says plainly that the platform cannot sell, which is the whole point
     // of the screen existing.
     assert!(body.contains("Nothing can be bought yet"), "got no warning");
@@ -524,7 +551,7 @@ async fn plan_product_ids_are_settable_without_a_restart() {
     let (status, _, _) = send(
         &state,
         "POST",
-        "/console/plans",
+        "/owner/plans",
         Some(&cookie),
         Some("id.starter.lemonsqueezy=812345&id.creator.lemonsqueezy="),
     )
@@ -551,7 +578,7 @@ async fn plan_product_ids_are_settable_without_a_restart() {
     );
 
     // The screen now reflects it, and stops warning.
-    let (_, body) = get(&state, "/console/plans", Some(&cookie)).await;
+    let (_, body) = get(&state, "/owner/plans", Some(&cookie)).await;
     assert!(body.contains(r#"value="812345""#));
     assert!(!body.contains("Nothing can be bought yet"));
     assert!(body.contains("On sale"));
@@ -561,7 +588,7 @@ async fn plan_product_ids_are_settable_without_a_restart() {
     let (status, _, _) = send(
         &state,
         "POST",
-        "/console/plans",
+        "/owner/plans",
         Some(&cookie),
         Some("id.starter.lemonsqueezy="),
     )
@@ -578,14 +605,14 @@ async fn only_an_owner_may_set_product_ids() {
     let (state, _dir) = platform().await;
     let cookie = as_operator(&state, StaffRole::Admin).await;
 
-    let (status, body) = get(&state, "/console/plans", Some(&cookie)).await;
+    let (status, body) = get(&state, "/owner/plans", Some(&cookie)).await;
     assert_eq!(status, StatusCode::OK, "an admin may look");
     assert!(body.contains("can only be changed by the Owner"), "and is told why not");
 
     let (status, _, _) = send(
         &state,
         "POST",
-        "/console/plans",
+        "/owner/plans",
         Some(&cookie),
         Some("id.starter.lemonsqueezy=812345"),
     )
@@ -606,7 +633,7 @@ async fn the_plans_form_refuses_what_it_does_not_know() {
 
     for hostile in ["id.no-such-plan.lemonsqueezy=x", "id.starter.notaprovider=x"] {
         let (status, _, _) =
-            send(&state, "POST", "/console/plans", Some(&cookie), Some(hostile)).await;
+            send(&state, "POST", "/owner/plans", Some(&cookie), Some(hostile)).await;
         assert_eq!(status, StatusCode::SEE_OTHER, "{hostile}");
     }
     // And the catalogue is untouched.
@@ -629,7 +656,7 @@ async fn settings_save_and_take_effect_immediately() {
     let (status, _, _) = send(
         &state,
         "POST",
-        "/console/settings",
+        "/owner/settings",
         Some(&cookie),
         Some("__present.signup.enabled=1"),
     )
@@ -641,7 +668,7 @@ async fn settings_save_and_take_effect_immediately() {
     let (status, _, _) = send(
         &state,
         "POST",
-        "/console/settings",
+        "/owner/settings",
         Some(&cookie),
         Some("__present.signup.enabled=1&signup.enabled=1"),
     )
@@ -652,7 +679,7 @@ async fn settings_save_and_take_effect_immediately() {
     // A submission mentioning neither leaves it exactly as it was — this is
     // the guard against a partial POST reading as "every switch off".
     let (status, _, _) =
-        send(&state, "POST", "/console/settings", Some(&cookie), Some("platform.name=Acme")).await;
+        send(&state, "POST", "/owner/settings", Some(&cookie), Some("platform.name=Acme")).await;
     assert_eq!(status, StatusCode::SEE_OTHER);
     assert!(state.live().signup_enabled(), "an unmentioned switch must not flip");
     assert_eq!(state.live().platform_name(), "Acme", "and the named field saved");
@@ -670,7 +697,7 @@ async fn a_support_operator_is_shown_no_controls_they_cannot_use() {
         .unwrap();
     let tenant = seed_site(&state, &account.id, "somebodys-site").await;
 
-    let (status, body) = get(&state, &format!("/console/sites/{}", tenant.id), Some(&cookie)).await;
+    let (status, body) = get(&state, &format!("/owner/sites/{}", tenant.id), Some(&cookie)).await;
     assert_eq!(status, StatusCode::OK);
     assert!(!body.contains("/suspend"), "suspend is Admin and above");
     assert!(body.contains("Apply plan"), "the plan control is shown…");
@@ -680,7 +707,7 @@ async fn a_support_operator_is_shown_no_controls_they_cannot_use() {
     let (status, _, _) = send(
         &state,
         "POST",
-        &format!("/console/sites/{}/suspend", tenant.id),
+        &format!("/owner/sites/{}/suspend", tenant.id),
         Some(&cookie),
         Some("reason=because"),
     )
@@ -690,7 +717,7 @@ async fn a_support_operator_is_shown_no_controls_they_cannot_use() {
     assert_eq!(tenant.status, pro_core::TenantStatus::Active, "still running");
 
     // Staff management is an owner's, so the invite form is not drawn.
-    let (status, staff) = get(&state, "/console/staff", Some(&cookie)).await;
+    let (status, staff) = get(&state, "/owner/staff", Some(&cookie)).await;
     assert_eq!(status, StatusCode::OK);
     assert!(!staff.contains("Add a staff login"));
 }
@@ -703,7 +730,7 @@ async fn the_two_panels_do_not_share_sessions() {
     let (_, customer) = as_customer(&state).await;
     let operator = as_operator(&state, StaffRole::Owner).await;
 
-    let (status, _) = get(&state, "/console", Some(&customer)).await;
+    let (status, _) = get(&state, "/owner/dashboard", Some(&customer)).await;
     assert_eq!(status, StatusCode::SEE_OTHER, "a customer cookie is no operator");
 
     let (status, _) = get(&state, "/dashboard", Some(&operator)).await;
@@ -909,7 +936,7 @@ async fn the_switcher_comes_back_to_the_page_it_was_used_on() {
     // A deep page, and one with a query string, which must survive intact.
     for (referer, expected) in [
         ("/dashboard/sites/abc", "/dashboard/sites/abc"),
-        ("/console/customers?page=2", "/console/customers?page=2"),
+        ("/owner/customers?page=2", "/owner/customers?page=2"),
         ("/dashboard/signin", "/dashboard/signin"),
         // A fragment is the browser's business, not the server's.
         ("/pricing#plans", "/pricing"),
@@ -934,9 +961,9 @@ async fn a_referer_from_elsewhere_is_not_followed() {
 
     for hostile in [
         "https://evil.example/dashboard",
-        "http://evil.example:8080/console",
+        "http://evil.example:8080/owner/dashboard",
         // A host that merely *starts* with ours is a different host.
-        "http://pro.localhost.evil.example/console",
+        "http://localhost.evil.example/owner/dashboard",
         "not-a-url",
     ] {
         let (status, headers, _) =
@@ -989,7 +1016,7 @@ async fn appearance_from(
 async fn a_signed_out_visitor_can_reach_the_switcher_everywhere() {
     let (state, _dir) = platform().await;
 
-    for path in ["/pricing", "/signup", "/dashboard/signin", "/console/signin", "/forgot"] {
+    for path in ["/pricing", "/signup", "/dashboard/signin", "/owner/signin", "/forgot"] {
         let (status, body) = get(&state, path, None).await;
         assert_eq!(status, StatusCode::OK, "{path}");
         assert!(
@@ -1021,7 +1048,7 @@ async fn a_customers_hostname_cannot_reach_the_console() {
     let (state, _dir) = platform().await;
     let request = Request::builder()
         .method("GET")
-        .uri("/console/signin")
+        .uri("/owner/signin")
         .header(header::HOST, "a-customers-domain.com")
         .body(Body::empty())
         .unwrap();
@@ -1103,7 +1130,7 @@ async fn a_hostile_site_title_cannot_attack_the_console() {
     .unwrap();
 
     let cookie = as_operator(&state, StaffRole::Owner).await;
-    for path in ["/console/sites", &format!("/console/sites/{}", tenant.id)] {
+    for path in ["/owner/sites", &format!("/owner/sites/{}", tenant.id)] {
         let (status, body) = get(&state, path, Some(&cookie)).await;
         assert_eq!(status, StatusCode::OK);
         assert!(!body.contains("<img src=x"), "{path}: the tag survived unescaped");
@@ -1158,10 +1185,10 @@ async fn console_managed_mail_updates_existing_sites_and_releases_them() {
     let body = pro_provision::config_file::build("https://mail-site.example.test", tenant.port, &state.config.plans[0], "2026-01-01", "https://billing", &Default::default(), &pro_provision::config_file::database_block(None));
     pro_provision::config_file::write(&dir, &state.config.tenants.env, &body).await.unwrap();
 
-    let (status, _, _) = send(&state, "POST", "/console/settings", Some(&cookie), Some("mail.tenantProvider=ses&mail.ses.region=us-east-1&mail.ses.user=console-ses-user&mail.ses.pass=console-ses-password&mail.fromAddress=verified%40example.test")).await;
+    let (status, _, _) = send(&state, "POST", "/owner/settings", Some(&cookie), Some("mail.tenantProvider=ses&mail.ses.region=us-east-1&mail.ses.user=console-ses-user&mail.ses.pass=console-ses-password&mail.fromAddress=verified%40example.test")).await;
     assert_eq!(status, StatusCode::SEE_OTHER);
     assert_eq!(state.live().mail().tenant_provider, "ses");
-    let (_, html) = get(&state, "/console/settings", Some(&cookie)).await;
+    let (_, html) = get(&state, "/owner/settings", Some(&cookie)).await;
     assert!(html.contains("Amazon SES"));
     assert!(!html.contains("console-ses-password"));
     assert!(!html.contains("console-ses-user"));
@@ -1181,10 +1208,10 @@ async fn console_managed_mail_updates_existing_sites_and_releases_them() {
     }
     await_provider(&state, &dir, Some("ses")).await;
     assert!(!state.supervisor.is_running(&tenant.id), "hibernating sites must stay asleep");
-    let (status, _, _) = send(&state, "POST", "/console/settings", Some(&cookie), Some("mail.tenantProvider=mailgun&mail.mailgun.apiKey=console-mailgun-key&mail.mailgun.domain=mg.example.test")).await;
+    let (status, _, _) = send(&state, "POST", "/owner/settings", Some(&cookie), Some("mail.tenantProvider=mailgun&mail.mailgun.apiKey=console-mailgun-key&mail.mailgun.domain=mg.example.test")).await;
     assert_eq!(status, StatusCode::SEE_OTHER);
     await_provider(&state, &dir, Some("mailgun")).await;
-    let (status, _, _) = send(&state, "POST", "/console/settings", Some(&cookie), Some("mail.tenantProvider=tenant")).await;
+    let (status, _, _) = send(&state, "POST", "/owner/settings", Some(&cookie), Some("mail.tenantProvider=tenant")).await;
     assert_eq!(status, StatusCode::SEE_OTHER);
     await_provider(&state, &dir, None).await;
     let body = pro_provision::config_file::read(&dir, &state.config.tenants.env).await.unwrap();
@@ -1197,9 +1224,9 @@ async fn console_managed_mail_updates_existing_sites_and_releases_them() {
 async fn plan_email_allowances_are_editable_and_update_public_content() {
     let (state,_dir)=platform().await;
     let cookie=as_operator(&state,StaffRole::Owner).await;
-    let (_,html)=get(&state,"/console/plans",Some(&cookie)).await;
+    let (_,html)=get(&state,"/owner/plans",Some(&cookie)).await;
     for plan in state.live().plans() {assert!(html.contains(&format!(r#"name="emails.{}""#,plan.slug)));}
-    let (status,_,_)=send(&state,"POST","/console/plans",Some(&cookie),Some("emails.starter=7000&emails.starter-yearly=8000")).await;
+    let (status,_,_)=send(&state,"POST","/owner/plans",Some(&cookie),Some("emails.starter=7000&emails.starter-yearly=8000")).await;
     assert_eq!(status,StatusCode::SEE_OTHER);
     assert_eq!(state.live().plan("starter").unwrap().email_allowance(),7000);
     assert_eq!(state.live().plan("starter-yearly").unwrap().email_allowance(),8000);
@@ -1209,13 +1236,13 @@ async fn plan_email_allowances_are_editable_and_update_public_content() {
     assert!(homepage.contains("Email sending included"));
     let jobs:i64=sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE kind='sync_tenant_mail'").fetch_one(&state.db).await.unwrap();
     assert!(jobs>0);
-    let _=send(&state,"POST","/console/plans",Some(&cookie),Some("emails.starter=-1&emails.creator=9000")).await;
+    let _=send(&state,"POST","/owner/plans",Some(&cookie),Some("emails.starter=-1&emails.creator=9000")).await;
     assert_eq!(state.live().plan("starter").unwrap().email_allowance(),7000);
     assert_eq!(state.live().plan("creator").unwrap().email_allowance(),25000);
     if let Some(dir)=std::env::var_os("VUUUT_EMAIL_PREVIEW_DIR") {
         let dir=std::path::PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("homepage.html"),homepage).unwrap();
-        let (_,plans)=get(&state,"/console/plans",Some(&cookie)).await;std::fs::write(dir.join("plans.html"),plans).unwrap();
+        let (_,plans)=get(&state,"/owner/plans",Some(&cookie)).await;std::fs::write(dir.join("plans.html"),plans).unwrap();
     }
 }
 
@@ -1229,7 +1256,7 @@ async fn site_email_details_show_volume_and_support_individual_auto_stop_policy(
     pro_db::tenants::set_status(&state.db,&tenant.id,pro_core::TenantStatus::Active).await.unwrap();
     let report=json!({"sent":50,"limit":5000,"pending":2,"failed":3,"blocked":4,"newsletter_sent":40,"transactional_sent":10,"total_sent":250,"remaining":4948,"period_start":"2026-11-01T00:00:00Z","period_end":"2026-12-01T00:00:00Z","daily":[{"date":"2026-11-02","sent":50,"failed":3,"blocked":4}],"providers":[{"provider":"ses","sent":50}],"history_note":"Accepted submissions"});
     pro_db::email_usage::record(&state.db,&tenant.id,&report).await.unwrap();
-    let path=format!("/console/sites/{}",tenant.id);
+    let path=format!("/owner/sites/{}",tenant.id);
     let (status,html)=get(&state,&path,Some(&cookie)).await;
     assert_eq!(status,StatusCode::OK);
     for label in ["Sent this period","Monthly allowance","Remaining","Newsletter sends","Transactional sends","Daily email activity","Sending providers","Save sending policy","5,000","4,948"] {assert!(html.contains(label),"missing {label}");}
@@ -1241,7 +1268,7 @@ async fn site_email_details_show_volume_and_support_individual_auto_stop_policy(
     let _=send(&state,"POST",&policy_url,Some(&cookie),Some("policy=inherit")).await;
     assert_eq!(pro_db::email_usage::policy(&state.db,&tenant.id).await.unwrap(),None);
     assert!(state.live().mail().auto_stop_at_limit);
-    let _=send(&state,"POST","/console/settings/email",Some(&cookie),Some("__present.mail.autoStopAtLimit=1")).await;
+    let _=send(&state,"POST","/owner/settings/email",Some(&cookie),Some("__present.mail.autoStopAtLimit=1")).await;
     assert!(!state.live().mail().auto_stop_at_limit);
     if let Some(dir)=std::env::var_os("VUUUT_EMAIL_PREVIEW_DIR") {
         let dir=std::path::PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();std::fs::write(dir.join("site.html"),html).unwrap();
@@ -1375,18 +1402,18 @@ async fn the_console_lists_every_domain_and_filters_them() {
         .await
         .unwrap();
 
-    let (status, all) = get(&state, "/console/domains", Some(&cookie)).await;
+    let (status, all) = get(&state, "/owner/domains", Some(&cookie)).await;
     assert_eq!(status, StatusCode::OK);
     for host in ["adas-journal.localhost", "theirs.localhost", "blog.example.com"] {
         assert!(all.contains(host), "every domain on the platform: {host}");
     }
     assert!(all.contains("owner@example.com") && all.contains("other@example.com"), "and whose");
 
-    let (_, pending) = get(&state, "/console/domains?status=pending", Some(&cookie)).await;
+    let (_, pending) = get(&state, "/owner/domains?status=pending", Some(&cookie)).await;
     assert!(pending.contains("blog.example.com"));
     assert!(!pending.contains("theirs.localhost"), "built-in addresses are never pending");
 
-    let (_, found) = get(&state, "/console/domains?q=other%40example", Some(&cookie)).await;
+    let (_, found) = get(&state, "/owner/domains?q=other%40example", Some(&cookie)).await;
     assert!(found.contains("theirs.localhost"), "searchable by owner");
     assert!(!found.contains("blog.example.com"));
 }
@@ -1403,7 +1430,7 @@ async fn console_domain_controls_follow_the_staff_role() {
         pro_db::domains::add(&state.db, &tenant.id, "blog.example.com", pro_core::DomainKind::Custom, false)
             .await
             .unwrap();
-    let page = format!("/console/domains/{}", custom.id);
+    let page = format!("/owner/domains/{}", custom.id);
 
     let support = as_operator(&state, StaffRole::Support).await;
     let (status, body) = get(&state, &page, Some(&support)).await;
@@ -1434,20 +1461,20 @@ async fn an_admin_removes_a_domain_from_the_console() {
             .unwrap();
     let admin = as_operator(&state, StaffRole::Admin).await;
 
-    let (status, body) = get(&state, &format!("/console/domains/{}", custom.id), Some(&admin)).await;
+    let (status, body) = get(&state, &format!("/owner/domains/{}", custom.id), Some(&admin)).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains(&format!("/console/domains/{}/remove", custom.id)));
+    assert!(body.contains(&format!("/owner/domains/{}/remove", custom.id)));
 
     let (status, headers, _) = send(
         &state,
         "POST",
-        &format!("/console/domains/{}/remove", custom.id),
+        &format!("/owner/domains/{}/remove", custom.id),
         Some(&admin),
         Some(""),
     )
     .await;
     assert_eq!(status, StatusCode::SEE_OTHER);
-    assert!(headers.get(header::LOCATION).unwrap().to_str().unwrap().starts_with("/console/domains?"));
+    assert!(headers.get(header::LOCATION).unwrap().to_str().unwrap().starts_with("/owner/domains?"));
     assert!(pro_db::domains::find_by_host(&state.db, "blog.example.com").await.unwrap().is_none());
 
     // Recorded against the operator, so the customer's history says who.

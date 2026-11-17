@@ -8,7 +8,7 @@
 //!   visitors ───────────► │  edge (this process)     │
 //!                         │  · TLS for every domain  │
 //!                         │  · Host → tenant         │
-//!                         │  · /dashboard  /console  │
+//!                         │  · /dashboard  /owner/dashboard  │
 //!                         └───────────┬──────────────┘
 //!                                     │ loopback
 //!                   ┌─────────────────┼─────────────────┐

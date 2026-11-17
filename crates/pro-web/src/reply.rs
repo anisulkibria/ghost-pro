@@ -453,11 +453,11 @@ mod tests {
     #[test]
     fn a_signed_out_visitor_is_sent_to_the_signin_form() {
         let result = Err(ProError::Unauthorized("Please sign in.".into()));
-        let response = or_page_or_signin("/console/signin", &chrome(), result);
+        let response = or_page_or_signin("/owner/signin", &chrome(), result);
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
         assert_eq!(
             response.headers().get(header::LOCATION).unwrap(),
-            "/console/signin"
+            "/owner/signin"
         );
     }
 
@@ -465,7 +465,7 @@ mod tests {
     #[test]
     fn other_page_failures_still_render() {
         let result = Err(ProError::Forbidden("This needs the Owner role.".into()));
-        let response = or_page_or_signin("/console/signin", &chrome(), result);
+        let response = or_page_or_signin("/owner/signin", &chrome(), result);
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 }

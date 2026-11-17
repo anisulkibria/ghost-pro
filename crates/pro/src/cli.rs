@@ -277,7 +277,7 @@ pub async fn setup(args: Args) -> Result<()> {
     println!("  2. ghost-pro doctor");
     println!("  3. ghost-pro serve");
     println!(
-        "\nThen open {}/console to choose a payment provider.\n",
+        "\nThen open {}/owner/dashboard to choose a payment provider.\n",
         config["url"].as_str().unwrap_or("")
     );
     Ok(())
@@ -443,7 +443,7 @@ pub async fn doctor() -> Result<()> {
                         "billing",
                         &format!(
                             "{provider} is configured but no plan has a {provider} product id \
-                             — set them on /console/plans"
+                             — set them on /owner/plans"
                         ),
                     );
                     problems += 1;
@@ -482,7 +482,7 @@ pub async fn doctor() -> Result<()> {
                                 "{reason}. Expose this machine and set `url` to that address \
                                  (a tunnel such as cloudflared or ngrok is enough for \
                                  development), or open paid sites by hand from \
-                                 /console/sites.",
+                                 /owner/sites.",
                             ),
                         );
                         problems += 1;
@@ -772,7 +772,7 @@ pub async fn create_staff(args: Args) -> Result<()> {
     .await;
 
     println!(
-        "\nCreated {} as {}.\n\nSign in at {}/console\n",
+        "\nCreated {} as {}.\n\nSign in at {}/owner/signin\n",
         member.email,
         effective_role.label(),
         config.canonical_url()

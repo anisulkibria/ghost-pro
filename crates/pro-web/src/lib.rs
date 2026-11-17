@@ -6,7 +6,7 @@
 //! | Surface | Who | Prefix | Cookie |
 //! |---|---|---|---|
 //! | [`dashboard`] | subscribers | `/dashboard` | `pro_session` |
-//! | [`console`] | the operator | `/console` | `pro_staff` |
+//! | [`console`] | the operator | `/owner` | `pro_staff` |
 //! | [`public`] | anybody | `/`, `/signup`, `/pricing` | — |
 //!
 //! The split is not cosmetic. They are different populations in different
@@ -56,6 +56,10 @@ pub fn platform_router(state: AppState) -> Router {
 /// takes a `Router<S>` for those and a `Router<()>` afterwards.
 fn platform_routes() -> Router<AppState> {
     Router::new()
+        .route("/console", axum::routing::any(legacy_console))
+        .route("/console/", axum::routing::any(legacy_console))
+        .route("/console/{*path}", axum::routing::any(legacy_console))
+        .route("/owner", get(|| async { axum::response::Redirect::to("/owner/dashboard") }))
         // ---- public ------------------------------------------------------
         .route("/", get(public::home))
         // The landing page's two static files. Named paths rather than a
@@ -132,57 +136,72 @@ fn platform_routes() -> Router<AppState> {
             post(dashboard_billing::revoke_session),
         )
         // ---- operator console --------------------------------------------
-        .route("/console", get(console::overview))
-        .route("/console/signin", get(console::signin_form).post(console::signin))
-        .route("/console/signout", get(console::signout).post(console::signout))
-        .route("/console/sites", get(console::sites))
-        .route("/console/sites/{id}", get(console::site))
-        .route("/console/sites/{id}/plan", post(console::set_plan))
-        .route("/console/sites/{id}/email-policy", post(console::save_email_policy))
-        .route("/console/sites/{id}/email-usage", post(console::refresh_email_usage))
-        .route("/console/sites/{id}/suspend", post(console::suspend))
-        .route("/console/sites/{id}/unsuspend", post(console::unsuspend))
-        .route("/console/sites/{id}/restart", post(console::restart))
-        .route("/console/sites/{id}/stop", post(console::stop))
-        .route("/console/sites/{id}/backup", post(console::backup))
+        .route("/owner/dashboard", get(console::overview))
+        .route("/owner/signin", get(console::signin_form).post(console::signin))
+        .route("/owner/signout", get(console::signout).post(console::signout))
+        .route("/owner/sites", get(console::sites))
+        .route("/owner/sites/{id}", get(console::site))
+        .route("/owner/sites/{id}/plan", post(console::set_plan))
+        .route("/owner/sites/{id}/email-policy", post(console::save_email_policy))
+        .route("/owner/sites/{id}/email-usage", post(console::refresh_email_usage))
+        .route("/owner/sites/{id}/suspend", post(console::suspend))
+        .route("/owner/sites/{id}/unsuspend", post(console::unsuspend))
+        .route("/owner/sites/{id}/restart", post(console::restart))
+        .route("/owner/sites/{id}/stop", post(console::stop))
+        .route("/owner/sites/{id}/backup", post(console::backup))
         .route(
-            "/console/sites/{id}/backups/{backup_id}",
+            "/owner/sites/{id}/backups/{backup_id}",
             get(console::download_backup),
         )
         .route(
-            "/console/sites/{id}/backups/{backup_id}/restore",
+            "/owner/sites/{id}/backups/{backup_id}/restore",
             post(console::restore_backup),
         )
         .route(
-            "/console/webhooks/{provider}/{event_id}/replay",
+            "/owner/webhooks/{provider}/{event_id}/replay",
             post(console::replay_webhook),
         )
         .route(
-            "/console/subscriptions/{id}/attach",
+            "/owner/subscriptions/{id}/attach",
             post(console::attach_subscription),
         )
-        .route("/console/domains", get(domains::console_list))
-        .route("/console/domains/{id}", get(domains::console_detail))
-        .route("/console/domains/{id}/check", post(domains::console_check))
-        .route("/console/domains/{id}/primary", post(domains::console_primary))
-        .route("/console/domains/{id}/remove", post(domains::console_remove))
-        .route("/console/customers", get(console::customers))
-        .route("/console/customers/{id}", get(console::customer))
-        .route("/console/customers/{id}/toggle", post(console::toggle_customer))
-        .route("/console/plans", get(console::plans_page).post(console::save_plans))
-        .route("/console/settings", get(console::settings).post(console::save_settings))
-        .route("/console/settings/{section}", get(console::settings_group).post(console::save_settings_group))
-        .route("/console/staff", get(console::staff_page).post(console::create_staff))
-        .route("/console/staff/{id}/role", post(console::set_staff_role))
-        .route("/console/staff/{id}/toggle", post(console::toggle_staff))
-        .route("/console/activity", get(console::activity))
-        .route("/console/jobs/{id}/retry", post(console::retry_job))
+        .route("/owner/domains", get(domains::console_list))
+        .route("/owner/domains/{id}", get(domains::console_detail))
+        .route("/owner/domains/{id}/check", post(domains::console_check))
+        .route("/owner/domains/{id}/primary", post(domains::console_primary))
+        .route("/owner/domains/{id}/remove", post(domains::console_remove))
+        .route("/owner/customers", get(console::customers))
+        .route("/owner/customers/{id}", get(console::customer))
+        .route("/owner/customers/{id}/toggle", post(console::toggle_customer))
+        .route("/owner/plans", get(console::plans_page).post(console::save_plans))
+        .route("/owner/settings", get(console::settings).post(console::save_settings))
+        .route("/owner/settings/{section}", get(console::settings_group).post(console::save_settings_group))
+        .route("/owner/staff", get(console::staff_page).post(console::create_staff))
+        .route("/owner/staff/{id}/role", post(console::set_staff_role))
+        .route("/owner/staff/{id}/toggle", post(console::toggle_staff))
+        .route("/owner/activity", get(console::activity))
+        .route("/owner/jobs/{id}/retry", post(console::retry_job))
         // ---- billing webhooks --------------------------------------------
         //
         // Outside both panels and unauthenticated by design: the authentication
         // *is* the signature, which is why `pro_billing::signature` fails
         // closed when a secret is missing.
         .route("/webhooks/{provider}", post(webhooks::receive))
+}
+
+/// Preserve bookmarks and in-flight forms while all generated links use /owner.
+async fn legacy_console(uri: axum::http::Uri) -> axum::response::Redirect {
+    let suffix = uri.path().strip_prefix("/console").expect("legacy console route");
+    let mut destination = if suffix.is_empty() || suffix == "/" {
+        "/owner/dashboard".to_string()
+    } else {
+        format!("/owner{suffix}")
+    };
+    if let Some(query) = uri.query() {
+        destination.push('?');
+        destination.push_str(query);
+    }
+    axum::response::Redirect::permanent(&destination)
 }
 
 /// The edge's entry point.
@@ -197,7 +216,7 @@ fn platform_routes() -> Router<AppState> {
 ///
 /// The host decision is a **middleware**, not a fallback, and that distinction
 /// is the security-relevant part. A fallback is only reached when no route
-/// matches, so `https://a-customers-domain.com/console` would have matched the
+/// matches, so `https://a-customers-domain.com/owner/dashboard` would have matched the
 /// console route and been served. It would still have demanded a staff login,
 /// but the console must not be *addressable* from a hostname a customer
 /// controls: that is enough to host a convincing copy of its sign-in page on a

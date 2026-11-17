@@ -2,7 +2,7 @@
 //!
 //! What a subscriber does here: install a Ghost site, attach their own domain,
 //! see what their plan allows, and manage their subscription. The operator
-//! console is a separate surface at `/console` with a separate login — see
+//! console is a separate surface at `/owner/dashboard` with a separate login — see
 //! [`crate::console`].
 //!
 //! Drawn with the Material 3 shell in [`crate::view`]: a nav rail down the

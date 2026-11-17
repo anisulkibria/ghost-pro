@@ -24,13 +24,22 @@ class LauncherTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="vuuut-launch-")
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
+        # Run a copy so the real checkout's .env and live listener cannot
+        # override this temporary deployment's URL, ports or CMS path.
+        self.script = self.base / "run.sh"
+        self.script.write_text(SCRIPT.read_text())
+        self.script.chmod(0o755)
+        binary = self.base / "target/release/ghost-pro"
+        binary.parent.mkdir(parents=True)
+        if BINARY.exists():
+            binary.symlink_to(BINARY)
         self.deployment = self.base / "deployment"
         self.deployment.mkdir()
         self.env = {key: value for key, value in os.environ.items()
                     if not key.startswith("PRO_") and key != "NODE_ENV"}
         self.env.update(PRO_DIR=str(self.deployment), RUST_LOG="info")
         self.config = {
-            "url": "http://pro.localhost:8080", "subdomainBase": "localhost",
+            "url": "http://localhost:8080", "subdomainBase": "localhost",
             "paths": {"ghostBinary": "/bin/sh", "dataDir": "data"},
             "billing": {"provider": "none"}, "mail": {"transport": "log"},
         }
@@ -96,7 +105,7 @@ target.chmod(0o755)
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
-        self.config["url"] = f"http://pro.localhost:{port}"
+        self.config["url"] = f"http://localhost:{port}"
         self.config["server"] = {"host": "127.0.0.1", "port": port}
         return port
 
@@ -105,7 +114,7 @@ target.chmod(0o755)
         self.config["database"] = {"url": "postgres://invalid"}
         self.write_config()
         (self.deployment / "server.log").write_text("HISTORICAL DATABASE ERROR\n")
-        result = subprocess.run([str(SCRIPT), "start"], env=self.env,
+        result = subprocess.run([str(self.script), "start"], env=self.env,
                                 capture_output=True, text=True, timeout=20)
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("output from this launch", result.stdout)
@@ -115,7 +124,7 @@ target.chmod(0o755)
     def test_server_survives_launcher_exit_and_opens_its_database(self):
         port = self.prepare_server()
         self.write_config()
-        result = subprocess.run([str(SCRIPT), "start"], env=self.env,
+        result = subprocess.run([str(self.script), "start"], env=self.env,
                                 capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         pid = int((self.deployment / ".ghost-pro.pid").read_text())
@@ -132,7 +141,7 @@ target.chmod(0o755)
                 time.sleep(0.02)
         self.addCleanup(stop)
         request = urllib.request.Request(f"http://127.0.0.1:{port}/health",
-                                         headers={"Host": f"pro.localhost:{port}"})
+                                         headers={"Host": f"localhost:{port}"})
         with urllib.request.urlopen(request, timeout=5) as response:
             health = json.load(response)
         self.assertEqual(health["status"], "ok")

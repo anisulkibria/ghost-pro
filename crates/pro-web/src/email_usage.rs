@@ -118,7 +118,7 @@ pub(crate) async fn card(state: &AppState, tenant: &Tenant, can_write: bool) -> 
     .collect::<String>();
     let action = if can_write {
         format!(
-            r#"<form method="post" action="/console/sites/{id}/email-usage"><button class="btn outlined small" type="submit">Refresh usage</button></form>"#,
+            r#"<form method="post" action="/owner/sites/{id}/email-usage"><button class="btn outlined small" type="submit">Refresh usage</button></form>"#,
             id = view::attr(&tenant.id)
         )
     } else {
@@ -129,7 +129,7 @@ pub(crate) async fn card(state: &AppState, tenant: &Tenant, can_write: bool) -> 
 <div class="tiles c3" style="margin-top:16px">{sent}{allowance}{remaining}</div>
 <div class="bar {full}" role="progressbar" aria-label="Monthly email allowance used" aria-valuenow="{percent}" aria-valuemin="0" aria-valuemax="100"><span style="width:{percent}%"></span></div>
 <p class="hint">{freshness} Newsletter recipients and transactional messages share one monthly allowance. Failed or blocked sends do not use the allowance.</p>
-<form method="post" action="/console/sites/{id}/email-policy" style="margin-top:20px"><div class="inline-form">{policy}<button class="btn small" type="submit"{disabled}>Save sending policy</button></div>
+<form method="post" action="/owner/sites/{id}/email-policy" style="margin-top:20px"><div class="inline-form">{policy}<button class="btn small" type="submit"{disabled}>Save sending policy</button></div>
 <p class="hint">Platform default: {default}. Turning auto-stop off keeps counting and permits sends above the plan allowance. Policy changes restart running sites.</p></form></div>"#,
         dates=view::esc(&dates),freshness=view::esc(&freshness),
         sent=view::metric("Sent this period",&number("sent"),None),allowance=view::metric("Monthly allowance",&view::number(limit),None),remaining=view::metric("Remaining",&number("remaining"),None),

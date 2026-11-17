@@ -132,8 +132,8 @@ Found a Vuuut checkout at ../../vuuut (relative to this directory,
 so this config stays valid on other machines).
 
 started (pid 12345)
-  dashboard  http://pro.localhost:8080/dashboard
-  console    http://pro.localhost:8080/console
+  dashboard  http://localhost:8080/dashboard
+  owner      http://localhost:8080/owner/dashboard
   log        /Users/you/Ghost/vuuut-pro/run/server.log
 ```
 
@@ -156,13 +156,16 @@ on the command line:
 ./run.sh staff --email you@example.com --name "Your Name"
 ```
 
-Sign in at **http://pro.localhost:8080/console**.
+Sign in at **http://localhost:8080/owner/signin**. The owner dashboard is at
+**http://localhost:8080/owner/dashboard**. Old `/console` links redirect to `/owner`.
 
-`pro.localhost` and `*.localhost` resolve to 127.0.0.1 on macOS and on most
-Linux distributions with no `/etc/hosts` entry. If yours does not, add one:
+The platform is served on `localhost`; tenant sites use `*.localhost`.
+For an existing local deployment, set `url` in `run/pro.json` and any `PRO_URL`
+override in `.env` to `http://localhost:8080`, then run `./run.sh restart`.
+For a browser that cannot resolve a tenant hostname, add that tenant explicitly:
 
 ```
-127.0.0.1 pro.localhost
+127.0.0.1 acme.localhost
 ```
 
 ## Step 5 — Check it over
@@ -210,7 +213,7 @@ Two checks are worth stopping for:
 ## Step 6 — Create a site
 
 In the console, or through the customer-facing signup at
-`http://pro.localhost:8080`. The first site takes a moment: the platform
+`http://localhost:8080`. The first site takes a moment: the platform
 creates its directory, copies the themes in, starts a `ghost` process on a
 loopback port and proxies to it. Watch it happen with:
 
@@ -231,7 +234,7 @@ repository — it is per-machine, and on a real platform it holds credentials.
 
 ```json
 {
-  "url": "http://pro.localhost:8080",
+  "url": "http://localhost:8080",
   "subdomainBase": "localhost",
   "paths": {
     "dataDir": "data",
@@ -453,7 +456,7 @@ is not a shared account-wide quota coordinator. AWS enforces account quotas.
 
 ## Console settings pages
 
-`/console/settings` is a searchable directory, matching the CMS settings layout.
+`/owner/settings` is a searchable directory, matching the CMS settings layout.
 Open General settings, Signup & security, Billing, a payment provider, Email,
 Amazon SES, or Mailgun to edit that section. Each page has a Save button and a
 back link. Saving returns to the same section and leaves other sections alone.

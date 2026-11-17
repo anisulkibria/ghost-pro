@@ -4,7 +4,7 @@
 //!
 //! * **accounts** — customers, at `/dashboard`. They install sites, attach
 //!   domains, pay.
-//! * **staff** — the operator and their colleagues, at `/console`. They
+//! * **staff** — the operator and their colleagues, at `/owner/dashboard`. They
 //!   choose the payment provider, see every tenant, suspend things.
 //!
 //! These are kept apart by three separate mechanisms, because any one of them

@@ -108,6 +108,7 @@ PY
 # where there is one, otherwise assembled from the port — this is only used in
 # the messages printed here, so a guess costs nothing.
 config_url() {
+    if [ -n "${PRO_URL:-}" ]; then echo "$PRO_URL"; return; fi
     local url="" scheme=http
     if command -v python3 >/dev/null 2>&1 && [ -f "$PRO_DIR/pro.json" ]; then
         url=$(python3 -c 'import json,sys
@@ -195,7 +196,7 @@ init_dir() {
     # </dev/null because setup prompts when it has a terminal, and a bootstrap
     # that stops to ask questions is not a bootstrap.
     (cd "$PRO_DIR" && "$BIN" setup \
-        --url "${PRO_URL:-http://pro.localhost:8080}" \
+        --url "${PRO_URL:-http://localhost:8080}" \
         --subdomain-base "${PRO_SUBDOMAIN_BASE:-localhost}" \
         </dev/null)
 }
@@ -332,7 +333,7 @@ PYTHON
     if [ "$(listener)" = "$started" ]; then
         echo "started (pid $started)"
         echo "  dashboard  $URL/dashboard"
-        echo "  console    $URL/console"
+        echo "  owner      $URL/owner/dashboard"
         echo "  log        $LOG"
     else
         # Running, but nothing on the port yet. Worth saying plainly: the
@@ -540,8 +541,8 @@ environment (also read from ./.env, which is gitignored — see .env.example):
                         next to this directory (sets PRO_PATHS__GHOST_BINARY
                         and PRO_PATHS__THEME_SOURCE)
   PRO_SERVER__PORT      override the edge port from pro.json
-  PRO_URL               platform URL written by init
-                        (default: http://pro.localhost:8080)
+  PRO_URL               platform URL override (also written by init)
+                        (default: http://localhost:8080)
   PRO_SUBDOMAIN_BASE    tenant zone written by init (default: localhost)
 EOF
     exit 1

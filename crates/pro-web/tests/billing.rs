@@ -79,7 +79,7 @@ async fn build_platform(billing: serde_json::Value) -> Platform {
     }))
     .unwrap();
     config.plans = pro_core::plans::default_plans();
-    // The variant ids a real operator would set on /console/plans. Put in the
+    // The variant ids a real operator would set on /owner/plans. Put in the
     // file here so the fixture is one object rather than a settings write.
     config.plans[0].price_ids.insert("lemonsqueezy".into(), STARTER_VARIANT.into());
     config.plans[1].price_ids.insert("lemonsqueezy".into(), CREATOR_VARIANT.into());

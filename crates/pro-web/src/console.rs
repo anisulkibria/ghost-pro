@@ -1,4 +1,4 @@
-//! The operator's panel: `/console`.
+//! The operator's panel: `/owner/dashboard`.
 //!
 //! This is the platform owner's surface, not a customer's. It has its own
 //! login, its own cookie and its own session population — see
@@ -43,13 +43,13 @@ pub(crate) enum Tab {
 
 fn nav(active: Tab) -> Vec<NavItem> {
     vec![
-        NavItem::new("Overview", "/console", "chart", "blue", active == Tab::Overview),
-        NavItem::new("Sites", "/console/sites", "sites", "green", active == Tab::Sites),
-        NavItem::new("Domains", "/console/domains", "globe", "teal", active == Tab::Domains),
-        NavItem::new("Customers", "/console/customers", "people", "purple", active == Tab::Customers),
-        NavItem::new("Settings", "/console/settings", "settings", "pink", active == Tab::Settings),
-        NavItem::new("Staff", "/console/staff", "shield", "amber", active == Tab::Staff),
-        NavItem::new("Activity", "/console/activity", "history", "slate", active == Tab::Activity),
+        NavItem::new("Overview", "/owner/dashboard", "chart", "blue", active == Tab::Overview),
+        NavItem::new("Sites", "/owner/sites", "sites", "green", active == Tab::Sites),
+        NavItem::new("Domains", "/owner/domains", "globe", "teal", active == Tab::Domains),
+        NavItem::new("Customers", "/owner/customers", "people", "purple", active == Tab::Customers),
+        NavItem::new("Settings", "/owner/settings", "settings", "pink", active == Tab::Settings),
+        NavItem::new("Staff", "/owner/staff", "shield", "amber", active == Tab::Staff),
+        NavItem::new("Activity", "/owner/activity", "history", "slate", active == Tab::Activity),
     ]
 }
 
@@ -69,13 +69,13 @@ pub(crate) fn shell(
         name: member.name.clone(),
         detail: member.role.label().to_string(),
         href: None,
-        signout: "/console/signout".into(),
+        signout: "/owner/signout".into(),
     };
     reply::html(view::page(Page {
         title,
         platform: &platform,
         tag: Some("Console"),
-        brand_href: "/console",
+        brand_href: "/owner/dashboard",
         nav: &nav,
         who: Some(&who),
         flash,
@@ -94,7 +94,7 @@ pub async fn signin_form(
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
     let card = view::form(
-        "/console/signin",
+        "/owner/signin",
         &format!(
             r#"{email}{password}<button class="btn" type="submit">{lock} Sign in</button>"#,
             email = view::field("email", "Email", "email", "", None, true),
@@ -128,7 +128,7 @@ pub async fn signin(
     Form(form): Form<SigninForm>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    reply::or_redirect("/console/signin", &chrome, async {
+    reply::or_redirect("/owner/signin", &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         let member = pro_db::staff::authenticate(&state.db, &form.email, &form.password).await?;
         let ip = client.ip_string();
@@ -153,7 +153,7 @@ pub async fn signin(
             state.secure_cookies(),
             sessions::STAFF_TTL_DAYS,
         );
-        Ok(redirect_with_cookie("/console", &cookie))
+        Ok(redirect_with_cookie("/owner/dashboard", &cookie))
     }.await)
 }
 
@@ -162,7 +162,7 @@ pub async fn signout(State(state): State<AppState>, headers: HeaderMap) -> Respo
     if let Some(token) = auth::cookie(&headers, name) {
         let _ = sessions::destroy(&state.db, &token).await;
     }
-    redirect_with_cookie("/console/signin", &auth::clear_cookie(name, state.secure_cookies()))
+    redirect_with_cookie("/owner/signin", &auth::clear_cookie(name, state.secure_cookies()))
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +176,7 @@ pub async fn overview(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_page_or_signin(
-        "/console/signin",
+        "/owner/signin",
         &chrome,
         overview_inner(&state, chrome.theme, &headers, &query).await,
     )
@@ -235,33 +235,33 @@ async fn overview_inner(
     let mut warnings = Vec::new();
     if count("failed") > 0 {
         warnings.push(format!(
-            r#"{} site{} failed to finish setting up. <a href="/console/sites?status=failed">Review</a>"#,
+            r#"{} site{} failed to finish setting up. <a href="/owner/sites?status=failed">Review</a>"#,
             count("failed"),
             if count("failed") == 1 { "" } else { "s" }
         ));
     }
     if failed_jobs > 0 {
         warnings.push(format!(
-            r#"{failed_jobs} background job{} failed. <a href="/console/activity">Review</a>"#,
+            r#"{failed_jobs} background job{} failed. <a href="/owner/activity">Review</a>"#,
             if failed_jobs == 1 { "" } else { "s" }
         ));
     }
     if failed_webhooks > 0 {
         warnings.push(
-            r#"Some billing webhooks could not be processed. <a href="/console/activity">Review</a>"#
+            r#"Some billing webhooks could not be processed. <a href="/owner/activity">Review</a>"#
                 .to_string(),
         );
     }
     if live.billing_provider() == "none" {
         warnings.push(
             r#"No payment provider is configured, so nothing is being charged.
-<a href="/console/settings/billing">Set one up</a>"#
+<a href="/owner/settings/billing">Set one up</a>"#
                 .to_string(),
         );
     } else if !live.provider_is_configured(&live.billing_provider()) {
         warnings.push(format!(
             r#"The selected provider (<strong>{}</strong>) is missing credentials — new checkouts
-will fail. <a href="/console/settings/billing">Fix</a>"#,
+will fail. <a href="/owner/settings/billing">Fix</a>"#,
             esc(&live.billing_provider())
         ));
     }
@@ -272,14 +272,14 @@ will fail. <a href="/console/settings/billing">Fix</a>"#,
         if let Some(reason) = state.config.webhook_unreachable_reason() {
             warnings.push(format!(
                 r#"{reason}. Serve the platform on a public address, or open paid sites by hand
-from <a href="/console/sites">Sites</a>."#,
+from <a href="/owner/sites">Sites</a>."#,
                 reason = esc(&reason),
             ));
         } else if live.webhook_secret(&live.billing_provider()).is_none() {
             warnings.push(format!(
                 r#"No webhook signing secret for <strong>{}</strong>, so every payment
 notification is refused and paid sites stay closed.
-<a href="/console/settings/billing">Set one</a>"#,
+<a href="/owner/settings/billing">Set one</a>"#,
                 esc(&live.billing_provider())
             ));
         }
@@ -292,7 +292,7 @@ notification is refused and paid sites stay closed.
     {
         warnings.push(format!(
             r#"{reason} — so customers receive no email.
-<a href="/console/settings/email">Configure email</a>"#,
+<a href="/owner/settings/email">Configure email</a>"#,
             reason = esc(&reason),
         ));
     }
@@ -349,7 +349,7 @@ notification is refused and paid sites stay closed.
             past_due = sub_count("past_due"),
             cancelled = sub_count("canceled"),
         ),
-        r#"<a class="btn outlined small" href="/console/settings">Settings</a>"#,
+        r#"<a class="btn outlined small" href="/owner/settings">Settings</a>"#,
     )));
 
     Ok(shell(
@@ -374,7 +374,7 @@ pub async fn sites(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_page_or_signin(
-        "/console/signin",
+        "/owner/signin",
         &chrome,
         sites_inner(&state, chrome.theme, &headers, &query).await,
     )
@@ -411,9 +411,9 @@ async fn sites_inner(
     .map(|(value, label, n)| {
         (
             if value.is_empty() {
-                "/console/sites".to_string()
+                "/owner/sites".to_string()
             } else {
-                format!("/console/sites?status={value}")
+                format!("/owner/sites?status={value}")
             },
             label.to_string(),
             Some(*n),
@@ -427,7 +427,7 @@ async fn sites_inner(
         let running = state.supervisor.is_running(&tenant.id);
         rows.push_str(&format!(
             r#"<tr>
-<td><a class="lead" href="/console/sites/{id}">{name}</a><span class="sub mono">{host}</span></td>
+<td><a class="lead" href="/owner/sites/{id}">{name}</a><span class="sub mono">{host}</span></td>
 <td>{status} {running}</td>
 <td>{plan}</td>
 <td class="num">{storage}</td>
@@ -456,7 +456,7 @@ async fn sites_inner(
         ),
         tabs = view::seg_bar(&tabs),
         search = view::search_form(
-            "/console/sites",
+            "/owner/sites",
             search.unwrap_or(""),
             "Search by address or title"
         ),
@@ -489,7 +489,7 @@ pub async fn site(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_page_or_signin(
-        "/console/signin",
+        "/owner/signin",
         &chrome,
         site_inner(&state, chrome.theme, &headers, &id, &query).await,
     )
@@ -525,7 +525,7 @@ async fn site_inner(
         &tenant.name,
         &format!(
             r#"<a class="mono" href="{origin}" target="_blank" rel="noopener">{address}</a>
-· owned by <a href="/console/customers/{account_id}">{email}</a><br>
+· owned by <a href="/owner/customers/{account_id}">{email}</a><br>
 {status} {running} <span class="muted small">port {port} · created {created}</span>"#,
             origin = attr(&origin),
             address = esc(&address),
@@ -602,7 +602,7 @@ async fn site_inner(
     body.push_str(&view::section("Plan"));
     body.push_str(&format!(
         r#"<div class="card padded">
-<form method="post" action="/console/sites/{id}/plan">
+<form method="post" action="/owner/sites/{id}/plan">
 <div class="inline-form">{plan}
 <button class="btn" type="submit"{disabled}>Apply plan</button></div>
 <p class="hint">Applying a plan rewrites the site's limits and restarts it. This does not
@@ -620,7 +620,7 @@ change what the customer is charged.</p></form></div>"#,
             .iter()
             .map(|d| {
                 format!(
-                    r#"<tr><td class="wrap"><a class="lead mono" href="/console/domains/{id}">{domain}</a>{primary}</td>
+                    r#"<tr><td class="wrap"><a class="lead mono" href="/owner/domains/{id}">{domain}</a>{primary}</td>
 <td>{status}</td><td class="muted">{kind}</td><td class="muted">{checked}</td>
 <td class="muted wrap">{error}</td></tr>"#,
                     id = attr(&d.id),
@@ -657,7 +657,7 @@ change what the customer is charged.</p></form></div>"#,
                 "Restore this site",
                 "Brings the public site back and reapplies its plan's limits.",
                 &view::action_button(
-                    &format!("/console/sites/{}/unsuspend", tenant.id),
+                    &format!("/owner/sites/{}/unsuspend", tenant.id),
                     "Restore site",
                     "small",
                     None,
@@ -673,7 +673,7 @@ still sign in and pay. Nothing is deleted.</span>
 {form}</div></div>"#,
                 glyph = view::svg("lock"),
                 form = view::form(
-                    &format!("/console/sites/{}/suspend", tenant.id),
+                    &format!("/owner/sites/{}/suspend", tenant.id),
                     &format!(
                         r#"<div class="inline-form" style="margin-top:12px">{reason}
 <button class="btn danger" type="submit">Suspend</button></div>"#,
@@ -700,14 +700,14 @@ still sign in and pay. Nothing is deleted.</span>
                 "Restart to pick up a configuration change; stop to free memory.",
                 &format!("{restart}{stop}",
                     restart = view::action_button(
-                        &format!("/console/sites/{}/restart", tenant.id),
+                        &format!("/owner/sites/{}/restart", tenant.id),
                         "Restart",
                         "outlined small",
                         None
                     ),
                     stop = if running {
                         view::action_button(
-                            &format!("/console/sites/{}/stop", tenant.id),
+                            &format!("/owner/sites/{}/stop", tenant.id),
                             "Stop",
                             "text small",
                             None,
@@ -723,7 +723,7 @@ still sign in and pay. Nothing is deleted.</span>
                 "Backup",
                 "Queues a full snapshot of this site.",
                 &view::action_button(
-                    &format!("/console/sites/{}/backup", tenant.id),
+                    &format!("/owner/sites/{}/backup", tenant.id),
                     "Back up now",
                     "outlined small",
                     None
@@ -779,7 +779,7 @@ pub async fn set_plan(
     Form(form): Form<PlanForm>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/sites/{id}");
+    let back = format!("/owner/sites/{id}");
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         let member = auth::staff_with(&state, &headers, StaffRole::Admin).await?;
@@ -823,7 +823,7 @@ pub async fn suspend(
     Form(form): Form<SuspendForm>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/sites/{id}");
+    let back = format!("/owner/sites/{id}");
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         let member = auth::staff_with(&state, &headers, StaffRole::Admin).await?;
@@ -860,7 +860,7 @@ pub async fn unsuspend(
     Path(id): Path<String>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/sites/{id}");
+    let back = format!("/owner/sites/{id}");
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         let member = auth::staff_with(&state, &headers, StaffRole::Admin).await?;
@@ -899,7 +899,7 @@ pub async fn restart(
     Path(id): Path<String>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/sites/{id}");
+    let back = format!("/owner/sites/{id}");
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         auth::staff_with(&state, &headers, StaffRole::Support).await?;
@@ -915,7 +915,7 @@ pub async fn stop(
     Path(id): Path<String>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/sites/{id}");
+    let back = format!("/owner/sites/{id}");
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         auth::staff_with(&state, &headers, StaffRole::Support).await?;
@@ -944,7 +944,7 @@ async fn console_backups_section(state: &AppState, tenant: &pro_core::Tenant) ->
             .map(|b| {
                 format!(
                     r#"<tr><td>{when}</td><td class="num">{size}</td><td>{reason}</td>
-<td class="end"><a class="btn tonal small" href="/console/sites/{tenant}/backups/{id}">{dl} Download</a>
+<td class="end"><a class="btn tonal small" href="/owner/sites/{tenant}/backups/{id}">{dl} Download</a>
 {restore}</td></tr>"#,
                     when = esc(&view::when(Some(&b.created_at))),
                     size = esc(&pro_core::plans::bytes_display(b.size_bytes)),
@@ -953,7 +953,7 @@ async fn console_backups_section(state: &AppState, tenant: &pro_core::Tenant) ->
                     id = attr(&b.id),
                     dl = view::svg("download"),
                     restore = view::action_button(
-                        &format!("/console/sites/{}/backups/{}/restore", tenant.id, b.id),
+                        &format!("/owner/sites/{}/backups/{}/restore", tenant.id, b.id),
                         "Restore",
                         "text small",
                         Some(&format!(
@@ -980,7 +980,7 @@ pub async fn backup(
     Path(id): Path<String>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/sites/{id}");
+    let back = format!("/owner/sites/{id}");
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         auth::staff_with(&state, &headers, StaffRole::Support).await?;
@@ -1002,7 +1002,7 @@ pub async fn download_backup(
     Path((id, backup_id)): Path<(String, String)>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/sites/{id}");
+    let back = format!("/owner/sites/{id}");
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         auth::staff_with(&state, &headers, StaffRole::Support).await?;
@@ -1030,7 +1030,7 @@ pub async fn restore_backup(
     Path((id, backup_id)): Path<(String, String)>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/sites/{id}");
+    let back = format!("/owner/sites/{id}");
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         auth::staff_with(&state, &headers, StaffRole::Admin).await?;
@@ -1077,7 +1077,7 @@ pub async fn attach_subscription(
     Form(form): Form<AttachForm>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    reply::or_redirect("/console/customers", &chrome, async {
+    reply::or_redirect("/owner/customers", &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         let member = auth::staff_with(&state, &headers, StaffRole::Admin).await?;
         let subscription = pro_db::subscriptions::get(&state.db, &subscription_id).await?;
@@ -1099,7 +1099,7 @@ pub async fn attach_subscription(
         )
         .await;
         Ok(redirect_with(
-            &format!("/console/customers/{}", subscription.account_id),
+            &format!("/owner/customers/{}", subscription.account_id),
             Flash::ok("Subscription attached."),
         ))
     }.await)
@@ -1116,7 +1116,7 @@ pub async fn customers(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_page_or_signin(
-        "/console/signin",
+        "/owner/signin",
         &chrome,
         customers_inner(&state, chrome.theme, &headers, &query).await,
     )
@@ -1136,7 +1136,7 @@ async fn customers_inner(
     for account in &accounts {
         let sites = pro_db::tenants::count_for_account(&state.db, &account.id).await?;
         rows.push_str(&format!(
-            r#"<tr><td><a class="lead" href="/console/customers/{id}">{email}</a>
+            r#"<tr><td><a class="lead" href="/owner/customers/{id}">{email}</a>
 <span class="sub">{name}</span></td>
 <td class="num">{sites}</td>
 <td>{verified}</td><td>{status}</td>
@@ -1167,7 +1167,7 @@ async fn customers_inner(
             ""
         ),
         search = view::search_form(
-            "/console/customers",
+            "/owner/customers",
             search.unwrap_or(""),
             "Search by email or name"
         ),
@@ -1200,7 +1200,7 @@ pub async fn customer(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_page_or_signin(
-        "/console/signin",
+        "/owner/signin",
         &chrome,
         customer_inner(&state, chrome.theme, &headers, &id, &query).await,
     )
@@ -1225,7 +1225,7 @@ async fn customer_inner(
             .iter()
             .map(|t| {
                 format!(
-                    r#"<tr><td><a class="lead" href="/console/sites/{id}">{name}</a></td>
+                    r#"<tr><td><a class="lead" href="/owner/sites/{id}">{name}</a></td>
 <td>{status}</td><td>{plan}</td></tr>"#,
                     id = attr(&t.id),
                     name = esc(&t.name),
@@ -1261,7 +1261,7 @@ async fn customer_inner(
                         String::new()
                     } else {
                         format!(
-                            r#"<form method="post" action="/console/subscriptions/{id}/attach" class="inline" style="gap:6px;align-items:center">
+                            r#"<form method="post" action="/owner/subscriptions/{id}/attach" class="inline" style="gap:6px;align-items:center">
 {select}<button class="btn tonal small" type="submit">Attach</button></form>"#,
                             id = attr(&s.id),
                             select = view::selbox("tenant_id", &options, false, "Site"),
@@ -1299,7 +1299,7 @@ async fn customer_inner(
                     "Restores access to the dashboard."
                 },
                 &view::action_button(
-                    &format!("/console/customers/{}/toggle", account.id),
+                    &format!("/owner/customers/{}/toggle", account.id),
                     if account.is_active() { "Block" } else { "Unblock" },
                     if account.is_active() { "danger small" } else { "small" },
                     Some(if account.is_active() {
@@ -1363,7 +1363,7 @@ pub async fn toggle_customer(
     Path(id): Path<String>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/customers/{id}");
+    let back = format!("/owner/customers/{id}");
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         let member = auth::staff_with(&state, &headers, StaffRole::Admin).await?;
@@ -1401,7 +1401,7 @@ pub async fn toggle_customer(
 
 pub async fn save_email_policy(State(state): State<AppState>, Path(id): Path<String>, headers: HeaderMap, Form(form): Form<HashMap<String,String>>) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/sites/{id}");
+    let back = format!("/owner/sites/{id}");
     reply::or_redirect(&back,&chrome,async {
         auth::require_same_origin(&headers,&state.config.host())?;
         let actor = auth::staff_with(&state,&headers,StaffRole::Admin).await?;
@@ -1419,7 +1419,7 @@ pub async fn save_email_policy(State(state): State<AppState>, Path(id): Path<Str
 
 pub async fn refresh_email_usage(State(state): State<AppState>, Path(id): Path<String>, headers: HeaderMap) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/sites/{id}");
+    let back = format!("/owner/sites/{id}");
     reply::or_redirect(&back,&chrome,async {
         auth::require_same_origin(&headers,&state.config.host())?;
         auth::staff_with(&state,&headers,StaffRole::Admin).await?;
@@ -1445,7 +1445,7 @@ struct SettingsSection {
 }
 
 impl SettingsSection {
-    fn path(&self) -> String { format!("/console/settings/{}", self.slug) }
+    fn path(&self) -> String { format!("/owner/settings/{}", self.slug) }
 }
 
 const SETTINGS_SECTIONS: &[SettingsSection] = &[
@@ -1483,7 +1483,7 @@ pub async fn settings(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_page_or_signin(
-        "/console/signin", &chrome,
+        "/owner/signin", &chrome,
         settings_inner(&state, chrome.theme, &headers, &query).await,
     )
 }
@@ -1519,9 +1519,9 @@ async fn settings_inner(
         }
     }
     for (path, title, detail, icon, tint) in [
-        ("/console/staff", "Staff", "People · Roles · Console access", "people", "teal"),
-        ("/console/plans", "Plans", "Email allowances · Product IDs · Pricing", "billing", "green"),
-        ("/console/activity", "History", "Platform activity · Audit log", "history", "slate"),
+        ("/owner/staff", "Staff", "People · Roles · Console access", "people", "teal"),
+        ("/owner/plans", "Plans", "Email allowances · Product IDs · Pricing", "billing", "green"),
+        ("/owner/activity", "History", "Platform activity · Audit log", "history", "slate"),
     ] {
         if words.is_empty() || matches(&format!("{title} {detail}")) {
             rows.push_str(&settings_link(path, title, detail, icon, tint));
@@ -1531,12 +1531,12 @@ async fn settings_inner(
         rows = view::row("search", "slate", "Nothing matches", "Try another word, or clear the search to browse the pages.", "");
     }
     let clear = if words.is_empty() { "" } else {
-        r#"<p class="settings-search-reset"><a href="/console/settings">Clear search</a></p>"#
+        r#"<p class="settings-search-reset"><a href="/owner/settings">Clear search</a></p>"#
     };
     let body = format!(
         r#"<div class="settings-directory"><header class="page-head"><div class="heading"><h1>Settings</h1><p class="sub">Platform configuration</p></div></header>
 {search}{clear}<div class="card rows" id="settings-groups">{rows}</div></div>"#,
-        search = view::search_form("/console/settings", search, "Search all settings"),
+        search = view::search_form("/owner/settings", search, "Search all settings"),
     );
     Ok(shell(state, theme, "Settings", Tab::Settings, &member, Flash::from_query(query).as_ref(), &body))
 }
@@ -1553,7 +1553,7 @@ pub async fn settings_group(
         let section = settings_section(&slug)?;
         settings_group_inner(&state, chrome.theme, &member, section, &query)
     }.await;
-    reply::or_page_or_signin("/console/signin", &chrome, result)
+    reply::or_page_or_signin("/owner/signin", &chrome, result)
 }
 
 fn settings_group_inner(
@@ -1572,7 +1572,7 @@ fn settings_group_inner(
     } else { String::new() };
     let mut body = format!(
         r#"<div class="settings-editor"><header class="page-head settings-head">
-<a class="icon-btn settings-back" href="/console/settings" aria-label="Back to settings" title="Back to settings">{back}</a>
+<a class="icon-btn settings-back" href="/owner/settings" aria-label="Back to settings" title="Back to settings">{back}</a>
 <div class="heading"><h1>{title}</h1><p class="sub">{summary}</p></div><div class="actions">{save}</div></header>"#,
         back = view::svg("chevron"), title = esc(section.title), summary = esc(section.summary),
     );
@@ -1598,15 +1598,15 @@ fn settings_group_inner(
         for provider in SETTINGS_SECTIONS.iter().filter(|s| ["stripe", "paddle", "lemon-squeezy", "gumroad"].contains(&s.slug)) {
             related.push_str(&settings_link(&provider.path(), provider.title, provider.summary, provider.icon, provider.tint));
         }
-        related.push_str(&settings_link("/console/plans", "Plans & email allowances", "Monthly email allowances and payment product IDs for every plan.", "key", "teal"));
+        related.push_str(&settings_link("/owner/plans", "Plans & email allowances", "Monthly email allowances and payment product IDs for every plan.", "key", "teal"));
     } else if section.slug == "email" {
         for provider in SETTINGS_SECTIONS.iter().filter(|s| ["ses", "mailgun"].contains(&s.slug)) {
             related.push_str(&settings_link(&provider.path(), provider.title, provider.summary, provider.icon, provider.tint));
         }
     } else if ["ses", "mailgun"].contains(&section.slug) {
-        related.push_str(&settings_link("/console/settings/email", "Email delivery", "Choose the transactional transport, tenant provider, and verified sender.", "mail", "blue"));
+        related.push_str(&settings_link("/owner/settings/email", "Email delivery", "Choose the transactional transport, tenant provider, and verified sender.", "mail", "blue"));
     } else if ["stripe", "paddle", "lemon-squeezy", "gumroad"].contains(&section.slug) {
-        related.push_str(&settings_link("/console/settings/billing", "Billing", "Choose the provider for new checkouts.", "billing", "green"));
+        related.push_str(&settings_link("/owner/settings/billing", "Billing", "Choose the provider for new checkouts.", "billing", "green"));
     }
     if !related.is_empty() {
         body.push_str(&view::section("Related settings"));
@@ -1625,7 +1625,7 @@ pub async fn save_settings_group(
     let chrome = state.chrome(&headers);
     let section = match settings_section(&slug) {
         Ok(section) => section,
-        Err(error) => return reply::or_page_or_signin("/console/signin", &chrome, Err(error)),
+        Err(error) => return reply::or_page_or_signin("/owner/signin", &chrome, Err(error)),
     };
     reply::or_redirect(&section.path(), &chrome, save_settings_inner(&state, &headers, &body, Some(section)).await)
 }
@@ -1753,7 +1753,7 @@ pub async fn save_settings(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_redirect(
-        "/console/settings",
+        "/owner/settings",
         &chrome,
         save_settings_inner(&state, &headers, &body, None).await,
     )
@@ -1779,7 +1779,7 @@ async fn save_settings_inner(
 ) -> Result<Response> {
     auth::require_same_origin(headers, &state.config.host())?;
     let member = auth::staff(state, headers).await?;
-    let back = section.map(SettingsSection::path).unwrap_or_else(|| "/console/settings".into());
+    let back = section.map(SettingsSection::path).unwrap_or_else(|| "/owner/settings".into());
 
     let submitted: HashMap<String, String> = form_urlencoded::parse(body.as_bytes())
         .map(|(k, v)| (k.into_owned(), v.into_owned()))
@@ -1917,7 +1917,7 @@ pub async fn plans_page(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_page_or_signin(
-        "/console/signin",
+        "/owner/signin",
         &chrome,
         plans_inner(&state, chrome.theme, &headers, &query).await,
     )
@@ -1983,13 +1983,13 @@ async fn plans_inner(
         "",
     );
 
-    body.push_str(&view::banner(BannerKind::Info, r#"Newsletter recipients and transactional emails share one monthly allowance, including on yearly subscriptions. Configure the default auto-stop behavior in <a href="/console/settings/email">Email settings</a>, or override it in a site's details."#));
+    body.push_str(&view::banner(BannerKind::Info, r#"Newsletter recipients and transactional emails share one monthly allowance, including on yearly subscriptions. Configure the default auto-stop behavior in <a href="/owner/settings/email">Email settings</a>, or override it in a site's details."#));
 
     if providers.is_empty() {
         body.push_str(&view::banner(
             BannerKind::Info,
             r#"No payment provider is configured, so there are no product ids to set.
-<a href="/console/settings/billing">Choose a provider</a> first."#,
+<a href="/owner/settings/billing">Choose a provider</a> first."#,
         ));
     }
 
@@ -2070,7 +2070,7 @@ async fn plans_inner(
 
     if !cards.is_empty() {
         body.push_str(&format!(
-            r#"<form method="post" action="/console/plans">{cards}
+            r#"<form method="post" action="/owner/plans">{cards}
 <button class="btn" type="submit"{disabled}>{check} Save plans</button></form>"#,
             cards = cards,
             disabled = view::flag("disabled", !is_owner),
@@ -2182,7 +2182,7 @@ pub async fn save_plans(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_redirect(
-        "/console/plans",
+        "/owner/plans",
         &chrome,
         save_plans_inner(&state, &headers, &body).await,
     )
@@ -2267,7 +2267,7 @@ async fn save_plans_inner(
     }
 
     if touched == 0 {
-        return Ok(redirect_with("/console/plans", Flash::ok("Nothing to change.")));
+        return Ok(redirect_with("/owner/plans", Flash::ok("Nothing to change.")));
     }
 
     state
@@ -2308,7 +2308,7 @@ async fn save_plans_inner(
     } else {
         format!("Saved. {on_sale} plan(s) can now be bought through {provider}. Email allowance updates are queued when changed.")
     };
-    Ok(redirect_with("/console/plans", Flash::ok(message)))
+    Ok(redirect_with("/owner/plans", Flash::ok(message)))
 }
 
 // ---------------------------------------------------------------------------
@@ -2322,7 +2322,7 @@ pub async fn staff_page(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_page_or_signin(
-        "/console/signin",
+        "/owner/signin",
         &chrome,
         staff_inner(&state, chrome.theme, &headers, &query).await,
     )
@@ -2358,7 +2358,7 @@ async fn staff_inner(
                     })
                     .collect();
                 format!(
-                    r#"<form method="post" action="/console/staff/{id}/role" class="inline" style="gap:6px">
+                    r#"<form method="post" action="/owner/staff/{id}/role" class="inline" style="gap:6px">
 {select}<button class="btn tonal small" type="submit">Set</button></form>"#,
                     id = attr(&s.id),
                     select = view::selbox("role", &options, false, "Role"),
@@ -2382,7 +2382,7 @@ async fn staff_inner(
                 seen = esc(&view::when(s.last_login_at.as_deref())),
                 toggle = if is_owner && s.id != member.id {
                     view::action_button(
-                        &format!("/console/staff/{}/toggle", s.id),
+                        &format!("/owner/staff/{}/toggle", s.id),
                         if s.is_active() { "Disable" } else { "Enable" },
                         if s.is_active() { "text danger small" } else { "text small" },
                         None,
@@ -2399,7 +2399,7 @@ async fn staff_inner(
             r#"{section}<div class="card padded">{form}</div>"#,
             section = view::section("Add a staff login"),
             form = view::form(
-                "/console/staff",
+                "/owner/staff",
                 &format!(
                     r#"<div class="grid2">{name}{email}</div>
 {password}
@@ -2471,7 +2471,7 @@ pub async fn create_staff(
     Form(form): Form<NewStaffForm>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    reply::or_redirect("/console/staff", &chrome, async {
+    reply::or_redirect("/owner/staff", &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         let member = auth::staff_with(&state, &headers, StaffRole::Owner).await?;
         let role = StaffRole::parse(form.role.trim())
@@ -2501,7 +2501,7 @@ pub async fn create_staff(
             serde_json::json!({"staff": created.id, "role": role.as_str()}),
         )
         .await;
-        Ok(redirect_with("/console/staff", Flash::ok("Staff login created.")))
+        Ok(redirect_with("/owner/staff", Flash::ok("Staff login created.")))
     }.await)
 }
 
@@ -2517,7 +2517,7 @@ pub async fn set_staff_role(
     Form(form): Form<RoleForm>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    reply::or_redirect("/console/staff", &chrome, async {
+    reply::or_redirect("/owner/staff", &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         let member = auth::staff_with(&state, &headers, StaffRole::Owner).await?;
         let role = StaffRole::parse(form.role.trim())
@@ -2533,7 +2533,7 @@ pub async fn set_staff_role(
             serde_json::json!({"staff": id, "role": role.as_str()}),
         )
         .await;
-        Ok(redirect_with("/console/staff", Flash::ok("Role updated.")))
+        Ok(redirect_with("/owner/staff", Flash::ok("Role updated.")))
     }.await)
 }
 
@@ -2543,7 +2543,7 @@ pub async fn toggle_staff(
     Path(id): Path<String>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    reply::or_redirect("/console/staff", &chrome, async {
+    reply::or_redirect("/owner/staff", &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         let member = auth::staff_with(&state, &headers, StaffRole::Owner).await?;
         let target = pro_db::staff::get(&state.db, &id).await?;
@@ -2559,7 +2559,7 @@ pub async fn toggle_staff(
             serde_json::json!({"staff": id, "status": next}),
         )
         .await;
-        Ok(redirect_with("/console/staff", Flash::ok("Updated.")))
+        Ok(redirect_with("/owner/staff", Flash::ok("Updated.")))
     }.await)
 }
 
@@ -2570,14 +2570,14 @@ pub async fn replay_webhook(
     Path((provider, event_id)): Path<(String, String)>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    reply::or_redirect("/console/activity", &chrome, async {
+    reply::or_redirect("/owner/activity", &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         auth::staff_with(&state, &headers, StaffRole::Admin).await?;
         // An event id in a URL is one an operator read off this screen; the
         // path-decoded value is matched exactly, never interpolated.
         let outcome = crate::webhooks::replay_event(&state, &provider, &event_id).await?;
         Ok(redirect_with(
-            "/console/activity",
+            "/owner/activity",
             Flash::ok(format!("Replayed: {outcome}")),
         ))
     }.await)
@@ -2594,7 +2594,7 @@ pub async fn activity(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_page_or_signin(
-        "/console/signin",
+        "/owner/signin",
         &chrome,
         activity_inner(&state, chrome.theme, &headers, &query).await,
     )
@@ -2631,7 +2631,7 @@ async fn activity_inner(
                     error = esc(j.last_error.as_deref().unwrap_or("")),
                     when = esc(&view::when(Some(&j.created_at))),
                     retry = view::action_button(
-                        &format!("/console/jobs/{}/retry", j.id),
+                        &format!("/owner/jobs/{}/retry", j.id),
                         "Retry",
                         "tonal small",
                         None
@@ -2665,7 +2665,7 @@ async fn activity_inner(
                     error = esc(error),
                     replay = view::action_button(
                         &format!(
-                            "/console/webhooks/{}/{}/replay",
+                            "/owner/webhooks/{}/{}/replay",
                             view::urlencode(provider),
                             view::urlencode(event_id)
                         ),
@@ -2706,7 +2706,7 @@ async fn activity_inner(
                         .tenant_id
                         .as_deref()
                         .map(|t| format!(
-                            r#"<a href="/console/sites/{}">{}</a>"#,
+                            r#"<a href="/owner/sites/{}">{}</a>"#,
                             attr(t),
                             esc(&t[..t.len().min(8)])
                         ))
@@ -2739,11 +2739,11 @@ pub async fn retry_job(
     Path(id): Path<String>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    reply::or_redirect("/console/activity", &chrome, async {
+    reply::or_redirect("/owner/activity", &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         auth::staff_with(&state, &headers, StaffRole::Admin).await?;
         pro_db::jobs::retry(&state.db, &id).await?;
-        Ok(redirect_with("/console/activity", Flash::ok("Job requeued.")))
+        Ok(redirect_with("/owner/activity", Flash::ok("Job requeued.")))
     }.await)
 }
 

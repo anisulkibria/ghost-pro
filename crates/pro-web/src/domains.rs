@@ -2,7 +2,7 @@
 //!
 //! A customer sees every address on every site they own, at
 //! `/dashboard/domains`; an operator sees every address on the platform, at
-//! `/console/domains`. Each domain has its own page in both panels, which is
+//! `/owner/domains`. Each domain has its own page in both panels, which is
 //! where everything about one hostname lives: whether it is serving, the DNS
 //! records it needs, its certificate, whether it is the site's primary
 //! address, and what has happened to it.
@@ -138,21 +138,21 @@ impl Panel {
     fn site_href(self, tenant_id: &str) -> String {
         match self {
             Panel::Customer => format!("/dashboard/sites/{tenant_id}"),
-            Panel::Console => format!("/console/sites/{tenant_id}"),
+            Panel::Console => format!("/owner/sites/{tenant_id}"),
         }
     }
 
     fn domain_href(self, domain_id: &str) -> String {
         match self {
             Panel::Customer => format!("/dashboard/domains/{domain_id}"),
-            Panel::Console => format!("/console/domains/{domain_id}"),
+            Panel::Console => format!("/owner/domains/{domain_id}"),
         }
     }
 
     fn list_href(self) -> &'static str {
         match self {
             Panel::Customer => "/dashboard/domains",
-            Panel::Console => "/console/domains",
+            Panel::Console => "/owner/domains",
         }
     }
 
@@ -165,7 +165,7 @@ impl Panel {
             Panel::Customer => {
                 format!("/dashboard/sites/{}/domains/{}/{verb}?back=domain", d.tenant_id, d.id)
             }
-            Panel::Console => format!("/console/domains/{}/{verb}", d.id),
+            Panel::Console => format!("/owner/domains/{}/{verb}", d.id),
         }
     }
 }
@@ -553,7 +553,7 @@ async fn detail_body(
     let owner = match panel {
         Panel::Customer => String::new(),
         Panel::Console => format!(
-            r#" · owned by <a href="/console/customers/{}">{}</a>"#,
+            r#" · owned by <a href="/owner/customers/{}">{}</a>"#,
             attr(&l.account_id),
             esc(&l.account_email)
         ),
@@ -799,7 +799,7 @@ pub async fn customer_detail(
 }
 
 // ---------------------------------------------------------------------------
-// Console: /console/domains
+// Console: /owner/domains
 // ---------------------------------------------------------------------------
 
 pub async fn console_list(
@@ -809,7 +809,7 @@ pub async fn console_list(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_page_or_signin(
-        "/console/signin",
+        "/owner/signin",
         &chrome,
         console_list_inner(&state, chrome.theme, &headers, &query).await,
     )
@@ -846,9 +846,9 @@ async fn console_list_inner(
             params.push(format!("q={}", view::urlencode(q)));
         }
         if params.is_empty() {
-            "/console/domains".to_string()
+            "/owner/domains".to_string()
         } else {
-            format!("/console/domains?{}", params.join("&"))
+            format!("/owner/domains?{}", params.join("&"))
         }
     };
     let current_status = status_filter.map(|s| s.as_str()).unwrap_or("");
@@ -876,7 +876,7 @@ async fn console_list_inner(
         rows.push_str(&format!(
             r#"<tr><td class="wrap"><a class="lead mono" href="{href}">{domain}</a>{primary}</td>
 <td><a href="{site}">{name}</a><span class="sub mono">{slug}</span></td>
-<td><a href="/console/customers/{account}">{email}</a></td>
+<td><a href="/owner/customers/{account}">{email}</a></td>
 <td>{status}</td><td class="muted">{kind}</td><td class="muted">{checked}</td></tr>"#,
             href = attr(&panel.domain_href(&d.id)),
             domain = esc(&d.domain),
@@ -902,7 +902,7 @@ async fn console_list_inner(
         status_tabs = view::seg_bar(&status_tabs),
         kind_tabs = view::seg_bar(&kind_tabs),
         search = view::search_form(
-            "/console/domains",
+            "/owner/domains",
             search.unwrap_or(""),
             "Search by domain, site or owner email"
         ),
@@ -932,7 +932,7 @@ pub async fn console_detail(
 ) -> Response {
     let chrome = state.chrome(&headers);
     reply::or_page_or_signin(
-        "/console/signin",
+        "/owner/signin",
         &chrome,
         async {
             let member = auth::staff(&state, &headers).await?;
@@ -953,7 +953,7 @@ pub async fn console_detail(
     )
 }
 
-/// `POST /console/domains/{id}/check`. Open to support staff: it changes
+/// `POST /owner/domains/{id}/check`. Open to support staff: it changes
 /// nothing the sweeper would not, and "check it again" is the first thing a
 /// customer stuck on DNS asks for.
 pub async fn console_check(
@@ -962,7 +962,7 @@ pub async fn console_check(
     Path(id): Path<String>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/domains/{id}");
+    let back = format!("/owner/domains/{id}");
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         auth::staff_with(&state, &headers, StaffRole::Support).await?;
@@ -977,7 +977,7 @@ pub async fn console_primary(
     Path(id): Path<String>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/domains/{id}");
+    let back = format!("/owner/domains/{id}");
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         let member = auth::staff_with(&state, &headers, StaffRole::Admin).await?;
@@ -994,7 +994,7 @@ pub async fn console_remove(
     Path(id): Path<String>,
 ) -> Response {
     let chrome = state.chrome(&headers);
-    let back = format!("/console/domains/{id}");
+    let back = format!("/owner/domains/{id}");
     reply::or_redirect(&back, &chrome, async {
         auth::require_same_origin(&headers, &state.config.host())?;
         let member = auth::staff_with(&state, &headers, StaffRole::Admin).await?;
@@ -1002,7 +1002,7 @@ pub async fn console_remove(
         let tenant = pro_db::tenants::get(&state.db, &domain.tenant_id).await?;
         let removed = detach(&state, &tenant, &id, &format!("staff:{}", member.id)).await?;
         Ok(redirect_with(
-            "/console/domains",
+            "/owner/domains",
             Flash::ok(format!("{} removed from {}.", removed.domain, tenant.name)),
         ))
     }.await)

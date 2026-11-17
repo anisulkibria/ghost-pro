@@ -256,7 +256,7 @@ pub static REGISTRY: &[SettingDef] = &[
     },
     // ---- which product each plan is, at each provider --------------------
     //
-    // Edited on /console/plans, not on the settings form: it is a map, and
+    // Edited on /owner/plans, not on the settings form: it is a map, and
     // which fields it needs depends on the plan catalogue and on which
     // providers are configured. Registered here for its role check, and
     // because `billing.provider` cannot be switched to a provider that can

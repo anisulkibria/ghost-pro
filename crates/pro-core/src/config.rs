@@ -771,7 +771,7 @@ impl Config {
         {
             tracing::warn!(
                 "no plan in this file has a {} product id. If they are set in the console \
-                 this is fine; otherwise nothing can be bought — see /console/plans",
+                 this is fine; otherwise nothing can be bought — see /owner/plans",
                 self.billing.provider
             );
         }
@@ -1174,7 +1174,7 @@ fn default_config_value(env: &str) -> serde_json::Value {
         // `.localhost` suffix resolves to loopback in every current browser
         // without a hosts-file entry, which is what makes wildcard subdomain
         // routing testable locally.
-        "url": if dev { "http://pro.localhost:8080" } else { "" },
+        "url": if dev { "http://localhost:8080" } else { "" },
         "subdomainBase": if dev { "localhost" } else { "" },
         "server": { "host": "0.0.0.0", "httpPort": if dev { 0 } else { 80 } },
         "paths": { "dataDir": "data", "ghostBinary": "ghost" },

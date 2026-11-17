@@ -43,7 +43,7 @@ pub async fn run_jobs(state: AppState) {
         tracing::error!("could not recover interrupted jobs: {e}");
     }
 
-    // Reconcile existing sites with file/console settings after deployment or a restart.
+    // Reconcile existing sites with file/owner/dashboard settings after deployment or a restart.
     if let Err(e) = pro_db::jobs::enqueue_unique(&state.db, "sync_tenant_mail", None, serde_json::json!({})).await {
         tracing::error!("could not queue tenant mail reconciliation: {e}");
     }

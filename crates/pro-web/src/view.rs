@@ -2161,7 +2161,7 @@ mod tests {
     /// URL a browser might prefetch.
     #[test]
     fn action_buttons_are_posts() {
-        let html = action_button("/console/sites/x/suspend", "Suspend", "danger", None);
+        let html = action_button("/owner/sites/x/suspend", "Suspend", "danger", None);
         assert!(html.contains(r#"method="post""#));
         assert!(html.contains("<button"));
         assert!(!html.contains("<details"), "no confirmation was asked for");
