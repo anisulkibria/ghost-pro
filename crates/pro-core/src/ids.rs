@@ -28,6 +28,9 @@ pub fn secret_token() -> String {
     hex::encode(bytes)
 }
 
+/// Identifies Vuuut Pro ownership tokens in DNS TXT records.
+pub const DOMAIN_VERIFICATION_PREFIX: &str = "ghost-pro-verify=";
+
 /// The token a customer publishes as a DNS TXT record to prove they own a
 /// domain.
 ///
@@ -36,7 +39,7 @@ pub fn secret_token() -> String {
 pub fn domain_verification_token() -> String {
     let mut bytes = [0u8; 16];
     rand::rng().fill_bytes(&mut bytes);
-    format!("ghost-pro-verify={}", hex::encode(bytes))
+    format!("{DOMAIN_VERIFICATION_PREFIX}{}", hex::encode(bytes))
 }
 
 /// SHA-256, hex-encoded.

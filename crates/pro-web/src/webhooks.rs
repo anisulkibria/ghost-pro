@@ -74,7 +74,9 @@ async fn handle(
     let header_bag = WebhookHeaders {
         stripe_signature: header(headers, "stripe-signature"),
         paddle_signature: header(headers, "paddle-signature"),
-        x_signature: header(headers, "x-signature"),
+        webhook_id: header(headers, "webhook-id"),
+        webhook_timestamp: header(headers, "webhook-timestamp"),
+        webhook_signature: header(headers, "webhook-signature"),
         // `?token=…`, which is all Gumroad can be authenticated by. Named
         // `token` rather than `secret` because it is what an operator types
         // into Gumroad's ping field and sees in their own browser history.
@@ -88,7 +90,7 @@ async fn handle(
     // form encoding rather than JSON.
     let parsed = provider.parse_body(body)?;
 
-    let event_id = provider.event_id(&parsed);
+    let event_id = provider.event_id(&parsed, &header_bag);
     let event_type = event_type_of(provider_name, &parsed);
 
     // (2) Claim before acting.
@@ -154,9 +156,8 @@ fn header(headers: &HeaderMap, name: &str) -> Option<String> {
 /// somewhere different.
 fn event_type_of(provider: &str, body: &serde_json::Value) -> String {
     let field = match provider {
-        "stripe" => body["type"].as_str(),
+        "stripe" | "polar" => body["type"].as_str(),
         "paddle" => body["event_type"].as_str(),
-        "lemonsqueezy" => body.pointer("/meta/event_name").and_then(|v| v.as_str()),
         _ => None,
     };
     field.unwrap_or("unknown").to_string()
@@ -360,82 +361,71 @@ async fn apply_subscription(
 ) -> Result<String> {
     let live = state.live();
 
-    // Which account this belongs to. The metadata set at checkout is the
-    // first choice; the provider's customer id is the fallback, which is what
-    // makes a renewal years later still resolvable even if metadata was lost.
-    let account_id = match &incoming.account_id {
-        Some(id) if pro_db::accounts::get(&state.db, id).await.is_ok() => id.clone(),
-        _ => {
-            // Already known under this provider's subscription id?
-            if let Some(existing) = pro_db::subscriptions::find_by_provider_id(
-                &state.db,
-                provider.name(),
-                &incoming.provider_subscription_id,
-            )
-            .await?
-            {
-                existing.account_id
-            } else if let Some(customer) = &incoming.provider_customer_id {
-                match pro_db::accounts::find_by_customer(&state.db, provider.name(), customer)
-                    .await?
-                {
-                    Some(account) => account.id,
-                    None => {
-                        return Err(ProError::BadRequest(format!(
-                            "subscription {} names no account this platform knows",
-                            incoming.provider_subscription_id
-                        )))
-                    }
-                }
-            } else {
-                return Err(ProError::BadRequest(format!(
-                    "subscription {} carries no account reference",
-                    incoming.provider_subscription_id
-                )));
-            }
-        }
-    };
-
-    // Remember the customer id, so later events resolve even without metadata.
-    if let Some(customer) = &incoming.provider_customer_id {
-        let _ = pro_db::accounts::set_billing_customer(
-            &state.db,
-            &account_id,
-            provider.name(),
-            customer,
-        )
-        .await;
+    let existing = pro_db::subscriptions::find_by_provider_id(
+        &state.db,
+        provider.name(),
+        &incoming.provider_subscription_id,
+    )
+    .await?;
+    let is_polar = provider.name() == "polar";
+    if is_polar && existing.is_none() && incoming.plan_slug.is_none() {
+        return if incoming.tenant_id.is_some() {
+            Err(ProError::BadRequest("Polar subscription has no matching plan product ID".into()))
+        } else {
+            Ok("ignored unmapped Polar product".into())
+        };
     }
 
-    // Which site this pays for. A checkout started before the site existed
-    // carries no tenant; in that case the account's only site is the
-    // unambiguous answer, and more than one is left for an operator rather
-    // than guessed at.
-    let tenant_id = match &incoming.tenant_id {
-        Some(id) => Some(id.clone()),
-        None => {
-            let existing = pro_db::subscriptions::find_by_provider_id(
-                &state.db,
-                provider.name(),
-                &incoming.provider_subscription_id,
-            )
-            .await?;
-            match existing.and_then(|s| s.tenant_id) {
-                Some(id) => Some(id),
-                None => {
-                    let sites =
-                        pro_db::tenants::list_for_account(&state.db, &account_id).await?;
-                    if sites.len() == 1 {
-                        Some(sites[0].id.clone())
-                    } else {
-                        None
-                    }
-                }
+    // Once linked, a subscription keeps its account and site through updates.
+    let account_id = if let Some(subscription) = &existing {
+        subscription.account_id.clone()
+    } else {
+        let account = match &incoming.account_id {
+            Some(id) => match pro_db::accounts::get(&state.db, id).await {
+                Ok(account) => Some(account),
+                Err(ProError::NotFound(_)) => None,
+                Err(error) => return Err(error),
+            },
+            None => None,
+        };
+        match (account, &incoming.provider_customer_id) {
+            (Some(account), _) => Some(account),
+            (None, Some(customer)) => {
+                pro_db::accounts::find_by_customer(&state.db, provider.name(), customer).await?
             }
+            _ => None,
         }
+        .ok_or_else(|| ProError::BadRequest(format!(
+            "subscription {} names no account this platform knows",
+            incoming.provider_subscription_id
+        )))?
+        .id
     };
 
-    let stored = pro_db::subscriptions::upsert(
+    let linked_tenant = existing.as_ref().and_then(|s| s.tenant_id.as_ref());
+    let event_tenant = incoming.tenant_id.as_ref();
+    let tenant_reference = if is_polar {
+        linked_tenant.or(event_tenant)
+    } else {
+        event_tenant.or(linked_tenant)
+    };
+    let tenant_id = match tenant_reference {
+        Some(id) => Some(id.clone()),
+        None => {
+            let sites = pro_db::tenants::list_for_account(&state.db, &account_id).await?;
+            if sites.len() == 1 { Some(sites[0].id.clone()) } else { None }
+        }
+    };
+    if is_polar {
+        if let Some(id) = &tenant_id {
+            let tenant = pro_db::tenants::get(&state.db, id).await?;
+            if tenant.account_id != account_id {
+                return Err(ProError::BadRequest("Polar subscription names a site owned by another account".into()));
+            }
+        }
+    }
+
+    let stored = pro_db::subscriptions::upsert_with_version(
         &state.db,
         pro_db::subscriptions::Upsert {
             account_id: &account_id,
@@ -451,12 +441,28 @@ async fn apply_subscription(
             cancel_at_period_end: incoming.cancel_at_period_end,
             canceled_at: incoming.canceled_at.as_deref(),
         },
+        incoming.provider_version.as_deref(),
     )
     .await?;
+    if incoming.provider_version.is_some() && stored.provider_version > incoming.provider_version {
+        return Ok("ignored older subscription update".into());
+    }
+
+    if let Some(customer) = &stored.provider_customer_id {
+        pro_db::accounts::set_billing_customer(&state.db, &account_id, provider.name(), customer).await?;
+    }
 
     let mut summary = format!("subscription {}", stored.status);
     if let Some(tenant_id) = &tenant_id {
-        if let Ok(tenant) = pro_db::tenants::get(&state.db, tenant_id).await {
+        if let Ok(mut tenant) = pro_db::tenants::get(&state.db, tenant_id).await {
+            if is_polar && matches!(stored.status.as_str(), "active" | "trialing") {
+                if let Some(period_start) = stored.current_period_start.as_deref() {
+                    if period_start > tenant.period_start.as_str() {
+                        pro_db::tenants::set_period_start(&state.db, tenant_id, period_start).await?;
+                        tenant.period_start = period_start.to_string();
+                    }
+                }
+            }
             // Apply the plan to the site, if the subscription names one and it
             // differs.
             if let Some(plan_slug) = &incoming.plan_slug {
@@ -485,7 +491,10 @@ async fn apply_subscription(
             // `checkout.session.completed` arrives as a subscription change,
             // not a payment, so a site that opened only on the payment event
             // would sit closed until an invoice event happened to follow.
-            if stored.is_entitled() && tenant.is_suspended_for_billing() {
+            if stored.is_entitled()
+                && (!is_polar || stored.status != "past_due")
+                && tenant.is_suspended_for_billing()
+            {
                 let was_awaiting = tenant.suspended_reason.as_deref()
                     == Some(pro_core::suspension::AWAITING_PAYMENT);
                 // The plan this is paying for, which on a plan change is the
@@ -535,7 +544,11 @@ async fn apply_subscription(
             // offline — but only once, and only after the grace period for a
             // *failed payment*. An outright cancellation is immediate,
             // because the customer asked for it.
-            if !stored.is_entitled() && tenant.status == pro_core::TenantStatus::Active {
+            if !stored.is_entitled()
+                && tenant.status == pro_core::TenantStatus::Active
+                && !pro_db::subscriptions::for_tenant(&state.db, tenant_id).await?
+                    .is_some_and(|other| other.id != stored.id && other.provider != "manual" && other.is_entitled())
+            {
                 pro_provision::suspend_site(
                     &state.db,
                     &state.config,

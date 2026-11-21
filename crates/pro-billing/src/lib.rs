@@ -1,5 +1,5 @@
 //! `pro-billing` — taking money for the platform, through Stripe, Paddle,
-//! Lemon Squeezy or Gumroad.
+//! Polar or Gumroad.
 //!
 //! Only the platform's own subscriptions are here. A *tenant's* member
 //! payments are that site's business and run through its own Ghost (today,
@@ -18,8 +18,8 @@
 //! Everything else — entitlement, dunning, which site a subscription pays for
 //! — is provider-neutral and lives in `pro-db` and `pro-web`. The providers
 //! disagree about almost everything (Stripe has subscription objects with
-//! period ends; Paddle sends transactions and subscriptions separately; Lemon
-//! Squeezy wraps everything in JSON:API; Gumroad has no checkout API, posts
+//! period ends; Paddle sends transactions and subscriptions separately; Gumroad
+//! has no checkout API, posts
 //! form-encoded bodies and signs nothing) so the translation has to happen at
 //! the edge, once, and nothing downstream should be able to tell which
 //! provider a customer is on.
@@ -43,8 +43,8 @@
 use pro_core::{Effective, ProError, Result};
 
 pub mod gumroad;
-pub mod lemonsqueezy;
 pub mod paddle;
+pub mod polar;
 pub mod signature;
 pub mod stripe;
 
@@ -82,10 +82,11 @@ pub struct SubscriptionState {
     pub cancel_at_period_end: Option<bool>,
     pub canceled_at: Option<String>,
     /// Passed through checkout so a webhook can find the account that started
-    /// it. All three providers support some form of custom metadata, and this
-    /// is the only thing the platform puts in it.
+    /// it.
     pub account_id: Option<String>,
     pub tenant_id: Option<String>,
+    /// Provider revision for full subscription snapshots.
+    pub provider_version: Option<String>,
 }
 
 /// Where a customer is sent to pay.
@@ -113,7 +114,7 @@ pub struct CheckoutRequest<'a> {
 /// One payment provider.
 #[async_trait::async_trait]
 pub trait Provider: Send + Sync {
-    /// `stripe`, `paddle`, `lemonsqueezy`, `gumroad`.
+    /// `stripe`, `paddle`, `polar`, `gumroad`.
     fn name(&self) -> &'static str;
 
     /// Begin a checkout.
@@ -144,7 +145,7 @@ pub trait Provider: Send + Sync {
 
     /// The provider's own id for this event, for idempotency. Empty when the
     /// provider does not supply one.
-    fn event_id(&self, body: &serde_json::Value) -> String;
+    fn event_id(&self, body: &serde_json::Value, headers: &WebhookHeaders) -> String;
 
     /// What this event means for the platform.
     fn interpret(&self, body: &serde_json::Value, catalogue: &[pro_core::Plan])
@@ -156,6 +157,15 @@ pub trait Provider: Send + Sync {
     /// which case the dashboard shows the cancel controls it implements
     /// itself.
     async fn management_url(&self, subscription: &pro_core::Subscription) -> Result<Option<String>>;
+
+    /// Change an existing subscription in place when the provider supports it.
+    async fn change_plan(
+        &self,
+        _subscription: &pro_core::Subscription,
+        _plan: &pro_core::Plan,
+    ) -> Result<()> {
+        Err(ProError::BadRequest("This provider does not support changing plans in place.".into()))
+    }
 
     /// End this subscription.
     ///
@@ -186,8 +196,10 @@ pub struct WebhookHeaders {
     pub stripe_signature: Option<String>,
     /// Paddle's `Paddle-Signature`.
     pub paddle_signature: Option<String>,
-    /// Lemon Squeezy's `X-Signature`.
-    pub x_signature: Option<String>,
+    /// Polar's Standard Webhooks headers.
+    pub webhook_id: Option<String>,
+    pub webhook_timestamp: Option<String>,
+    pub webhook_signature: Option<String>,
     /// A secret from the webhook URL's own query string, for a provider that
     /// signs nothing at all.
     ///
@@ -228,17 +240,13 @@ pub fn build(name: &str, settings: &Effective) -> Option<Box<dyn Provider>> {
                     as Box<dyn Provider>
             })
         }
-        "lemonsqueezy" => {
-            let cfg = settings.lemonsqueezy();
-            match (cfg.api_key, cfg.store_id) {
-                (Some(key), Some(store)) => Some(Box::new(lemonsqueezy::LemonSqueezy::new(
-                    key,
-                    store,
-                    cfg.webhook_secret,
-                    cfg.test_mode,
-                )) as Box<dyn Provider>),
-                _ => None,
-            }
+        "polar" => {
+            let cfg = settings.polar();
+            Some(Box::new(polar::Polar::new(
+                cfg.access_token.filter(|v| !v.trim().is_empty())?,
+                cfg.webhook_secret.filter(|v| !v.trim().is_empty())?,
+                cfg.sandbox,
+            )) as Box<dyn Provider>)
         }
         // The ping token is required, not optional: Gumroad signs nothing, so
         // a Gumroad built without one would refuse every ping it received.
@@ -282,11 +290,7 @@ pub fn normalise_status(provider: &str, raw: &str) -> Option<&'static str> {
         // Paddle needs no arms of its own: `trialing`, `active`, `past_due`,
         // `paused` and `canceled` are spelled exactly as above, which is why
         // those arms are keyed on `_` rather than per provider.
-        // ---- Lemon Squeezy ------------------------------------------------
-        ("lemonsqueezy", "on_trial") => "trialing",
-        // Lemon Squeezy's `unpaid` is the end of its dunning, not the start.
-        ("lemonsqueezy", "unpaid") => "expired",
-        ("lemonsqueezy", "expired") => "expired",
+        ("polar", "incomplete_expired" | "unpaid") => "expired",
         // Gumroad's own vocabulary never reaches here: its pings carry no
         // status field, so `gumroad.rs` decides the status from *which*
         // resource arrived and sets one of these six directly. The arms
@@ -361,21 +365,20 @@ mod tests {
         }));
         assert_eq!(active(&p).unwrap().name(), "paddle");
 
-        let l = settings(json!({
-            "billing.provider": "lemonsqueezy",
-            "billing.lemonsqueezy.apiKey": "ls_1",
-            "billing.lemonsqueezy.storeId": "4242",
+        let polar = settings(json!({
+            "billing.provider": "polar",
+            "billing.polar.accessToken": "polar_oat_test",
+            "billing.polar.webhookSecret": "polar_whs_test",
         }));
-        assert_eq!(active(&l).unwrap().name(), "lemonsqueezy");
+        assert_eq!(active(&polar).unwrap().name(), "polar");
     }
 
-    /// Lemon Squeezy needs a store as well as a key, and half a configuration
-    /// must not produce a provider that fails at checkout.
+    /// Starting checkout requires a token and a secret to verify payments.
     #[test]
     fn a_half_configured_provider_is_not_built() {
         let s = settings(json!({
-            "billing.provider": "lemonsqueezy",
-            "billing.lemonsqueezy.apiKey": "ls_1",
+            "billing.provider": "polar",
+            "billing.polar.accessToken": "polar_oat_test",
         }));
         assert!(active(&s).is_none());
     }
@@ -391,12 +394,12 @@ mod tests {
         }));
         assert_eq!(active(&s).unwrap().name(), "paddle");
         assert_eq!(build("stripe", &s).unwrap().name(), "stripe", "old subscriptions keep working");
-        assert!(build("lemonsqueezy", &s).is_none());
+        assert!(build("polar", &s).is_none());
     }
 
     #[test]
     fn normalises_the_shared_statuses() {
-        for provider in ["stripe", "paddle", "lemonsqueezy"] {
+        for provider in ["stripe", "paddle", "polar"] {
             assert_eq!(normalise_status(provider, "active"), Some("active"));
             assert_eq!(normalise_status(provider, "past_due"), Some("past_due"));
             assert_eq!(normalise_status(provider, "canceled"), Some("canceled"));
@@ -412,16 +415,14 @@ mod tests {
     fn normalises_trials_per_provider() {
         assert_eq!(normalise_status("stripe", "trialing"), Some("trialing"));
         assert_eq!(normalise_status("paddle", "trialing"), Some("trialing"));
-        assert_eq!(normalise_status("lemonsqueezy", "on_trial"), Some("trialing"));
+        assert_eq!(normalise_status("polar", "trialing"), Some("trialing"));
     }
 
-    /// `unpaid` means opposite things at Stripe and Lemon Squeezy: Stripe is
-    /// still dunning, Lemon Squeezy has given up. Mapping both to one status
-    /// would either suspend a customer early or never suspend them.
+    /// Polar reports unpaid after payment retries are exhausted.
     #[test]
     fn unpaid_means_different_things_per_provider() {
         assert_eq!(normalise_status("stripe", "unpaid"), Some("past_due"));
-        assert_eq!(normalise_status("lemonsqueezy", "unpaid"), Some("expired"));
+        assert_eq!(normalise_status("polar", "unpaid"), Some("expired"));
     }
 
     /// Stripe's `incomplete` is mid-flow, not a failure.
@@ -444,9 +445,9 @@ mod tests {
     fn normalised_statuses_are_all_storable() {
         let raws = [
             "trialing", "active", "past_due", "paused", "canceled", "cancelled", "expired",
-            "incomplete", "incomplete_expired", "unpaid", "on_trial",
+            "incomplete", "incomplete_expired", "unpaid",
         ];
-        for provider in ["stripe", "paddle", "lemonsqueezy"] {
+        for provider in ["stripe", "paddle", "polar"] {
             for raw in raws {
                 if let Some(mapped) = normalise_status(provider, raw) {
                     assert!(

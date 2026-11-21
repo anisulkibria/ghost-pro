@@ -1,5 +1,5 @@
-//! HTML, written as functions — in the Material 3 language the Ghost CMS port
-//! at `Vuuut` uses for its admin.
+//! Shared HTML and styling for the Vuuut Pro panels. Material 3 controls sit
+//! on the tinted glass surfaces used by the Vuuut admin.
 //!
 //! ## Why functions and not templates
 //!
@@ -221,6 +221,9 @@ const DARK: &str = r#"
   --surface: #171214; --on-surface: #ECE0E3; --on-surface-variant: #D0C2C6;
   --sc-lowest: #120E10; --sc-low: #1F1A1C; --sc: #241F21; --sc-high: #2F292B; --sc-highest: #3A3436;
   --outline: #998D91; --outline-variant: #4B3F42;
+  --input-outline: var(--outline);
+  --field-focus-border: color-mix(in srgb, var(--primary) 65%, transparent);
+  --field-focus-halo: color-mix(in srgb, var(--primary) 11%, transparent);
   --inverse-surface: #ECE0E3; --inverse-on-surface: #352F30;
   --blue-bg: #1F3E75; --blue-fg: #AECBFF;
   --green-bg: #173B23; --green-fg: #9CD8AA;
@@ -231,6 +234,18 @@ const DARK: &str = r#"
   --red-bg: #6A1B16; --red-fg: #FFB4AB;
   --slate-bg: #2C2F36; --slate-fg: #C6CAD8;
   --shadow-1: 0 1px 2px rgba(0,0,0,.5); --shadow-2: 0 2px 8px rgba(0,0,0,.55);
+  --glass: rgba(46,37,48,.72);
+  --glass-strong: rgba(34,26,36,.91);
+  --glass-film: rgba(255,255,255,.08);
+  --glass-stroke: rgba(255,235,247,.14);
+  --glass-edge: rgba(255,242,249,.15);
+  --glass-hover: rgba(255,212,233,.11);
+  --glass-press: rgba(255,212,233,.18);
+  --glass-shadow: 0 14px 34px -20px rgba(0,0,0,.8);
+  --field-surface: #2b232e;
+  --ambient-rose: #4a263a;
+  --ambient-lilac: #352946;
+  --ambient-blue: #22354b;
 "#;
 
 /// Everything but the dark tokens.
@@ -250,6 +265,9 @@ const BASE: &str = r#"
   --surface: #FFF8F8; --on-surface: #201A1B; --on-surface-variant: #514347;
   --sc-lowest: #FFFFFF; --sc-low: #FAEFF1; --sc: #F4EAEC; --sc-high: #EFDFE3; --sc-highest: #E9DBDF;
   --outline: #847375; --outline-variant: #D7C3C7;
+  --input-outline: color-mix(in srgb, var(--outline-variant) 58%, transparent);
+  --field-focus-border: color-mix(in srgb, var(--primary) 72%, transparent);
+  --field-focus-halo: color-mix(in srgb, var(--primary) 14%, transparent);
   --inverse-surface: #352F30; --inverse-on-surface: #F9EDEF;
   --blue-bg: #D8E2FF; --blue-fg: #001A41;
   --green-bg: #C4EED0; --green-fg: #0C3D24;
@@ -269,6 +287,19 @@ const BASE: &str = r#"
   --dur: .18s;
   --shadow-1: 0 1px 2px rgba(0,0,0,.08), 0 1px 3px 1px rgba(0,0,0,.04);
   --shadow-2: 0 1px 2px rgba(0,0,0,.1), 0 2px 6px 2px rgba(0,0,0,.05);
+  --glass: rgba(255,255,255,.66);
+  --glass-strong: rgba(255,250,253,.91);
+  --glass-film: rgba(255,255,255,.44);
+  --glass-stroke: rgba(125,77,106,.19);
+  --glass-edge: rgba(255,255,255,.91);
+  --glass-hover: color-mix(in srgb, var(--primary) 9%, transparent);
+  --glass-press: color-mix(in srgb, var(--primary) 15%, transparent);
+  --glass-shadow: 0 14px 32px -23px rgba(66,27,53,.46);
+  --glass-blur: saturate(155%) blur(18px);
+  --field-surface: #fff9fc;
+  --ambient-rose: #f8d1e3;
+  --ambient-lilac: #e8dbf6;
+  --ambient-blue: #dbeafa;
 }
 *, *::before, *::after { box-sizing: border-box; }
 html { scrollbar-color: var(--outline-variant) transparent; }
@@ -291,10 +322,23 @@ code, .mono { font-family: var(--mono); }
    beneath it, pill-shaped tabs. It is sticky and never scrolls itself — the
    nav list inside it does — so a popover in its foot can reach past its
    edge instead of growing the rail a scrollbar. */
-.shell { display: flex; min-height: 100vh; --rail-w: 246px; }
-.rail { width: var(--rail-w); flex: none; padding: 28px 16px 16px; display: flex; flex-direction: column;
-  background: var(--sc-low); position: sticky; top: 0; height: 100vh; z-index: 30;
-  border-right: 1px solid color-mix(in srgb, var(--outline-variant) 55%, transparent); }
+.shell { display: flex; min-height: 100vh; --rail-w: 246px; isolation: isolate; }
+.shell::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(ellipse 70% 61% at 12% 0%, var(--ambient-rose), transparent 74%),
+    radial-gradient(ellipse 75% 68% at 96% 9%, var(--ambient-lilac), transparent 79%),
+    radial-gradient(ellipse 82% 66% at 78% 106%, var(--ambient-blue), transparent 80%),
+    var(--surface); }
+.rail { width: var(--rail-w); flex: none; padding: 20px 13px 12px; display: flex; flex-direction: column;
+  --rail-top: #50233e; --rail-mid: #35213e; --rail-bottom: #202743;
+  position: sticky; top: 0; height: 100vh; height: 100dvh; z-index: 30;
+  color: var(--on-surface);
+  background: linear-gradient(157deg, var(--rail-top), var(--rail-mid) 54%, var(--rail-bottom));
+  border-right: 1px solid var(--glass-stroke); }
+html.dark .rail { --rail-top: #32172a; --rail-mid: #24172d; --rail-bottom: #151c31; }
+@media (prefers-color-scheme: dark) {
+  html.system .rail { --rail-top: #32172a; --rail-mid: #24172d; --rail-bottom: #151c31; }
+}
 .rail .nav-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
   scrollbar-width: thin; scrollbar-color: var(--outline-variant) transparent;
   margin: 0 -6px; padding: 0 6px; }
@@ -303,7 +347,8 @@ code, .mono { font-family: var(--mono); }
    column reads as masthead, then navigation, rather than one list. */
 .brand { display: flex; align-items: center; gap: 12px; min-height: 0;
   padding: 10px 12px; margin: 0 0 40px; color: inherit; text-decoration: none; border-radius: 16px; }
-.brand:hover { background: color-mix(in srgb, var(--on-surface) 6%, transparent); }
+.brand:hover { background: var(--glass-hover); }
+.rail .brand-mark, .auth-logo { box-shadow: inset 0 1px 0 var(--glass-edge), 0 7px 14px -9px rgba(32,4,23,.72); }
 .brand:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 /* The platform's tile: an italic serif `v` on a rounded square with one
    corner squared off, the arrow riding its top-right — the Click
@@ -325,15 +370,18 @@ code, .mono { font-family: var(--mono); }
    between them so the selected one reads as a shape, not a stripe. */
 .nav-item { display: flex; align-items: center; gap: 14px; padding: 9px 14px; margin: 4px 0; border-radius: 999px;
   text-decoration: none; color: var(--on-surface-variant); font-size: 13.5px; font-weight: 500;
-  transition: background var(--dur) var(--ease), color var(--dur) var(--ease); position: relative; }
-.nav-item:hover { background: color-mix(in srgb, var(--on-surface) 6%, transparent); color: var(--on-surface); }
-.nav-item.active { background: var(--secondary-container); color: var(--on-secondary-container); font-weight: 600; }
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); position: relative; }
+.nav-item:hover { background: var(--glass-hover); color: var(--on-surface); }
+.nav-item.active { background: linear-gradient(180deg, rgba(255,240,250,.24), rgba(255,228,247,.12));
+  color: var(--on-surface); font-weight: 600;
+  box-shadow: inset 0 1px 0 var(--glass-edge), inset 0 0 0 1px var(--glass-stroke),
+    0 6px 15px -11px rgba(0,0,0,.84); }
 .nav-item:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .nav-item .nav-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The rail runs at its own, tighter scale: the tinted squares elsewhere lead
    56px list rows, where 40px is right; as navigation they only have to read
    at a glance. 26px inside a 9px-padded pill makes the 44px row. */
-.rail .ic { width: 26px; height: 26px; border-radius: 8px; }
+.rail .ic { width: 26px; height: 26px; border-radius: 9px; box-shadow: inset 0 1px 0 rgba(255,255,255,.18); }
 .rail .ic svg { width: 16px; height: 16px; }
 .ic { width: 40px; height: 40px; border-radius: 14px; display: grid; place-items: center; flex: none; }
 .ic svg { width: 21px; height: 21px; }
@@ -345,9 +393,9 @@ code, .mono { font-family: var(--mono); }
 .tint-teal { background: var(--teal-bg); color: var(--teal-fg); }
 .tint-red { background: var(--red-bg); color: var(--red-fg); }
 .tint-slate { background: var(--slate-bg); color: var(--slate-fg); }
-.rail-foot { margin-top: auto; padding-top: 14px; position: relative;
-  border-top: 1px solid color-mix(in srgb, var(--outline-variant) 55%, transparent); }
-.who { display: flex; align-items: center; gap: 8px; padding: 6px 4px 0; }
+.rail-foot { margin-top: auto; padding: 6px; position: relative; border-radius: 19px;
+  border: 1px solid var(--glass-stroke); background: var(--glass-film); box-shadow: inset 0 1px 0 var(--glass-edge); }
+.who { display: flex; align-items: center; gap: 7px; padding: 3px; }
 .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--primary); color: var(--on-primary);
   display: grid; place-items: center; font-weight: 600; font-size: 13px; flex: none; }
 .who b { font-size: 13px; font-weight: 600; display: block; line-height: 1.2; }
@@ -362,7 +410,7 @@ code, .mono { font-family: var(--mono); }
 .who-link { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
   color: inherit; text-decoration: none; border-radius: 999px; padding: 4px; margin: -4px;
   transition: background var(--dur) var(--ease); }
-.who-link:hover { background: color-mix(in srgb, var(--on-surface) 6%, transparent); }
+.who-link:hover { background: var(--glass-hover); }
 .who-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .who-link > div { min-width: 0; }
 /* Clipping applies to the two lines of text. The avatar is excluded because
@@ -375,6 +423,7 @@ code, .mono { font-family: var(--mono); }
 .main { flex: 1; min-width: 0; }
 .content { max-width: 1500px; margin: 0 auto; padding: 0 clamp(24px, 3vw, 48px) 64px; }
 .content.narrow { max-width: 640px; }
+.shell .content { padding-top: 16px; }
 
 /* ---- appearance menu ----
    Ghost's own switcher offers Dark, Light and System from the account menu.
@@ -399,8 +448,9 @@ html.dark .theme-menu > summary .t-sun { display: none; }
 .theme-menu { position: relative; }
 .theme-menu .pop { position: absolute; top: calc(100% + 10px); bottom: auto; left: auto; right: 0;
   width: 220px; z-index: 45;
-  background: var(--sc-lowest); border: 1px solid var(--outline-variant); border-radius: 14px;
-  box-shadow: var(--shadow-2); padding: 6px; }
+  background: var(--glass-strong); border: 1px solid var(--glass-stroke); border-radius: 18px;
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-2), inset 0 1px 0 var(--glass-edge); padding: 6px; }
 /* In the rail the popover anchors to the whole rail-foot row rather than the
    32px button, so it can span the rail's width and still open inside it — the
    rail scrolls, and a box hanging past its edge would grow a scrollbar. The
@@ -412,7 +462,7 @@ html.dark .theme-menu > summary .t-sun { display: none; }
 .menu-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 9px;
   font-size: 13.5px; font-weight: 500; color: var(--on-surface); text-decoration: none;
   width: 100%; border: none; background: none; font-family: inherit; text-align: left; cursor: pointer; }
-.menu-item:hover { background: color-mix(in srgb, var(--on-surface) 7%, transparent); }
+.menu-item:hover { background: var(--glass-hover); }
 .menu-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .menu-item .ck { width: 18px; height: 18px; flex: none; display: grid; place-items: center;
   color: transparent; margin-left: auto; }
@@ -430,7 +480,11 @@ html.dark .theme-menu > summary .t-sun { display: none; }
   padding: 22px 4px 16px; margin-bottom: 8px;
   background: color-mix(in srgb, var(--surface) 82%, transparent); backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px); }
-.page-head h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0; }
+.shell .page-head { top: 12px; padding: 14px 20px; margin: 0 0 18px; border-radius: 23px;
+  background: var(--glass-strong); border: 1px solid var(--glass-stroke);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-edge); }
+.page-head h1 { margin: 0; font-size: 25px; font-weight: 600; letter-spacing: -.016em; line-height: 1.2; }
 .page-head .sub { margin: 2px 0 0; font-size: 13.5px; color: var(--on-surface-variant); }
 .page-head .sub a { text-decoration: none; border-bottom: 1px solid var(--outline-variant); }
 .page-head .heading { min-width: 0; }
@@ -438,20 +492,24 @@ html.dark .theme-menu > summary .t-sun { display: none; }
   flex-wrap: wrap; justify-content: flex-end; }
 /* List-shaped pages borrow the editorial face, so the page has one voice. */
 .page-head.editorial h1 { font-family: var(--display); font-optical-sizing: auto;
-  font-weight: 600; letter-spacing: -.02em; font-size: 27px; }
+  font-weight: 600; letter-spacing: -.025em; font-size: clamp(25px, 2.4vw, 32px); }
 
 /* ---- groups, cards, rows ---- */
-.section { font-size: 13px; font-weight: 600; color: var(--on-surface-variant);
-  padding: 20px 16px 10px; letter-spacing: .2px; }
-.card { background: var(--sc-lowest); border-radius: 24px; margin-bottom: 12px; overflow: hidden;
+.section { font-size: 12px; font-weight: 700; color: var(--on-surface-variant);
+  padding: 23px 9px 10px; letter-spacing: .075em; text-transform: uppercase; }
+.card { background: var(--sc-lowest); border-radius: 24px; margin-bottom: 14px; overflow: hidden;
   box-shadow: var(--shadow-1); }
+.shell .card, .auth-box .card { background: var(--glass); border: 1px solid var(--glass-stroke);
+  border-radius: 26px; box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-edge);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
 .card.padded { padding: 20px; }
 .card.flush { padding: 0; }
 .rows .row { display: flex; align-items: center; gap: 16px; padding: 13px 20px; position: relative;
   text-decoration: none; color: inherit; transition: background var(--dur) var(--ease); }
 .rows .row + .row::before { content: ""; position: absolute; top: 0; left: 76px; right: 0; height: 1px;
   background: var(--outline-variant); }
-a.row:hover, .rows .row.hoverable:hover { background: color-mix(in srgb, var(--on-surface) 4%, transparent); }
+a.row:hover, .rows .row.hoverable:hover { background: var(--glass-hover); }
+.rows a.row:active, .rows .row.hoverable:active { background: var(--glass-press); }
 .rows .row .body { flex: 1; min-width: 0; }
 /* Title over detail, each clipped to the body's width. Plain inline spans
    would let a long value run through the chips and buttons to the right:
@@ -501,6 +559,11 @@ a.row:hover, .rows .row.hoverable:hover { background: color-mix(in srgb, var(--o
   cursor: pointer; white-space: nowrap;
   transition: box-shadow var(--dur) var(--ease), transform .1s var(--ease), background var(--dur) var(--ease); }
 .btn:hover { box-shadow: var(--shadow-1); }
+.shell .btn:not(.text):not(.outlined), .auth .btn:not(.text):not(.outlined) {
+  background-image: linear-gradient(180deg, rgba(255,255,255,.12), transparent 78%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.26); }
+.shell .btn:not(.text):not(.outlined):hover { box-shadow: var(--shadow-2), inset 0 1px 0 rgba(255,255,255,.26); }
+.shell .btn[disabled]:hover { box-shadow: none; }
 .btn:active { transform: scale(.97); }
 .btn svg.i { width: 18px; height: 18px; }
 .btn.tonal { background: var(--secondary-container); color: var(--on-secondary-container); }
@@ -547,18 +610,20 @@ form.inline { display: inline-flex; margin: 0; }
    row of a site's Maintenance card, where it matters most. Lift the clip
    only while a confirmation is open, so the corners stay crisp otherwise. */
 .card:has(.confirm[open]) { overflow: visible; }
+.shell .card:has(.confirm[open]) { position: relative; z-index: 10; }
 
 /* ---- text fields (M3 outlined, floating label) ---- */
 .field { position: relative; display: block; margin-bottom: 16px; }
 .field input, .field textarea, .field select { width: 100%; font-family: inherit; font-size: 15px;
-  color: var(--on-surface); background: transparent; border: 1px solid var(--outline);
+  color: var(--on-surface); background: transparent;
+  border: 1px solid color-mix(in srgb, var(--outline-variant) 58%, transparent);
   border-radius: 12px; padding: 22px 14px 6px; outline: none; caret-color: var(--primary);
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
 .field textarea { resize: vertical; min-height: 96px; }
 .field > span { position: absolute; left: 11px; top: 15px; font-size: 15px; color: var(--on-surface-variant);
   padding: 0 5px; pointer-events: none; transition: all var(--dur) var(--ease); background: var(--sc-lowest); }
-.field input:focus, .field textarea:focus, .field select:focus { border-color: var(--primary);
-  box-shadow: inset 0 0 0 1px var(--primary); }
+.field input:focus, .field textarea:focus, .field select:focus { border-color: var(--field-focus-border);
+  box-shadow: 0 0 0 3px var(--field-focus-halo); }
 .field input[disabled], .field select[disabled] { color: var(--on-surface-variant);
   background: color-mix(in srgb, var(--on-surface) 4%, transparent); cursor: not-allowed; }
 /* Asked of the field, not of the input's next sibling. `input + span` is the
@@ -581,6 +646,10 @@ form.inline { display: inline-flex; margin: 0; }
 /* A field on a card that is itself tinted needs its label's backing to match,
    or the notch in the outline reads as a white sticker. */
 .card.padded .field > span { background: var(--sc-lowest); }
+.shell .card .field > span, .auth .card .field > span { background: transparent; }
+.shell .card .field:is(:focus-within, .fixed, :has(input:not(:placeholder-shown)), :has(textarea), :has(select)) > span,
+.auth .card .field:is(:focus-within, .fixed, :has(input:not(:placeholder-shown)), :has(textarea), :has(select)) > span {
+  background: var(--field-surface); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 /* A field and the button that submits it, on one line. The fields carry
    bottom margin for stacked forms, and in a flex row that margin is part of
@@ -598,8 +667,8 @@ form.inline { display: inline-flex; margin: 0; }
 .switch { position: relative; display: inline-flex; flex: none; cursor: pointer; }
 .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
 .switch .track { width: 52px; height: 32px; border-radius: 16px; background: var(--sc-highest);
-  box-shadow: inset 0 0 0 2px var(--outline); transition: all .2s var(--ease); display: flex; align-items: center; }
-.switch .thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--outline);
+  box-shadow: inset 0 0 0 2px var(--input-outline); transition: all .2s var(--ease); display: flex; align-items: center; }
+.switch .thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--input-outline);
   margin-left: 6px; transition: all .2s var(--ease); }
 .switch input:checked ~ .track { background: var(--primary); box-shadow: none; }
 .switch input:checked ~ .track .thumb { width: 24px; height: 24px; background: var(--on-primary);
@@ -617,7 +686,7 @@ form.inline { display: inline-flex; margin: 0; }
    none of the head room a label would need. */
 .selbox, .textbox { position: relative; display: inline-flex; flex: none; }
 .selbox select, .textbox input { height: 40px; min-width: 160px; max-width: 260px;
-  border: 1px solid var(--outline); border-radius: 12px; background: transparent; color: var(--on-surface);
+  border: 1px solid var(--input-outline); border-radius: 12px; background: transparent; color: var(--on-surface);
   font-family: inherit; font-size: 13.5px; font-weight: 500; outline: none;
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
 .selbox select { appearance: none; -webkit-appearance: none; padding: 0 38px 0 16px; cursor: pointer; }
@@ -636,10 +705,15 @@ form.inline { display: inline-flex; margin: 0; }
 .search input { flex: 1; min-width: 0; border: none; outline: none; background: transparent;
   font-family: inherit; font-size: 14.5px; color: var(--on-surface); height: 100%; }
 .search .btn { height: 34px; }
+.shell .search { background: var(--glass); border: 1px solid var(--glass-stroke);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-edge); }
+.shell .search:focus-within { border-color: var(--primary); }
 
 /* ---- banners ---- */
 .banner { display: flex; gap: 12px; align-items: flex-start; border-radius: 16px; padding: 14px 18px;
   font-size: 14px; margin-bottom: 12px; }
+.shell .banner { border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  box-shadow: inset 0 1px 0 var(--glass-edge); }
 .banner svg.i { width: 20px; height: 20px; margin-top: 1px; flex: none; }
 /* The message is one flex item: without this wrapper every <code> or <strong>
    inside it becomes its own flex item and the sentence breaks into columns. */
@@ -659,7 +733,9 @@ form.inline { display: inline-flex; margin: 0; }
 .tiles.c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .tiles.c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .tile { background: var(--sc-lowest); border-radius: 24px; padding: 18px 20px; box-shadow: var(--shadow-1); }
-.tile .label { font-size: 13px; font-weight: 500; color: var(--on-surface-variant); }
+.shell .tile { background: var(--glass); border: 1px solid var(--glass-stroke); border-radius: 26px;
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-edge); }
+.tile .label { font-size: 12px; font-weight: 600; color: var(--on-surface-variant); letter-spacing: .025em; }
 .tile .value { font-size: 30px; font-weight: 600; font-variant-numeric: proportional-nums;
   line-height: 1.25; margin-top: 2px; letter-spacing: -.02em; }
 .tile .value .unit { font-size: 13px; font-weight: 500; color: var(--on-surface-variant); letter-spacing: 0; }
@@ -712,6 +788,10 @@ table.tbl td.empty-cell { padding: 32px 16px; text-align: center; color: var(--o
   transition: background var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
 .plan:hover { background: var(--sc-high); box-shadow: var(--shadow-1); }
 .plan.on { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); background: var(--sc-lowest); }
+.shell .plan { background: var(--glass); border-color: var(--glass-stroke);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-edge); }
+.shell .plan:hover { background: var(--glass-strong); }
+.shell .plan.on { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary), var(--glass-shadow); }
 .plan h3 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.2px; color: var(--on-surface); }
 .plan .price { font-size: 30px; font-weight: 600; letter-spacing: -.03em; line-height: 1.2; margin: 6px 0 2px; }
 .plan .price span { font-size: 14px; font-weight: 500; color: var(--on-surface-variant); letter-spacing: 0; }
@@ -757,7 +837,8 @@ table.tbl td.empty-cell { padding: 32px 16px; text-align: center; color: var(--o
   background: var(--primary); color: var(--on-primary); display: grid; place-items: center; margin: 0 auto 20px; }
 .auth-logo span { position: absolute; font-family: var(--font); font-style: normal; font-weight: 600;
   font-size: 22px; line-height: 1; right: 5px; top: 4px; }
-.auth-box h1 { text-align: center; font-size: 26px; font-weight: 600; margin: 0 0 6px; }
+.auth-box h1 { text-align: center; font-family: var(--display); font-optical-sizing: auto;
+  font-size: 31px; line-height: 1.15; font-weight: 600; letter-spacing: -.024em; margin: 0 0 9px; }
 .auth-box .sub { text-align: center; color: var(--on-surface-variant); font-size: 14px; margin: 0 0 24px; }
 .auth-box .card { padding: 26px; }
 .auth-box .btn { width: 100%; height: 46px; font-size: 15px; margin-top: 4px; }
@@ -824,37 +905,40 @@ table.tbl td.empty-cell { padding: 32px 16px; text-align: center; color: var(--o
   .nav-item { width: 44px; height: 44px; padding: 0; margin: 4px auto; gap: 0; justify-content: center; }
   .nav-item .nav-label { position: absolute; width: 1px; height: 1px; overflow: hidden;
     clip: rect(0 0 0 0); white-space: nowrap; }
-  .rail-foot { width: 100%; padding: 14px 0 0; }
-  .who { flex-direction: column; gap: 10px; padding: 6px 0 0; }
+  .rail-foot { width: 100%; padding: 6px 0; }
+  .who { flex-direction: column; gap: 8px; padding: 2px 0; }
   .who-link { margin: 0; padding: 2px; }
   .who-link > div { display: none; }
   /* The popover is wider than the rail here. It opens upward from the
      foot, as on the full rail, but at its own width over the content. */
   .rail .theme-menu .pop { left: 0; right: auto; width: 220px; }
 }
-/* Top strip. */
+/* The compact navigation keeps each destination visible on phones. */
 @media (max-width: 650px) {
   .shell { flex-direction: column; }
-  .rail { width: 100%; height: auto; position: static; flex-direction: column; overflow: visible;
-    padding: 0 0 0; border-right: none;
-    border-bottom: 1px solid color-mix(in srgb, var(--outline-variant) 55%, transparent); }
-  .brand { padding: 14px 10px 10px; margin: 0 6px; min-height: 0; gap: 10px; }
-  .brand-mark { width: 32px; height: 35px; font-size: 30px; border-radius: 10px 10px 10px 3px; }
-  .brand-mark span { font-size: 12px; right: 2px; top: 1px; }
-  .brand b { font-size: 21px; }
-  .brand .tag { font-size: 8px; letter-spacing: 3px; margin-top: 3px; }
-  .rail .nav-scroll { display: flex; flex: none; gap: 4px; margin: 0; overflow-x: auto; overflow-y: hidden;
-    padding: 4px 12px 12px; scrollbar-width: none; scroll-snap-type: x proximity; scroll-padding-inline: 12px; }
-  .rail .nav-scroll::-webkit-scrollbar { display: none; }
-  .nav-item { flex: none; margin: 0; padding: 8px 14px 8px 10px; gap: 8px; scroll-snap-align: start; }
-  .nav-item .ic { display: none; }
-  .rail-foot { margin: 0; padding: 0 12px 10px; }
-  /* The rail's appearance menu opens upward, which is right when the rail is a
-     tall column whose foot sits at the bottom of the screen. As a top strip the
-     same rule would throw the popup off the top of the page, so the strip goes
-     back to the shared default: anchored to the button, opening downward. */
+  .rail { position: static; display: grid; grid-template-columns: minmax(0,1fr) auto;
+    align-items: center; width: 100%; height: auto; padding: 9px;
+    border-right: 0; border-bottom: 1px solid var(--glass-stroke); }
+  .rail > .brand { padding: 5px; margin: 0; gap: 8px; }
+  .rail .brand-mark { width: 32px; height: 35px; font-size: 30px; border-radius: 10px 10px 10px 3px; }
+  .rail .brand-mark span { font-size: 12px; right: 2px; top: 1px; }
+  .rail .brand b { font-size: 20px; }
+  .rail .brand .tag { font-size: 8px; letter-spacing: .18em; margin-top: 2px; }
+  .rail .nav-scroll { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px; margin: 7px 0 0; padding: 2px; overflow: visible; }
+  .rail .nav-item { flex-direction: column; justify-content: center; gap: 3px; min-height: 46px;
+    margin: 0; padding: 4px 1px; border-radius: 13px; font-size: clamp(10.5px, 3vw, 12.5px); }
+  .rail .nav-item .ic { width: 22px; height: 22px; border-radius: 7px; }
+  .rail .nav-item .ic svg { width: 14px; height: 14px; }
+  .rail .nav-item .nav-label { flex: initial; max-width: 100%; }
+  .rail-foot { grid-column: 2; grid-row: 1; margin: 0; padding: 3px; }
+  .rail .who { gap: 2px; padding: 0; }
+  .rail .who-link { flex: none; margin: 0; padding: 3px; }
+  .rail .who-link > div { display: none; }
   .rail .theme-menu { position: relative; }
   .rail .theme-menu .pop { top: calc(100% + 10px); bottom: auto; left: auto; right: 0; width: 220px; }
+  .shell .content { padding-inline: 12px; padding-top: 12px; }
+  .shell .page-head { position: relative; top: auto; padding: 13px 15px; gap: 10px; border-radius: 20px; }
 }
 @media (max-width: 639px) {
   .tiles, .tiles.c3, .tiles.c2 { grid-template-columns: 1fr; }
@@ -881,17 +965,36 @@ table.tbl td.empty-cell { padding: 32px 16px; text-align: center; color: var(--o
 .settings-head .settings-back svg { transform: rotate(180deg); }
 .settings-editor .row { scroll-margin-top: 112px; }
 .settings-editor .row:target { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+.settings-providers details { scroll-margin-top: 112px; }
+.settings-providers details + details, .settings-providers details[open] > .rows { border-top: 1px solid var(--outline-variant); }
+.settings-providers summary.row { cursor: pointer; flex-wrap: nowrap; align-items: center; }
+.settings-providers summary::-webkit-details-marker { display: none; }
+.settings-providers summary:focus-visible { outline: 2px solid var(--primary); outline-offset: -3px; }
+.settings-providers summary > svg { width: 20px; height: 20px; flex: none; order: 3; color: var(--on-surface-variant); }
+.settings-providers details[open] > summary > svg { transform: rotate(180deg); }
 .settings-search-reset { margin: -6px 18px 16px; font-size: 13px; }
 .settings-search-reset a { color: var(--primary); }
 @media (max-width: 639px) {
   .settings-directory.rows .row, .settings-directory .rows .row { flex-wrap: nowrap; align-items: center; }
   .settings-directory.rows .row .body, .settings-directory .rows .row .body { flex: 1; }
   .settings-directory.rows .row .trailing, .settings-directory .rows .row .trailing { flex: none; padding: 0; margin-left: auto; }
-  .settings-head .heading { flex: 1; }
-  .settings-head .actions { padding-left: 56px; }
+  .shell .settings-head { position: sticky; top: 8px; display: grid; align-items: center;
+    grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; }
+  .settings-head .heading .sub { display: none; }
+  .settings-head .actions { width: auto; margin: 0; }
+  .settings-head .actions .btn { height: 36px; padding-inline: 13px; }
+  .settings-head .settings-back { width: 32px; height: 32px; }
+  .settings-editor .row, .settings-providers details { scroll-margin-top: 84px; }
+  .settings-editor .textbox { width: 100%; }
+  .settings-editor .textbox input { max-width: none; }
 }
 
-
+@media (prefers-reduced-transparency: reduce) {
+  .shell, .rail, .auth { --glass-blur: none; }
+  .shell, .auth { --glass: var(--sc-lowest); --glass-strong: var(--sc-lowest); }
+  .shell::before { display: none; }
+  .rail .theme-menu .pop { background: var(--sc); }
+}
 "#;
 
 /// The stylesheet, inlined.
@@ -903,7 +1006,7 @@ pub fn style() -> &'static str {
     static STYLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     STYLE.get_or_init(|| {
         format!(
-            "{BASE}\nhtml.dark {{{DARK}}}\n@media (prefers-color-scheme: dark) {{ html.system {{{DARK}}} }}\n"
+            "{BASE}\nhtml.dark, .rail {{{DARK}}}\n@media (prefers-color-scheme: dark) {{ html.system {{{DARK}}} }}\n"
         )
     })
 }
@@ -1050,8 +1153,9 @@ fn rail(page: &Page) -> String {
         .iter()
         .map(|item| {
             format!(
-                r#"<a class="nav-item{cls}" href="{href}"{target}><span class="ic tint-{tint}">{svg}</span><span class="nav-label">{label}</span></a>"#,
+                r#"<a class="nav-item{cls}" href="{href}"{current}{target}><span class="ic tint-{tint}">{svg}</span><span class="nav-label">{label}</span></a>"#,
                 cls = if item.active { " active" } else { "" },
+                current = if item.active { r#" aria-current="page""# } else { "" },
                 href = attr(&item.href),
                 target = if item.external { r#" target="_blank" rel="noopener""# } else { "" },
                 tint = item.tint,
@@ -1082,7 +1186,7 @@ fn rail(page: &Page) -> String {
             // the link obviously is.
             let block = match &who.href {
                 Some(href) => format!(
-                    r#"<a class="who-link" href="{href}" title="{name} · {detail}">{inner}</a>"#,
+                    r#"<a class="who-link" href="{href}" aria-label="Account for {name}" title="{name} · {detail}">{inner}</a>"#,
                     href = attr(href),
                     name = attr(&who.name),
                     detail = attr(&who.detail),
@@ -1109,7 +1213,7 @@ fn rail(page: &Page) -> String {
     };
 
     format!(
-        r#"<aside class="rail">{brand}<div class="nav-scroll">{links}</div>{foot}</aside>"#,
+        r#"<aside class="rail">{brand}<nav class="nav-scroll" aria-label="Dashboard navigation">{links}</nav>{foot}</aside>"#,
         brand = brand(page.platform, page.tag, page.brand_href),
         links = links,
         foot = foot,

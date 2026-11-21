@@ -1,7 +1,7 @@
-//! Single-use tokens: email verification, password resets, staff invites.
+//! Single-use tokens for email verification, password resets, staff invites,
+//! and Domain Connect approvals.
 //!
-//! One module for all three because the rules are identical, and a token that
-//! can be replayed is the same bug each time. Every one of these is:
+//! The same rules apply to every kind. Every token is:
 //!
 //! * **hashed at rest** — the table holds SHA-256, so a database dump is not a
 //!   set of live password-reset links;
@@ -16,6 +16,7 @@ use sqlx::Row;
 pub const VERIFY_EMAIL: &str = "verify_email";
 pub const RESET_PASSWORD: &str = "reset_password";
 pub const STAFF_INVITE: &str = "staff_invite";
+pub const DOMAIN_CONNECT: &str = "domain_connect";
 
 /// How long each kind lasts.
 ///
@@ -26,6 +27,7 @@ pub const STAFF_INVITE: &str = "staff_invite";
 /// friction with no security gain.
 pub fn ttl_hours(kind: &str) -> i64 {
     match kind {
+        DOMAIN_CONNECT => 1,
         RESET_PASSWORD => 2,
         VERIFY_EMAIL => 72,
         STAFF_INVITE => 168,
@@ -159,6 +161,7 @@ fn expired_message(kind: &str) -> String {
                          Please request a new one."
             .into(),
         STAFF_INVITE => "This invitation has expired or already been accepted.".into(),
+        DOMAIN_CONNECT => "This DNS approval link has expired or already been used. Start setup again from your domain’s page.".into(),
         _ => "This link is no longer valid.".into(),
     }
 }

@@ -122,7 +122,7 @@ impl Provider for Stripe {
         signature::verify_stripe(body, header, self.webhook_secret.as_deref().unwrap_or(""))
     }
 
-    fn event_id(&self, body: &Value) -> String {
+    fn event_id(&self, body: &Value, _headers: &WebhookHeaders) -> String {
         body["id"].as_str().unwrap_or_default().to_string()
     }
 
@@ -196,6 +196,7 @@ impl Provider for Stripe {
                     canceled_at: from_unix(object.get("canceled_at")),
                     account_id: object["metadata"]["account_id"].as_str().map(str::to_string),
                     tenant_id: object["metadata"]["tenant_id"].as_str().map(str::to_string),
+                    ..Default::default()
                 }))
             }
 
@@ -270,8 +271,8 @@ mod tests {
 
     #[test]
     fn reads_the_event_id_for_idempotency() {
-        assert_eq!(stripe().event_id(&json!({"id": "evt_123"})), "evt_123");
-        assert_eq!(stripe().event_id(&json!({})), "");
+        assert_eq!(stripe().event_id(&json!({"id": "evt_123"}), &WebhookHeaders::default()), "evt_123");
+        assert_eq!(stripe().event_id(&json!({}), &WebhookHeaders::default()), "");
     }
 
     #[test]

@@ -1,11 +1,11 @@
 //! Platform subscriptions — what a customer pays *us*.
 //!
-//! Three providers write into this one table, so the vocabulary here is
+//! Payment providers write into this one table, so the vocabulary here is
 //! normalised and provider-neutral: `status` is always one of our six values,
-//! never Stripe's `incomplete_expired` or Lemon Squeezy's `on_trial`. The
+//! never Stripe's `incomplete_expired`. The
 //! translation happens in `pro-billing`, at the edge of the system, which
 //! means everything downstream — entitlement, dunning, the dashboard — is
-//! written once rather than three times.
+//! shared across providers.
 use pro_core::{ids, now_iso, DbErrorExt, ProError, Result, Subscription};
 use crate::Db;
 use sqlx::any::AnyRow;
@@ -25,6 +25,7 @@ fn map(row: &AnyRow) -> Subscription {
         provider: row.get("provider"),
         provider_subscription_id: row.get("provider_subscription_id"),
         provider_customer_id: row.get("provider_customer_id"),
+        provider_version: row.get("provider_version"),
         status: row.get("status"),
         current_period_start: row.get("current_period_start"),
         current_period_end: row.get("current_period_end"),
@@ -38,7 +39,7 @@ fn map(row: &AnyRow) -> Subscription {
 }
 
 const COLS: &str = "id, account_id, tenant_id, plan_slug, provider, provider_subscription_id, \
-                    provider_customer_id, status, current_period_start, current_period_end, \
+                    provider_customer_id, provider_version, status, current_period_start, current_period_end, \
                     trial_ends_at, cancel_at_period_end, canceled_at, past_due_since, \
                     created_at, updated_at";
 
@@ -77,6 +78,16 @@ pub struct Upsert<'a> {
 ///   provider that retries daily would reset the clock every day and a site
 ///   would never be suspended.
 pub async fn upsert(pool: &Db, up: Upsert<'_>) -> Result<Subscription> {
+    upsert_with_version(pool, up, None).await
+}
+
+/// A complete provider snapshot carries its resource revision. Apply the write
+/// only if that revision is still current, including with concurrent deliveries.
+pub async fn upsert_with_version(
+    pool: &Db,
+    up: Upsert<'_>,
+    provider_version: Option<&str>,
+) -> Result<Subscription> {
     if let Some(status) = up.status {
         if !STATUSES.contains(&status) {
             // A provider status that was not translated is a bug in
@@ -108,27 +119,33 @@ pub async fn upsert(pool: &Db, up: Upsert<'_>) -> Result<Subscription> {
                     plan_slug = COALESCE(?, plan_slug), \
                     provider_customer_id = COALESCE(?, provider_customer_id), \
                     status = ?, \
+                    provider_version = COALESCE(?, provider_version), \
                     current_period_start = COALESCE(?, current_period_start), \
                     current_period_end = COALESCE(?, current_period_end), \
                     trial_ends_at = COALESCE(?, trial_ends_at), \
                     cancel_at_period_end = COALESCE(?, cancel_at_period_end), \
-                    canceled_at = COALESCE(?, canceled_at), \
+                    canceled_at = CASE WHEN ? IS NOT NULL THEN ? ELSE COALESCE(?, canceled_at) END, \
                     past_due_since = ?, \
                     updated_at = ? \
-                 WHERE id = ?",
+                 WHERE id = ? AND (? IS NULL OR provider_version IS NULL OR provider_version <= ?)",
             )
             .bind(up.tenant_id)
             .bind(up.plan_slug)
             .bind(up.provider_customer_id)
             .bind(status)
+            .bind(provider_version)
             .bind(up.current_period_start)
             .bind(up.current_period_end)
             .bind(up.trial_ends_at)
             .bind(up.cancel_at_period_end.map(i64::from))
+            .bind(provider_version)
+            .bind(up.canceled_at)
             .bind(up.canceled_at)
             .bind(past_due_since)
             .bind(&now)
             .bind(&current.id)
+            .bind(provider_version)
+            .bind(provider_version)
             .execute(pool)
             .await
             .db_err()?;
@@ -141,8 +158,8 @@ pub async fn upsert(pool: &Db, up: Upsert<'_>) -> Result<Subscription> {
                 "INSERT INTO subscriptions (id, account_id, tenant_id, plan_slug, provider, \
                  provider_subscription_id, provider_customer_id, status, current_period_start, \
                  current_period_end, trial_ends_at, cancel_at_period_end, canceled_at, \
-                 past_due_since, created_at, updated_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 past_due_since, created_at, updated_at, provider_version) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&id)
             .bind(up.account_id)
@@ -160,6 +177,7 @@ pub async fn upsert(pool: &Db, up: Upsert<'_>) -> Result<Subscription> {
             .bind(if status == "past_due" { Some(now.clone()) } else { None })
             .bind(&now)
             .bind(&now)
+            .bind(provider_version)
             .execute(pool)
             .await
             .db_err()?;
@@ -202,7 +220,7 @@ pub async fn for_tenant(pool: &Db, tenant_id: &str) -> Result<Option<Subscriptio
     let row = sqlx::query(&format!(
         "SELECT {COLS} FROM subscriptions WHERE tenant_id = ? \
          ORDER BY CASE WHEN status IN ('trialing','active','past_due') THEN 0 ELSE 1 END, \
-                  created_at DESC LIMIT 1"
+                  CASE WHEN provider = 'manual' THEN 1 ELSE 0 END, created_at DESC LIMIT 1"
     ))
     .bind(tenant_id)
     .fetch_optional(pool)
@@ -252,7 +270,9 @@ pub async fn past_due_beyond_grace(
         "SELECT {COLS} FROM subscriptions s \
          WHERE s.status = 'past_due' AND s.past_due_since IS NOT NULL \
            AND s.past_due_since <= ? AND s.tenant_id IS NOT NULL \
-           AND EXISTS (SELECT 1 FROM tenants t WHERE t.id = s.tenant_id AND t.status = 'active')"
+           AND EXISTS (SELECT 1 FROM tenants t WHERE t.id = s.tenant_id AND t.status = 'active') \
+           AND NOT EXISTS (SELECT 1 FROM subscriptions other WHERE other.tenant_id = s.tenant_id \
+             AND other.provider <> 'manual' AND other.status IN ('active', 'trialing'))"
     ))
     .bind(cutoff)
     .fetch_all(pool)
@@ -273,7 +293,9 @@ pub async fn expired_trials(pool: &Db) -> Result<Vec<(Subscription, String)>> {
     let rows = sqlx::query(&format!(
         "SELECT {COLS} FROM subscriptions s \
          WHERE s.status = 'trialing' AND s.trial_ends_at IS NOT NULL \
-           AND s.trial_ends_at <= ? AND s.tenant_id IS NOT NULL"
+           AND s.trial_ends_at <= ? AND s.tenant_id IS NOT NULL AND s.provider <> 'polar' \
+           AND NOT EXISTS (SELECT 1 FROM subscriptions other WHERE other.tenant_id = s.tenant_id \
+             AND other.id <> s.id AND other.provider <> 'manual' AND other.status IN ('active', 'trialing'))"
     ))
     .bind(now_iso())
     .fetch_all(pool)

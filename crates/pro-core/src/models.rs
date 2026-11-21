@@ -421,11 +421,13 @@ pub struct Subscription {
     pub tenant_id: Option<String>,
     pub plan_slug: String,
     /// Which provider holds this subscription: `stripe`, `paddle`,
-    /// `lemonsqueezy`, `gumroad`, or `manual` for one an operator granted.
+    /// `polar`, `gumroad`, or `manual` for one an operator granted.
     pub provider: String,
     /// The subscription's id at that provider.
     pub provider_subscription_id: Option<String>,
     pub provider_customer_id: Option<String>,
+    #[serde(skip)]
+    pub provider_version: Option<String>,
     /// `trialing`, `active`, `past_due`, `paused`, `canceled`, `expired`.
     /// Normalised across providers, which all name these differently.
     pub status: String,

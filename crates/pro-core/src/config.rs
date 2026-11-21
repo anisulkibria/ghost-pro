@@ -73,10 +73,34 @@ pub struct Config {
     /// from the same place — the common single-machine case.
     #[serde(default)]
     pub public_addresses: Vec<String>,
+    /// Signing credentials for the published Domain Connect templates.
+    #[serde(default)]
+    pub domain_connect: Option<DomainConnectConfig>,
     #[serde(skip)]
     pub env: String,
     #[serde(skip)]
     pub base_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DomainConnectConfig {
+    /// Published template provider identifier. Defaults to vuuut.com.
+    #[serde(default = "default_domain_connect_provider")]
+    pub provider_id: String,
+    /// PKCS#8 RSA PEM path, relative to the deployment directory.
+    pub private_key_file: PathBuf,
+    /// DNS label that identifies the signing public key.
+    #[serde(default = "default_domain_connect_key")]
+    pub key_id: String,
+}
+
+fn default_domain_connect_provider() -> String {
+    "vuuut.com".into()
+}
+
+fn default_domain_connect_key() -> String {
+    "_dcpubkeyv1".into()
 }
 
 /// The control plane's own listeners.
@@ -307,6 +331,9 @@ impl Default for SslConfig {
     }
 }
 
+/// Provider slugs supported for hosted billing.
+pub const BILLING_PROVIDERS: &[&str] = &["stripe", "paddle", "polar", "gumroad"];
+
 /// Which payment provider the platform sells through, and the keys for it.
 ///
 /// All four are configured at once if an operator wants; `provider` picks the
@@ -317,7 +344,7 @@ impl Default for SslConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BillingConfig {
-    /// `stripe`, `paddle`, `lemonsqueezy`, `gumroad`, or `none`.
+    /// `stripe`, `paddle`, `polar`, `gumroad`, or `none`.
     ///
     /// `none` is a platform that does not charge — an internal deployment, or
     /// one where an operator provisions every tenant by hand. Signup still
@@ -341,7 +368,7 @@ pub struct BillingConfig {
     #[serde(default)]
     pub paddle: PaddleConfig,
     #[serde(default)]
-    pub lemonsqueezy: LemonSqueezyConfig,
+    pub polar: PolarConfig,
     #[serde(default)]
     pub gumroad: GumroadConfig,
 }
@@ -354,7 +381,7 @@ impl Default for BillingConfig {
             dunning_grace_days: default_grace_days(),
             stripe: StripeConfig::default(),
             paddle: PaddleConfig::default(),
-            lemonsqueezy: LemonSqueezyConfig::default(),
+            polar: PolarConfig::default(),
             gumroad: GumroadConfig::default(),
         }
     }
@@ -401,18 +428,24 @@ pub struct PaddleConfig {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LemonSqueezyConfig {
-    #[serde(default, alias = "apiKey")]
-    pub api_key: Option<String>,
-    /// The store a checkout is created in.
-    #[serde(default, alias = "storeId")]
-    pub store_id: Option<String>,
-    /// Signing secret for `X-Signature`.
-    #[serde(default, alias = "webhookSecret")]
+pub struct PolarConfig {
+    /// Organization access token for the selected environment.
+    #[serde(default)]
+    pub access_token: Option<String>,
+    /// Secret from the Polar webhook endpoint or the local Polar CLI.
+    #[serde(default)]
     pub webhook_secret: Option<String>,
-    /// Lemon Squeezy's own test mode, set per checkout.
-    #[serde(default, alias = "testMode")]
-    pub test_mode: bool,
+    /// Use sandbox-api.polar.sh for test payments.
+    #[serde(default)]
+    pub sandbox: bool,
+}
+
+impl PolarConfig {
+    pub fn is_configured(&self) -> bool {
+        [self.access_token.as_deref(), self.webhook_secret.as_deref()]
+            .into_iter()
+            .all(|value| value.is_some_and(|text| !text.trim().is_empty()))
+    }
 }
 
 /// Gumroad.
@@ -695,12 +728,12 @@ impl Config {
         if self.tenants.port_ceiling <= self.tenants.port_floor {
             return Err(ProError::Config("tenants.portCeiling must exceed tenants.portFloor".into()));
         }
-        const KNOWN_PROVIDERS: &[&str] =
-            &["none", "stripe", "paddle", "lemonsqueezy", "gumroad"];
-        if !KNOWN_PROVIDERS.contains(&self.billing.provider.as_str()) {
+        if self.billing.provider != "none"
+            && !BILLING_PROVIDERS.contains(&self.billing.provider.as_str())
+        {
             return Err(ProError::Config(format!(
-                "billing.provider must be one of {}: got {}",
-                KNOWN_PROVIDERS.join(", "),
+                "billing.provider must be none or one of {}: got {}",
+                BILLING_PROVIDERS.join(", "),
                 self.billing.provider
             )));
         }
@@ -722,16 +755,11 @@ impl Config {
                     ));
                 }
             }
-            "lemonsqueezy" => {
-                let ls = &self.billing.lemonsqueezy;
-                if ls.api_key.is_none() {
+            "polar" => {
+                if !self.billing.polar.is_configured() {
                     return Err(ProError::Config(
-                        "billing.provider is lemonsqueezy but billing.lemonsqueezy.apiKey is unset".into(),
-                    ));
-                }
-                if ls.store_id.is_none() {
-                    return Err(ProError::Config(
-                        "billing.provider is lemonsqueezy but billing.lemonsqueezy.storeId is unset".into(),
+                        "billing.provider is polar but billing.polar.accessToken or \
+                         billing.polar.webhookSecret is unset".into(),
                     ));
                 }
             }
@@ -1239,9 +1267,8 @@ fn set_path(cfg: &mut serde_json::Value, path: &[String], val: serde_json::Value
 /// Objects and arrays are parsed, which is the difference from Ghost's loader
 /// and the reason this platform can set a whole plan or a provider's keys from
 /// the environment. Everything else is scalar-parsed, with one deliberate
-/// exception: a string of digits long enough to be an id — a Lemon Squeezy
-/// variant, a Paddle numeric — stays a string, because turning `"812345"`
-/// into `812345` makes it compare unequal to the id every API returns.
+/// exception: a long numeric identifier stays a string so it still matches
+/// the identifier returned by the provider.
 fn parse_env_value(v: &str) -> serde_json::Value {
     let t = v.trim();
     match t {
@@ -1431,6 +1458,7 @@ mod tests {
             plans: default_plans(),
             reserved_slugs: vec!["acme".into()],
             public_addresses: vec![],
+            domain_connect: None,
             env: "production".into(),
             base_dir: PathBuf::from("/srv/pro"),
         }
@@ -1508,13 +1536,13 @@ mod tests {
     }
 
     #[test]
-    fn validates_lemonsqueezy_needs_a_store() {
+    fn validates_polar_needs_a_signing_secret() {
         let mut c = cfg();
-        c.billing.provider = "lemonsqueezy".into();
-        c.billing.lemonsqueezy.api_key = Some("key".into());
-        c.plans[0].price_ids.insert("lemonsqueezy".into(), "812345".into());
-        assert!(c.validate().is_err(), "store id is required to create a checkout");
-        c.billing.lemonsqueezy.store_id = Some("1".into());
+        c.billing.provider = "polar".into();
+        c.billing.polar.access_token = Some("key".into());
+        c.plans[0].price_ids.insert("polar".into(), "07521167-2b19-420a-9714-754d4b1d84ac".into());
+        assert!(c.validate().is_err(), "a signing secret is required to process payments");
+        c.billing.polar.webhook_secret = Some("secret".into());
         assert!(c.validate().is_ok());
     }
 
@@ -1574,9 +1602,7 @@ mod tests {
         assert_eq!(parse_env_value("hello"), serde_json::json!("hello"));
     }
 
-    /// Provider ids are strings even when they are all digits. Coercing a
-    /// Lemon Squeezy variant id to a number makes it compare unequal to the
-    /// string the API returns.
+    /// Provider ids are strings even when they are all digits.
     #[test]
     fn numeric_looking_ids_stay_strings() {
         assert_eq!(parse_env_value("0123"), serde_json::json!("0123"));

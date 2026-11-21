@@ -7,7 +7,7 @@
 //! |---|---|---|
 //! | Stripe | `Stripe-Signature: t=…,v1=…` | `"{t}.{body}"` |
 //! | Paddle | `Paddle-Signature: ts=…;h1=…` | `"{ts}:{body}"` |
-//! | Lemon Squeezy | `X-Signature: …` | the body alone |
+//! | Polar | `webhook-id`, `webhook-timestamp`, `webhook-signature` | `"{id}.{ts}.{body}"` |
 //!
 //! Three rules apply to all of them, and each one is a real vulnerability if
 //! broken:
@@ -80,13 +80,13 @@ fn check_age(timestamp: &str) -> Result<()> {
     // Only the past is bounded tightly; a slightly future timestamp is clock
     // skew on the provider's side, which is not an attack and not worth
     // rejecting a real event over.
-    if now - ts > MAX_AGE_SECS {
+    if ts < now - MAX_AGE_SECS {
         return Err(ProError::BadRequest(format!(
             "webhook is {}s old, beyond the {MAX_AGE_SECS}s replay window",
-            now - ts
+            now.saturating_sub(ts)
         )));
     }
-    if ts - now > MAX_AGE_SECS {
+    if ts > now + MAX_AGE_SECS {
         return Err(ProError::BadRequest("webhook timestamp is in the future".into()));
     }
     Ok(())
@@ -171,28 +171,46 @@ pub fn verify_paddle(body: &[u8], header: &str, secret: &str) -> Result<()> {
     }
 }
 
-/// Verify Lemon Squeezy's `X-Signature`.
-///
-/// The simplest of the three: HMAC of the raw body, hex, no timestamp.
-///
-/// That also means Lemon Squeezy webhooks carry **no replay protection of
-/// their own** — a captured delivery stays valid indefinitely as far as the
-/// signature is concerned. The event-id idempotency in
-/// `pro_db::audit::claim_webhook` is what closes that gap, and for this
-/// provider it is not an optimisation but the only defence. It is the reason
-/// that table has a unique index rather than a best-effort cache.
-pub fn verify_lemonsqueezy(body: &[u8], header: &str, secret: &str) -> Result<()> {
+/// Verify Polar's Standard Webhooks headers over the original body.
+pub fn verify_polar(
+    body: &[u8],
+    headers: &crate::WebhookHeaders,
+    secret: &str,
+) -> Result<()> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use hmac::{Hmac, Mac};
+
     if secret.is_empty() {
-        return Err(ProError::Config(
-            "billing.lemonsqueezy.webhookSecret is unset, so webhooks cannot be verified".into(),
-        ));
+        return Err(ProError::Config("billing.polar.webhookSecret is unset".into()));
     }
-    let expected = hmac_sha256_hex(secret.as_bytes(), body);
-    if ids::constant_time_eq(header.trim(), &expected) {
-        Ok(())
-    } else {
-        Err(ProError::Forbidden("webhook signature does not match".into()))
+    let id = headers.webhook_id.as_deref().filter(|id| !id.is_empty())
+        .ok_or_else(|| ProError::BadRequest("missing webhook-id header".into()))?;
+    let timestamp = headers.webhook_timestamp.as_deref()
+        .ok_or_else(|| ProError::BadRequest("missing webhook-timestamp header".into()))?;
+    let signatures = headers.webhook_signature.as_deref()
+        .ok_or_else(|| ProError::BadRequest("missing webhook-signature header".into()))?;
+    check_age(timestamp)?;
+
+    // Polar supports both literal secrets and Standard Webhooks whsec_ keys.
+    let decoded = secret.strip_prefix("whsec_").and_then(|key| STANDARD.decode(key).ok())
+        .filter(|key| !key.is_empty());
+    let keys = [Some(secret.as_bytes()), decoded.as_deref()];
+    for key in keys.into_iter().flatten() {
+        let mut mac = Hmac::<sha2::Sha256>::new_from_slice(key).map_err(ProError::internal)?;
+        mac.update(id.as_bytes());
+        mac.update(b".");
+        mac.update(timestamp.as_bytes());
+        mac.update(b".");
+        mac.update(body);
+        if signatures.split_ascii_whitespace()
+            .filter_map(|signature| signature.strip_prefix("v1,"))
+            .filter_map(|signature| STANDARD.decode(signature).ok())
+            .any(|signature| mac.clone().verify_slice(&signature).is_ok())
+        {
+            return Ok(());
+        }
     }
+    Err(ProError::Forbidden("webhook signature does not match".into()))
 }
 
 #[cfg(test)]
@@ -340,22 +358,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn lemonsqueezy_accepts_a_valid_signature() {
-        let sig = hmac_sha256_hex(SECRET.as_bytes(), BODY);
-        assert!(verify_lemonsqueezy(BODY, &sig, SECRET).is_ok());
-        // Whitespace from a header must not matter.
-        assert!(verify_lemonsqueezy(BODY, &format!("  {sig}  "), SECRET).is_ok());
-    }
-
-    #[test]
-    fn lemonsqueezy_rejects_a_bad_signature() {
-        assert_eq!(verify_lemonsqueezy(BODY, "deadbeef", SECRET).unwrap_err().status(), 403);
-        assert!(verify_lemonsqueezy(BODY, "", SECRET).is_err());
-        let sig = hmac_sha256_hex(SECRET.as_bytes(), BODY);
-        assert!(verify_lemonsqueezy(br#"{"tampered":true}"#, &sig, SECRET).is_err());
-    }
-
     /// An unconfigured secret must refuse, never pass. This is the single most
     /// important assertion in the module: failing open here hands anybody who
     /// can reach the endpoint the ability to grant themselves a subscription.
@@ -365,7 +367,7 @@ mod tests {
         let stripe = stripe_header(BODY, ts, SECRET);
         assert!(verify_stripe(BODY, &stripe, "").is_err());
         assert!(verify_paddle(BODY, &format!("ts={ts};h1=abc"), "").is_err());
-        assert!(verify_lemonsqueezy(BODY, &hmac_sha256_hex(b"", BODY), "").is_err());
+        assert!(verify_polar(BODY, &crate::WebhookHeaders::default(), "").is_err());
     }
 
     /// The signature covers the exact bytes sent. Re-serialised JSON — same

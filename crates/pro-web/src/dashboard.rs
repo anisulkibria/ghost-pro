@@ -391,11 +391,8 @@ async fn create_site_inner(
         ));
     }
 
-    let plan = live
-        .config()
-        .plan(form.plan.trim())
-        .ok_or_else(|| ProError::BadRequest("Choose a plan.".into()))?
-        .clone();
+    let plan = live.plan(form.plan.trim())
+        .ok_or_else(|| ProError::BadRequest("Choose a plan.".into()))?;
 
     let title = form.title.trim();
     if title.is_empty() {
@@ -420,7 +417,15 @@ async fn create_site_inner(
     // is built, so a platform that demands payment it cannot actually take
     // fails here rather than leaving a site nobody can pay for.
     let payment_first = live.require_payment_up_front() && live.billing_provider() != "none";
-    let provider = if payment_first { Some(pro_billing::require(&live)?) } else { None };
+    let provider = if payment_first {
+        let provider = pro_billing::require(&live)?;
+        if !plan.is_purchasable(provider.name()) {
+            return Err(ProError::BadRequest("That plan is not available for checkout.".into()));
+        }
+        Some(provider)
+    } else {
+        None
+    };
 
     let period_start = pro_core::now_iso();
     let tenant = pro_provision::create_site(
@@ -627,15 +632,35 @@ async fn pay_site_inner(state: &AppState, headers: &HeaderMap, id: &str) -> Resu
     let tenant = auth::owned_tenant(state, &account, id).await?;
     let live = state.live();
 
-    // Only a site billing has closed. An operator's suspension is not a thing
-    // a customer can pay their way out of.
-    if !tenant.is_suspended_for_billing() {
+    let subscription = pro_db::subscriptions::for_tenant(&state.db, &tenant.id).await?;
+    let open_polar_trial = tenant.status == TenantStatus::Active
+        && live.billing_provider() == "polar"
+        && subscription.as_ref().is_some_and(|sub| {
+            sub.provider == "manual" && matches!(sub.status.as_str(), "trialing" | "past_due")
+        });
+    if !tenant.is_suspended_for_billing() && !open_polar_trial {
         return Err(ProError::BadRequest(
             "This site is not waiting for a payment.".into(),
         ));
     }
 
     let provider = pro_billing::require(&live)?;
+    if let Some(subscription) = subscription.filter(|sub| {
+        sub.is_entitled() && sub.provider_subscription_id.is_some()
+    }) {
+        if subscription.provider == "polar" {
+            let billing = pro_billing::build("polar", &live).ok_or_else(|| {
+                ProError::Unavailable("Polar is unavailable. Contact support for help with billing.".into())
+            })?;
+            if let Some(url) = billing.management_url(&subscription).await? {
+                return Ok(reply::redirect(&url));
+            }
+        } else if provider.name() == "polar" {
+            return Err(ProError::Conflict(
+                "This site still has a subscription with another provider. Contact support to move it.".into(),
+            ));
+        }
+    }
     let plan = live
         .plan(&tenant.plan_slug)
         .ok_or_else(|| ProError::Config(format!("plan {:?} is gone", tenant.plan_slug)))?;
@@ -1027,13 +1052,14 @@ async fn domains_section(
             format!(
                 r#"<div class="card padded" style="margin-bottom:12px">
 <p class="pop-title" style="margin:0 0 4px;padding:0">Point {domain} here</p>
-<p class="hint" style="margin:0 0 14px">Add these records at your domain provider.{last_error}</p>
+<p class="hint" style="margin:0 0 14px">Add these records with your DNS host. <a href="/dashboard/domains/{id}">Find your DNS host and see the setup steps</a>.{last_error}</p>
 <div class="tbl-wrap"><table class="tbl">
 <thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Note</th></tr></thead>
 <tbody>{records}</tbody></table></div>
 <p class="hint">DNS changes can take up to an hour. We check automatically, and your
 certificate is issued as soon as the records are visible.</p></div>"#,
                 domain = esc(&domain.domain),
+                id = attr(&domain.id),
                 last_error = domain
                     .last_error
                     .as_deref()

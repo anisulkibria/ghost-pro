@@ -14,6 +14,7 @@
 //! TLS and certificate issuance live in the `pro` binary alongside the rest of
 //! the serving setup, for the same reason Vuuut keeps them in its own
 //! `serve` module: it is the one place that has to own the listener.
+pub mod domain_connect;
 pub mod dns;
 pub mod forward;
 pub mod router;

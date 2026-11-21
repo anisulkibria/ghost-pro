@@ -12,10 +12,11 @@
 //! effects (rewriting the site's `url`, flushing the edge's host cache, the
 //! audit trail) must not drift apart between the two.
 use axum::extract::{Form, Path, Query, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, Method};
 use axum::response::Response;
 use pro_core::{Domain, DomainKind, DomainStatus, ProError, Result, StaffRole, Tenant};
 use pro_db::domains::DomainListing;
+use pro_proxy::{dns, domain_connect::{self, Authority}};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -187,12 +188,6 @@ fn pill_for(l: &DomainListing) -> String {
 
 const PRIMARY_CHIP: &str = r#" <span class="chip tonal">Primary</span>"#;
 
-/// An apex is `example.com`; anything with more labels is a subdomain and can
-/// take a `CNAME`. Matches `pro_proxy::dns::instructions`.
-fn is_apex(host: &str) -> bool {
-    host.matches('.').count() <= 1
-}
-
 /// The sentence at the top of a domain's page: what state it is in, in words,
 /// and what — if anything — its owner has to do about it.
 fn status_banner(state: &AppState, panel: Panel, l: &DomainListing) -> String {
@@ -253,9 +248,15 @@ fn status_banner(state: &AppState, panel: Panel, l: &DomainListing) -> String {
     }
 }
 
+#[derive(Default)]
+struct DnsSetup<'a> {
+    authority: Option<&'a Authority>,
+    approval: Option<&'a str>,
+}
+
 /// The DNS card: what to publish, or, for a built-in address, that there is
 /// nothing to publish.
-fn dns_section(state: &AppState, panel: Panel, l: &DomainListing) -> String {
+fn dns_section(state: &AppState, panel: Panel, l: &DomainListing, setup: DnsSetup<'_>) -> String {
     let d = &l.domain;
     let mut out = view::section("DNS");
 
@@ -273,12 +274,50 @@ fn dns_section(state: &AppState, panel: Panel, l: &DomainListing) -> String {
     }
 
     let expect = crate::domain_expectation(state);
-    let dns = pro_proxy::dns::instructions(&d.domain, &d.verification_token, &expect);
+    let zone = setup.authority.map(|authority| authority.zone.as_str());
+    let provider = setup.authority.and_then(|authority| authority.provider);
+    let instructions = dns::instructions_for_zone(&d.domain, &d.verification_token, &expect, zone);
+    if matches!(panel, Panel::Customer) && d.status != DomainStatus::Active {
+        let button = if let (Some(provider), Some(url)) = (provider, setup.approval) {
+            format!(
+                r#"<a class="btn tonal small" rel="noreferrer" href="{}">Continue to {}</a>"#,
+                attr(url),
+                esc(provider.name())
+            )
+        } else {
+            view::action_button(
+                &format!("/dashboard/domains/{}/dns/setup", d.id),
+                "Connect automatically",
+                "small",
+                None,
+            )
+        };
+        let (title, description) = match setup.authority {
+            Some(authority) => (
+                match authority.provider {
+                    Some(provider) => format!("DNS hosted by {}", provider.name()),
+                    None => format!("DNS zone {}", authority.zone),
+                },
+                format!("<strong>{}</strong> · {}", esc(&authority.zone), esc(&authority.nameservers.join(", "))),
+            ),
+            None => (
+                "Automatic DNS setup".into(),
+                "Vuuut Pro checks your domain’s nameservers to find the DNS host and its setup options.".into(),
+            ),
+        };
+        out.push_str(&view::rows(&view::row(
+            "dns",
+            "blue",
+            &title,
+            &description,
+            &button,
+        )));
+    }
 
     // An apex needs A records, and they can only be given if the platform knows
     // its own public address. Without one the table would list only the TXT
     // record and the customer would be left with nothing that routes traffic.
-    if is_apex(&d.domain) && expect.addresses.is_empty() {
+    if dns::is_apex(&d.domain, zone) && expect.addresses.is_empty() {
         out.push_str(&view::banner(
             BannerKind::Warn,
             &match panel {
@@ -297,7 +336,7 @@ fn dns_section(state: &AppState, panel: Panel, l: &DomainListing) -> String {
         ));
     }
 
-    let records: String = dns
+    let records: String = instructions
         .records
         .iter()
         .map(|r| {
@@ -312,26 +351,47 @@ fn dns_section(state: &AppState, panel: Panel, l: &DomainListing) -> String {
         })
         .collect();
 
-    let hint = if d.status == DomainStatus::Active {
-        "Keep these records in place. Removing them takes this address offline."
+    let manual = if d.status == DomainStatus::Active {
+        r#"<p class="hint">Keep the routing records in place to keep this address connected.</p>"#
+            .into()
     } else {
-        "Add these at your domain provider. DNS changes can take up to an hour to be visible."
+        let dashboard = provider
+            .map(|provider| {
+                format!(
+                    r#" <a href="{}" target="_blank" rel="noopener noreferrer">Open {} DNS</a>."#,
+                    attr(provider.dns_dashboard()),
+                    esc(provider.name())
+                )
+            })
+            .unwrap_or_default();
+        let proxy = if provider == Some(domain_connect::Provider::Cloudflare) {
+            r#" In Cloudflare, set the routing records to <strong>DNS only</strong>."#
+        } else {
+            ""
+        };
+        format!(
+            r#"<h3>Set up DNS manually</h3>
+<ol class="hint" style="padding-left:20px;margin:0 0 14px">
+<li>Sign in to the provider that hosts your DNS and open the domain’s DNS records.{dashboard}</li>
+<li>Add each routing record shown below. Copy its <strong>Type</strong>, <strong>Name</strong> (sometimes called Host), and <strong>Value</strong> (sometimes called Target). Use <code>@</code> for the root domain and leave TTL at its default.{proxy}</li>
+<li>Add the optional TXT record if you want to verify ownership before pointing traffic to Vuuut Pro.</li>
+<li>Save the records, then return here and select <strong>Check now</strong>. DNS updates can take time to appear.</li>
+</ol>"#
+        )
     };
     let check = if d.status != DomainStatus::Active {
-        view::action_button(&panel.action(d, "check"), "Check now", "tonal small", None)
+        format!(
+            r#"<div style="margin-top:14px">{}</div>"#,
+            view::action_button(&panel.action(d, "check"), "Check now", "tonal small", None)
+        )
     } else {
         String::new()
     };
     out.push_str(&format!(
         r#"<div class="card padded">
-<div class="inline-form" style="justify-content:space-between;align-items:center;margin-bottom:12px">
-<p class="hint" style="margin:0">{hint}</p>{check}</div>
-<div class="tbl-wrap"><table class="tbl">
+{manual}<div class="tbl-wrap"><table class="tbl">
 <thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Note</th></tr></thead>
-<tbody>{records}</tbody></table></div></div>"#,
-        hint = esc(hint),
-        check = check,
-        records = records,
+<tbody>{records}</tbody></table></div>{check}</div>"#,
     ));
     out
 }
@@ -547,6 +607,7 @@ async fn detail_body(
     panel: Panel,
     l: &DomainListing,
     can_write: bool,
+    setup: DnsSetup<'_>,
 ) -> Result<String> {
     let d = &l.domain;
 
@@ -604,7 +665,7 @@ async fn detail_body(
     ));
     body.push_str("</div>");
 
-    body.push_str(&dns_section(state, panel, l));
+    body.push_str(&dns_section(state, panel, l, setup));
     body.push_str(&https_section(state, panel, l));
     body.push_str(&manage_section(panel, l, can_write));
     body.push_str(&history_section(state, panel, l).await?);
@@ -723,8 +784,8 @@ async fn customer_list_inner(
                 &format!(
                     r#"<div class="inline-form">{site}{field}
 <button class="btn" type="submit">{add} Add domain</button></div>
-<p class="hint">For example <code>blog.yourcompany.com</code>, or <code>yourcompany.com</code>.
-You will be shown the DNS records to add next.</p>"#,
+<p class="hint">For example <code>blog.yourcompany.com</code> or <code>yourcompany.com</code>.
+After adding the domain, you can find its DNS provider and see the records to copy for manual setup.</p>"#,
                     site = view::select("site", "Site", &options, None, false),
                     field = view::field("domain", "Your own domain", "text", "", None, true),
                     add = view::svg("add"),
@@ -762,7 +823,7 @@ pub async fn customer_connect(
             crate::dashboard::add_domain_inner(&state, &headers, &form.site, &form.domain).await?;
         Ok(redirect_with(
             &format!("/dashboard/domains/{}", added.id),
-            Flash::ok(format!("{} added. Now point its DNS here.", added.domain)),
+            Flash::ok(format!("{} added. Set up its DNS to connect it.", added.domain)),
         ))
     }.await)
 }
@@ -779,23 +840,171 @@ pub async fn customer_detail(
         &chrome,
         async {
             let account = auth::account(&state, &headers).await?;
-            let listing = pro_db::domains::listing(&state.db, &id).await?;
-            if listing.account_id != account.id {
-                return Err(ProError::NotFound("No such domain.".into()));
-            }
-            let body = detail_body(&state, Panel::Customer, &listing, true).await?;
-            Ok(crate::dashboard::shell(
+            let listing = customer_domain(&state, &account, &id).await?;
+            render_customer_domain(
                 &state,
                 chrome.theme,
-                &listing.domain.domain,
-                crate::dashboard::Tab::Domains,
                 &account,
+                &listing,
+                DnsSetup::default(),
                 Flash::from_query(&query).as_ref(),
-                &body,
-            ))
+            )
+            .await
         }
         .await,
     )
+}
+
+async fn customer_domain(
+    state: &AppState,
+    account: &pro_core::Account,
+    id: &str,
+) -> Result<DomainListing> {
+    let listing = pro_db::domains::listing(&state.db, id).await?;
+    if listing.account_id != account.id {
+        return Err(ProError::NotFound("No such domain.".into()));
+    }
+    Ok(listing)
+}
+
+async fn render_customer_domain(
+    state: &AppState,
+    theme: Theme,
+    account: &pro_core::Account,
+    listing: &DomainListing,
+    setup: DnsSetup<'_>,
+    flash: Option<&Flash>,
+) -> Result<Response> {
+    let body = detail_body(state, Panel::Customer, listing, true, setup).await?;
+    Ok(crate::dashboard::shell(
+        state,
+        theme,
+        &listing.domain.domain,
+        crate::dashboard::Tab::Domains,
+        account,
+        flash,
+        &body,
+    ))
+}
+
+fn connect_config(state: &AppState) -> Option<&pro_core::config::DomainConnectConfig> {
+    state
+        .config
+        .domain_connect
+        .as_ref()
+        .filter(|_| state.config.url.starts_with("https://") && !state.config.host_is_local())
+}
+
+pub async fn customer_dns_setup(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    method: Method,
+) -> Response {
+    let chrome = state.chrome(&headers);
+    let back = Panel::Customer.domain_href(&id);
+    let start_approval = method == Method::POST;
+    let result = async {
+        if start_approval {
+            auth::require_same_origin(&headers, &state.config.host())?;
+        }
+        let account = auth::account(&state, &headers).await?;
+        let listing = customer_domain(&state, &account, &id).await?;
+        let domain = &listing.domain;
+        if domain.kind != DomainKind::Custom || domain.status == DomainStatus::Active {
+            if !start_approval {
+                return Ok(reply::redirect(&back));
+            }
+            return Err(ProError::BadRequest("This domain is already connected.".into()));
+        }
+
+        let authority = domain_connect::detect(&domain.domain).await.unwrap_or(None);
+        let config = connect_config(&state);
+        if let (true, Some(config), Some(authority)) = (start_approval, config, &authority) {
+            let expect = crate::domain_expectation(&state);
+            if let Some(approval) = domain_connect::Approval::discover(&domain.domain, authority, &expect, config).await {
+                let token = pro_db::tokens::issue(
+                    &state.db, pro_db::tokens::DOMAIN_CONNECT, "account", &account.id,
+                    serde_json::json!({ "domain_id": domain.id }),
+                ).await?;
+                // Cloudflare does not echo the optional state parameter.
+                // Put the single-use account-bound token in the signed return path.
+                let callback = state.url(&format!("{back}/dns/finish/{token}"));
+                match approval.signed_url(&callback, &domain.verification_token, config, &state.config.base_dir) {
+                    Ok(url) => {
+                        // Navigate via a link so the dashboard's same-origin
+                        // form policy also works in browsers that check redirects.
+                        let setup = DnsSetup { authority: Some(authority), approval: Some(url.as_str()) };
+                        let hint = Flash::ok("Continue to your DNS provider and approve the records to connect your domain.");
+                        return render_customer_domain(&state, chrome.theme, &account, &listing, setup, Some(&hint)).await;
+                    }
+                    Err(error) => tracing::warn!("{error}"),
+                }
+            }
+        }
+
+        let notice = match &authority {
+            Some(authority) if authority.provider.is_none() => Some(
+                "Use the nameservers shown below to find your DNS provider, then follow the manual steps.",
+            ),
+            Some(_) if config.is_none() => Some(
+                "DNS provider detected. Automatic approval requires a public HTTPS address and a configured Domain Connect integration. Follow the manual steps below.",
+            ),
+            Some(_) if start_approval => Some(
+                "Automatic setup is unavailable for this domain. Follow the manual steps below.",
+            ),
+            Some(_) => None,
+            None => Some(
+                "We couldn’t find the DNS provider. Use the manual steps at the provider listed in your domain’s nameserver settings.",
+            ),
+        };
+        let hint = notice.map(Flash::warn);
+        let setup = DnsSetup { authority: authority.as_ref(), approval: None };
+        render_customer_domain(&state, chrome.theme, &account, &listing, setup, hint.as_ref()).await
+    }.await;
+    if start_approval {
+        reply::or_redirect(&back, &chrome, result)
+    } else {
+        reply::or_page_or_signin("/dashboard/signin", &chrome, result)
+    }
+}
+
+#[derive(Deserialize)]
+pub struct DomainConnectReturn {
+    error: Option<String>,
+}
+
+pub async fn customer_dns_finished(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, token)): Path<(String, String)>,
+    Query(query): Query<DomainConnectReturn>,
+) -> Response {
+    let chrome = state.chrome(&headers);
+    let back = Panel::Customer.domain_href(&id);
+    reply::or_redirect(&back, &chrome, async {
+        let account = auth::account(&state, &headers).await?;
+        let listing = customer_domain(&state, &account, &id).await?;
+        if listing.domain.kind != DomainKind::Custom {
+            return Err(ProError::NotFound("No such custom domain.".into()));
+        }
+        let claim = pro_db::tokens::consume(&state.db, pro_db::tokens::DOMAIN_CONNECT, &token).await?;
+        if claim.subject_type != "account" || claim.subject_id != account.id
+            || claim.meta["domain_id"].as_str() != Some(id.as_str())
+        {
+            return Err(ProError::Forbidden("This approval belongs to another domain or account.".into()));
+        }
+
+        let verdict = crate::verify_domain_now(&state, &listing.domain).await?;
+        let flash = if verdict.is_servable() {
+            Flash::ok(format!("{} is connected.", listing.domain.domain))
+        } else if query.error.is_some() {
+            Flash::warn("The provider did not complete automatic setup. Try again or use the manual steps.")
+        } else {
+            Flash::ok("DNS is being verified. You can check again from this page.")
+        };
+        Ok(redirect_with(&back, flash))
+    }.await)
 }
 
 // ---------------------------------------------------------------------------
@@ -938,7 +1147,7 @@ pub async fn console_detail(
             let member = auth::staff(&state, &headers).await?;
             let listing = pro_db::domains::listing(&state.db, &id).await?;
             let can_write = member.can(StaffRole::Admin);
-            let body = detail_body(&state, Panel::Console, &listing, can_write).await?;
+            let body = detail_body(&state, Panel::Console, &listing, can_write, DnsSetup::default()).await?;
             Ok(crate::console::shell(
                 &state,
                 chrome.theme,

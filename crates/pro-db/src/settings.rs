@@ -330,12 +330,12 @@ mod tests {
         let err = store
             .save(
                 &pool,
-                &[("billing.provider".into(), Some(json!("lemonsqueezy")))],
+                &[("billing.provider".into(), Some(json!("polar")))],
                 StaffRole::Owner,
                 "staff:1",
             )
             .await
-            .expect_err("no Lemon Squeezy keys");
+            .expect_err("no Polar keys");
         assert_eq!(err.status(), 400);
         assert_eq!(store.current().billing_provider(), "stripe");
     }
@@ -349,16 +349,16 @@ mod tests {
             .save(
                 &pool,
                 &[
-                    ("billing.provider".into(), Some(json!("lemonsqueezy"))),
-                    ("billing.lemonsqueezy.apiKey".into(), Some(json!("ls_key"))),
-                    ("billing.lemonsqueezy.storeId".into(), Some(json!("4242"))),
+                    ("billing.provider".into(), Some(json!("polar"))),
+                    ("billing.polar.accessToken".into(), Some(json!("polar_oat_test"))),
+                    ("billing.polar.webhookSecret".into(), Some(json!("polar_whs_test"))),
                 ],
                 StaffRole::Owner,
                 "staff:1",
             )
             .await
             .unwrap();
-        assert_eq!(store.current().billing_provider(), "lemonsqueezy");
+        assert_eq!(store.current().billing_provider(), "polar");
     }
 
     /// A form must apply whole or not at all — a provider switched on without

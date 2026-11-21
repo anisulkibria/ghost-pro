@@ -17,8 +17,9 @@
 //! the save path refuses it regardless of what the form carried.
 use axum::extract::{Form, Path, Query, State};
 use axum::http::HeaderMap;
-use axum::response::Response;
-use pro_core::settings::Kind;
+use axum::response::{IntoResponse, Redirect, Response};
+use pro_core::config::BILLING_PROVIDERS;
+use pro_core::settings::{Kind, SettingDef};
 use pro_core::{ProError, Result, Staff, StaffRole, TenantStatus};
 use pro_db::sessions::{self, Subject};
 use serde::Deserialize;
@@ -339,7 +340,7 @@ notification is refused and paid sites stay closed.
             "none" => "No payment provider".to_string(),
             "stripe" => "Stripe".to_string(),
             "paddle" => "Paddle".to_string(),
-            "lemonsqueezy" => "Lemon Squeezy".to_string(),
+            "polar" => "Polar".to_string(),
             other => other.to_string(),
         },
         &format!(
@@ -1446,24 +1447,44 @@ struct SettingsSection {
 
 impl SettingsSection {
     fn path(&self) -> String { format!("/owner/settings/{}", self.slug) }
+
+    fn includes(&self, setting: &SettingDef) -> bool {
+        setting.group == self.group
+            || (self.slug == "billing" && setting.key.starts_with("billing."))
+            || (self.slug == "email" && setting.key.starts_with("mail."))
+    }
 }
 
 const SETTINGS_SECTIONS: &[SettingsSection] = &[
     SettingsSection { slug: "general", title: "General settings", group: "Platform", icon: "settings", tint: "pink", summary: "Platform name · Support email · Site hosting" },
     SettingsSection { slug: "signup", title: "Signup & security", group: "Signup", icon: "shield", tint: "teal", summary: "Account registration · Email verification · Disposable addresses" },
-    SettingsSection { slug: "billing", title: "Billing", group: "Billing", icon: "billing", tint: "green", summary: "Payment provider · Checkout · Dunning · Plan product IDs" },
-    SettingsSection { slug: "stripe", title: "Stripe", group: "Stripe", icon: "key", tint: "purple", summary: "API keys · Webhook signing secret" },
-    SettingsSection { slug: "paddle", title: "Paddle", group: "Paddle", icon: "key", tint: "blue", summary: "API key · Client token · Webhooks · Sandbox" },
-    SettingsSection { slug: "lemon-squeezy", title: "Lemon Squeezy", group: "Lemon Squeezy", icon: "key", tint: "amber", summary: "API key · Store ID · Webhooks · Test mode" },
-    SettingsSection { slug: "gumroad", title: "Gumroad", group: "Gumroad", icon: "key", tint: "red", summary: "Access token · Ping token · Product verification" },
-    SettingsSection { slug: "email", title: "Email", group: "Mail", icon: "mail", tint: "blue", summary: "Transactional email · SMTP · Sender identity · Auto-stop" },
-    SettingsSection { slug: "ses", title: "Amazon SES", group: "Amazon SES", icon: "mail", tint: "amber", summary: "AWS region · SMTP endpoint & credentials · Newsletter send rate" },
-    SettingsSection { slug: "mailgun", title: "Mailgun", group: "Mailgun", icon: "mail", tint: "purple", summary: "Sending domain · API key · Region · Webhooks" },
+    SettingsSection { slug: "billing", title: "Billing", group: "Billing", icon: "billing", tint: "green", summary: "Payment providers · Credentials · Checkout · Payment recovery" },
+    SettingsSection { slug: "email", title: "Email", group: "Mail", icon: "mail", tint: "blue", summary: "Transactional email · Amazon SES · Mailgun · Usage limits" },
 ];
 
 fn settings_section(slug: &str) -> Result<&'static SettingsSection> {
     SETTINGS_SECTIONS.iter().find(|section| section.slug == slug)
         .ok_or_else(|| ProError::NotFound("Settings page not found".into()))
+}
+
+const EMAIL_PROVIDERS: &[(&str, &str)] = &[("ses", "Amazon SES"), ("mailgun", "Mailgun")];
+
+fn provider_settings_path(section: &str, provider: &str, anchor: &str) -> String {
+    format!("/owner/settings/{section}?provider={provider}#{anchor}")
+}
+
+fn provider_settings_section(provider: &str) -> Option<(&'static str, &'static str)> {
+    if BILLING_PROVIDERS.contains(&provider) {
+        return Some(("billing", title_case(provider)));
+    }
+    EMAIL_PROVIDERS.iter().find(|(slug, _)| *slug == provider).map(|(_, name)| ("email", *name))
+}
+
+fn redirect_provider_settings(provider: &str) -> Option<Response> {
+    let (section, _) = provider_settings_section(provider)?;
+    Some(Redirect::permanent(&provider_settings_path(
+        section, provider, &format!("{section}-{provider}"),
+    )).into_response())
 }
 
 fn settings_link(path: &str, title: &str, detail: &str, icon: &str, tint: &str) -> String {
@@ -1507,12 +1528,23 @@ async fn settings_inner(
             rows.push_str(&settings_link(&section.path(), section.title, section.summary, section.icon, section.tint));
         }
         if !words.is_empty() {
-            for def in pro_core::settings::REGISTRY.iter().filter(|def| def.group == section.group && !matches!(def.kind, Kind::Managed)) {
+            for def in pro_core::settings::REGISTRY.iter().filter(|def| section.includes(def) && !matches!(def.kind, Kind::Managed)) {
                 // Search metadata only; saved values and credentials never enter the index.
-                if matches(&format!("{} {} {}", def.label, def.key, def.help)) {
+                if matches(&format!("{} {} {} {}", def.label, def.key, def.group, def.help)) {
+                    let anchor = format!("setting-{}", def.key.replace('.', "_"));
+                    let provider_path = def.key.split('.').nth(1)
+                        .and_then(|provider| provider_settings_section(provider)
+                            .filter(|(parent, _)| *parent == section.slug)
+                            .map(|(_, name)| (provider, name)));
+                    let (path, detail) = match provider_path {
+                        Some((provider, name)) => (
+                            provider_settings_path(section.slug, provider, &anchor),
+                            format!("{} · {name}", section.title),
+                        ),
+                        None => (format!("{}#{anchor}", section.path()), section.title.to_string()),
+                    };
                     rows.push_str(&settings_link(
-                        &format!("{}#setting-{}", section.path(), def.key.replace('.', "_")),
-                        def.label, section.title, section.icon, section.tint,
+                        &path, def.label, &detail, section.icon, section.tint,
                     ));
                 }
             }
@@ -1547,6 +1579,9 @@ pub async fn settings_group(
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
+    if let Some(redirect) = redirect_provider_settings(&slug) {
+        return redirect;
+    }
     let chrome = state.chrome(&headers);
     let result = async {
         let member = auth::staff(&state, &headers).await?;
@@ -1565,8 +1600,12 @@ fn settings_group_inner(
 ) -> Result<Response> {
     let live = state.live();
     let views = pro_db::settings::view_for(&live, member.role);
-    let fields: Vec<_> = views.iter().filter(|item| item.def.group == section.group && !matches!(item.def.kind, Kind::Managed)).collect();
+    let fields: Vec<_> = views.iter()
+        .filter(|item| section.includes(item.def) && !matches!(item.def.kind, Kind::Managed))
+        .collect();
     let editable = fields.iter().any(|item| item.editable);
+    let rows = |group: &str| fields.iter().filter(|item| item.def.group == group)
+        .map(|item| render_setting(item)).collect::<String>();
     let save = if editable {
         format!(r#"<button class="btn" type="submit" form="settings-form">{} Save</button>"#, view::svg("check"))
     } else { String::new() };
@@ -1576,39 +1615,57 @@ fn settings_group_inner(
 <div class="heading"><h1>{title}</h1><p class="sub">{summary}</p></div><div class="actions">{save}</div></header>"#,
         back = view::svg("chevron"), title = esc(section.title), summary = esc(section.summary),
     );
+    let disclosure = |slug: &str, name: &str, open| format!(
+        r#"<details id="{section}-{slug}"{open}>
+<summary class="row hoverable"><span class="body"><span class="title">{name}</span></span>{chevron}</summary>
+<div class="rows settings">{fields}</div></details>"#,
+        section = section.slug,
+        name = esc(name),
+        open = view::flag("open", open),
+        chevron = view::svg("down"),
+        fields = rows(name),
+    );
+    let expanded_provider = query.get("provider").map(String::as_str).filter(|provider| {
+        provider_settings_section(provider).is_some_and(|(parent, _)| parent == section.slug)
+    });
+    let mut form = view::rows(&rows(section.group));
     if section.slug == "billing" {
         let provider = live.billing_provider();
+        let title = esc(title_case(&provider));
         body.push_str(&if provider == "none" {
-            view::banner(BannerKind::Info, "No payment provider is selected. Configure a provider below, then select it here when you are ready to accept payments.")
+            view::banner(BannerKind::Info, "Configure a payment provider below and select it to start accepting payments.")
         } else if live.provider_is_configured(&provider) {
-            view::banner(BannerKind::Ok, &format!("New checkouts use <strong>{}</strong>. Existing subscriptions keep their current provider.", esc(&provider)))
+            view::banner(BannerKind::Ok, &format!("New checkouts use <strong>{title}</strong>. Existing subscriptions keep their current provider."))
         } else {
-            view::banner(BannerKind::Warn, &format!("<strong>{}</strong> is selected but needs credentials. Open its settings below.", esc(&provider)))
+            view::banner(BannerKind::Warn, &format!("<strong>{title}</strong> needs credentials before it can accept payments."))
         });
+        let open_provider = expanded_provider.unwrap_or(&provider);
+        let providers: String = BILLING_PROVIDERS.iter()
+            .map(|slug| disclosure(slug, title_case(slug), *slug == open_provider))
+            .collect();
+        form.push_str(&view::section("Payment processor credentials"));
+        form.push_str(&format!(r#"<div class="card rows settings-providers">{providers}</div>"#));
+    } else if section.slug == "email" {
+        let mail = live.mail();
+        let providers: String = EMAIL_PROVIDERS.iter().map(|(slug, name)| {
+            let open = match expanded_provider {
+                Some(provider) => provider == *slug,
+                None => mail.tenant_provider == *slug || (*slug == "ses" && mail.transport == "ses"),
+            };
+            disclosure(slug, name, open)
+        }).collect();
+        form.push_str(&view::section("Delivery provider settings"));
+        form.push_str(&format!(r#"<div class="card rows settings-providers">{providers}</div>"#));
     }
     if !editable {
         body.push_str(&view::banner(BannerKind::Info, "You can view these settings. Fields marked with a role can be changed by staff with that role."));
     }
     body.push_str(&format!(
-        r#"<form method="post" action="{path}" id="settings-form">{fields}</form>"#,
-        path = section.path(), fields = view::rows(&fields.iter().map(|item| render_setting(item)).collect::<String>()),
+        r#"<form method="post" action="{path}" id="settings-form">{form}</form>"#,
+        path = section.path(),
     ));
-    let mut related = String::new();
     if section.slug == "billing" {
-        for provider in SETTINGS_SECTIONS.iter().filter(|s| ["stripe", "paddle", "lemon-squeezy", "gumroad"].contains(&s.slug)) {
-            related.push_str(&settings_link(&provider.path(), provider.title, provider.summary, provider.icon, provider.tint));
-        }
-        related.push_str(&settings_link("/owner/plans", "Plans & email allowances", "Monthly email allowances and payment product IDs for every plan.", "key", "teal"));
-    } else if section.slug == "email" {
-        for provider in SETTINGS_SECTIONS.iter().filter(|s| ["ses", "mailgun"].contains(&s.slug)) {
-            related.push_str(&settings_link(&provider.path(), provider.title, provider.summary, provider.icon, provider.tint));
-        }
-    } else if ["ses", "mailgun"].contains(&section.slug) {
-        related.push_str(&settings_link("/owner/settings/email", "Email delivery", "Choose the transactional transport, tenant provider, and verified sender.", "mail", "blue"));
-    } else if ["stripe", "paddle", "lemon-squeezy", "gumroad"].contains(&section.slug) {
-        related.push_str(&settings_link("/owner/settings/billing", "Billing", "Choose the provider for new checkouts.", "billing", "green"));
-    }
-    if !related.is_empty() {
+        let related = settings_link("/owner/plans", "Plans & email allowances", "Monthly email allowances and payment product IDs for every plan.", "key", "teal");
         body.push_str(&view::section("Related settings"));
         body.push_str(&format!(r#"<div class="card rows settings-directory">{related}</div>"#));
     }
@@ -1622,6 +1679,9 @@ pub async fn save_settings_group(
     headers: HeaderMap,
     body: String,
 ) -> Response {
+    if let Some(redirect) = redirect_provider_settings(&slug) {
+        return redirect;
+    }
     let chrome = state.chrome(&headers);
     let section = match settings_section(&slug) {
         Ok(section) => section,
@@ -1788,14 +1848,14 @@ async fn save_settings_inner(
     if let Some(section) = section {
         for key in submitted.keys() {
             let key = key.strip_prefix(PRESENT_PREFIX).unwrap_or(key);
-            if pro_core::settings::def(key).is_some_and(|def| def.group != section.group) {
+            if pro_core::settings::def(key).is_some_and(|def| !section.includes(def)) {
                 return Err(ProError::BadRequest("This page only saves its own settings. Open the other section to change those fields.".into()));
             }
         }
     }
     let mut changes: Vec<(String, Option<serde_json::Value>)> = Vec::new();
     for def in pro_core::settings::REGISTRY {
-        if section.is_some_and(|section| def.group != section.group) { continue; }
+        if section.is_some_and(|section| !section.includes(def)) { continue; }
         // Not this actor's to change: leave whatever is stored alone.
         if !pro_core::settings::can_edit(def.key, member.role) {
             continue;
@@ -1831,6 +1891,17 @@ async fn save_settings_inner(
                 }
             }
         }
+    }
+
+    if section.is_some_and(|section| matches!(section.slug, "billing" | "email")) {
+        let live = state.live();
+        changes.retain(|(key, value)| match value {
+            Some(value) => {
+                pro_core::settings::validate(key, &live.form_value(key))
+                    .ok().flatten().as_ref() != Some(value)
+            }
+            None => live.is_overridden(key),
+        });
     }
 
     let before = state.live().billing_provider();
@@ -1925,9 +1996,6 @@ pub async fn plans_page(
 
 /// What each provider calls the thing a plan maps to, and where to find it.
 ///
-/// The wording matters more than it looks: an operator who pastes a Lemon
-/// Squeezy *product* id where its *variant* id belongs gets a checkout that
-/// 404s, and the two are adjacent in their dashboard.
 fn price_id_hint(provider: &str) -> (&'static str, &'static str) {
     match provider {
         "stripe" => (
@@ -1935,10 +2003,9 @@ fn price_id_hint(provider: &str) -> (&'static str, &'static str) {
             "price_… from the product's pricing section. Not the product id (prod_…).",
         ),
         "paddle" => ("Price ID", "pri_… from Catalogue → Products → the price."),
-        "lemonsqueezy" => (
-            "Variant ID",
-            "The numeric variant id — Store → Products → the product → the variant. \
-             Not the product id: a checkout is created against a variant.",
+        "polar" => (
+            "Product ID",
+            "Copy the recurring product UUID from Polar. Use a separate product for each billing interval.",
         ),
         "gumroad" => (
             "Product permalink",
@@ -2087,7 +2154,7 @@ async fn plans_inner(
          cancellations and recovered payments all arrive that way. Add the endpoint for \
          whichever provider you use, with its signing secret in Settings.",
     ));
-    let hook_rows: String = ["stripe", "paddle", "lemonsqueezy", "gumroad"]
+    let hook_rows: String = BILLING_PROVIDERS
         .iter()
         .map(|provider| {
             let url = state.url(&format!("/webhooks/{provider}"));
@@ -2145,13 +2212,7 @@ fn webhook_events(provider: &str) -> &'static str {
             "subscription.created, .updated, .canceled; \
              transaction.completed, transaction.payment_failed"
         }
-        "lemonsqueezy" => {
-            "subscription_created, subscription_updated, subscription_cancelled, \
-             subscription_resumed, subscription_expired, subscription_paused, \
-             subscription_unpaused, subscription_plan_changed, \
-             subscription_payment_success, subscription_payment_failed, \
-             subscription_payment_recovered, subscription_payment_refunded"
-        }
+        "polar" => "subscription.created, subscription.updated",
         "gumroad" => {
             "sale, refund, dispute, dispute_won, cancellation, subscription_updated, \
              subscription_ended, subscription_restarted"
@@ -2164,7 +2225,7 @@ fn title_case(provider: &str) -> &'static str {
     match provider {
         "stripe" => "Stripe",
         "paddle" => "Paddle",
-        "lemonsqueezy" => "Lemon Squeezy",
+        "polar" => "Polar",
         "gumroad" => "Gumroad",
         _ => "Provider",
     }
@@ -2203,7 +2264,7 @@ async fn save_plans_inner(
         .collect();
 
     let live = state.live();
-    let known_providers = ["stripe", "paddle", "lemonsqueezy", "gumroad"];
+    let known_providers = BILLING_PROVIDERS;
 
     // Start from what is stored, so a submission that carries only the
     // providers currently configured does not wipe the id of one that is
@@ -2830,9 +2891,14 @@ mod tests {
         assert!(html.contains(r#"type="password""#));
     }
     #[test]
-    fn every_settings_group_has_one_directory_page() {
-        for group in pro_core::settings::groups() {
-            assert_eq!(SETTINGS_SECTIONS.iter().filter(|section| section.group == group).count(), 1, "{group} must have one page");
+    fn every_setting_has_one_directory_page() {
+        for setting in pro_core::settings::REGISTRY {
+            assert_eq!(
+                SETTINGS_SECTIONS.iter().filter(|section| section.includes(setting)).count(),
+                1,
+                "{} must have one page",
+                setting.key,
+            );
         }
         for (index, section) in SETTINGS_SECTIONS.iter().enumerate() {
             assert!(SETTINGS_SECTIONS[index + 1..].iter().all(|other| other.slug != section.slug));

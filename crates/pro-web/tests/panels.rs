@@ -208,6 +208,8 @@ async fn seed_site(state: &pro_web::AppState, account_id: &str, slug: &str) -> p
 fn assert_m3_shell(body: &str, where_: &str) {
     assert!(body.contains(r#"<aside class="rail">"#), "{where_}: no nav rail");
     assert!(body.contains("--primary: #984059"), "{where_}: no tonal palette");
+    assert!(body.contains(".shell::before") && body.contains("--glass-blur"), "{where_}: no glass surfaces");
+    assert!(body.contains(r#"aria-current="page""#), "{where_}: no current navigation link");
     assert!(body.contains(r#"class="page-head"#), "{where_}: no app bar");
     // The whole design system is script-free on purpose: these pages are
     // served under `default-src 'none'`, which would block one anyway.
@@ -415,8 +417,7 @@ async fn settings_directory_and_pages_cover_the_registry() {
     let mut preview = Vec::new();
     for (slug, group) in [
         ("general", "Platform"), ("signup", "Signup"), ("billing", "Billing"),
-        ("stripe", "Stripe"), ("paddle", "Paddle"), ("lemon-squeezy", "Lemon Squeezy"),
-        ("gumroad", "Gumroad"), ("email", "Mail"), ("ses", "Amazon SES"), ("mailgun", "Mailgun"),
+        ("email", "Mail"),
     ] {
         let path = format!("/owner/settings/{slug}");
         assert!(directory.contains(&format!(r#"href="{path}""#)));
@@ -428,10 +429,25 @@ async fn settings_directory_and_pages_cover_the_registry() {
         for def in pro_core::settings::REGISTRY {
             let field = format!(r#"name="{}""#, def.key);
             assert!(!directory.contains(&field), "the directory must not contain editable fields");
-            let belongs = def.group == group && !matches!(def.kind, pro_core::settings::Kind::Managed);
+            let belongs = (def.group == group
+                || (slug == "billing" && def.key.starts_with("billing."))
+                || (slug == "email" && def.key.starts_with("mail.")))
+                && !matches!(def.kind, pro_core::settings::Kind::Managed);
             assert_eq!(page.contains(&field), belongs, "{} is on the wrong page: {slug}", def.key);
         }
         preview.push((slug.to_string(), page));
+    }
+    let old_pages = pro_core::config::BILLING_PROVIDERS.iter().map(|provider| ("billing", *provider))
+        .chain([("email", "ses"), ("email", "mailgun")]);
+    for (section, provider) in old_pages {
+        let path = format!("/owner/settings/{provider}");
+        assert!(!directory.contains(&format!(r#"href="{path}""#)));
+        let destination = format!("/owner/settings/{section}?provider={provider}#{section}-{provider}");
+        for method in ["GET", "POST"] {
+            let (status, headers, _) = send(&state, method, &path, Some(&cookie), None).await;
+            assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
+            assert_eq!(headers[header::LOCATION], destination);
+        }
     }
     // Optional local artifacts contain fixture data only and no real account sessions.
     if let Some(dir) = std::env::var_os("VUUUT_SETTINGS_PREVIEW_DIR") {
@@ -448,9 +464,17 @@ async fn settings_search_finds_fields_and_escapes_the_query() {
     let cookie = as_operator(&state, StaffRole::Owner).await;
     let (status, body) = get(&state, "/owner/settings?q=SMTP%20password", Some(&cookie)).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("/owner/settings/ses#setting-mail_ses_pass"));
+    assert!(body.contains("/owner/settings/email?provider=ses#setting-mail_ses_pass"));
     assert!(body.contains("/owner/settings/email#setting-mail_pass"));
-    assert!(!body.contains("/owner/settings/stripe#"));
+    assert!(!body.contains("provider=stripe"));
+    let (_, body) = get(&state, "/owner/settings?q=Mailgun%20API%20key", Some(&cookie)).await;
+    assert!(body.contains("/owner/settings/email?provider=mailgun#setting-mail_mailgun_apiKey"));
+    let (_, body) = get(&state, "/owner/settings/email?provider=mailgun", Some(&cookie)).await;
+    assert!(body.contains(r#"<details id="email-mailgun" open>"#));
+    let (_, body) = get(&state, "/owner/settings?q=Polar%20access%20token", Some(&cookie)).await;
+    assert!(body.contains("/owner/settings/billing?provider=polar#setting-billing_polar_accessToken"));
+    let (_, body) = get(&state, "/owner/settings/billing?provider=polar", Some(&cookie)).await;
+    assert!(body.contains(r#"<details id="billing-polar" open>"#));
     let (_, body) = get(&state, "/owner/settings?q=%3Cscript%3E", Some(&cookie)).await;
     assert!(body.contains("Nothing matches"));
     assert!(body.contains("&lt;script&gt;"));
@@ -484,20 +508,75 @@ async fn section_saves_stay_on_the_page_and_cannot_write_other_sections() {
 async fn section_secrets_are_write_only_and_survive_blank_saves() {
     let (state, _dir) = platform().await;
     let cookie = as_operator(&state, StaffRole::Admin).await;
-    let (status, headers, _) = send(&state, "POST", "/owner/settings/ses", Some(&cookie), Some("mail.ses.region=us-east-1&mail.ses.user=ses-private-user&mail.ses.pass=ses-private-password&mail.ses.endpoint=example.fips.region.mail-manager-smtp.amazonaws.com")).await;
+    let path = "/owner/settings/email";
+    let (status, headers, _) = send(&state, "POST", path, Some(&cookie), Some(concat!(
+        "mail.tenantProvider=ses&mail.fromAddress=delivery%40example.com",
+        "&mail.ses.region=us-east-1&mail.ses.user=ses-private-user",
+        "&mail.ses.pass=ses-private-password",
+        "&mail.ses.endpoint=example.fips.region.mail-manager-smtp.amazonaws.com",
+    ))).await;
     assert_eq!(status, StatusCode::SEE_OTHER);
-    assert!(headers["location"].to_str().unwrap().starts_with("/owner/settings/ses?"));
-    let (_, html) = get(&state, "/owner/settings/ses", Some(&cookie)).await;
+    assert!(headers[header::LOCATION].to_str().unwrap().starts_with("/owner/settings/email?"));
+    let (_, html) = get(&state, path, Some(&cookie)).await;
+    assert!(html.contains(r#"<details id="email-ses" open>"#));
+    assert_eq!(state.live().mail().tenant_provider, "ses");
     assert!(!html.contains("ses-private-user"));
     assert!(!html.contains("ses-private-password"));
     assert!(html.contains("example.fips.region.mail-manager-smtp.amazonaws.com"));
     assert_eq!(state.live().mail().ses_smtp_host().as_deref(), Some("example.fips.region.mail-manager-smtp.amazonaws.com"));
-    let _ = send(&state, "POST", "/owner/settings/ses", Some(&cookie), Some("mail.ses.user=&mail.ses.pass=&mail.ses.region=eu-west-1")).await;
+    let _ = send(&state, "POST", path, Some(&cookie), Some("mail.ses.user=&mail.ses.pass=&mail.ses.region=eu-west-1")).await;
     assert_eq!(state.live().mail().ses.pass.as_deref(), Some("ses-private-password"));
     assert_eq!(state.live().mail().ses.region.as_deref(), Some("eu-west-1"));
+    let (_, headers, _) = send(&state, "POST", path, Some(&cookie), Some(concat!(
+        "mail.tenantProvider=mailgun&mail.mailgun.domain=mg.example.com",
+        "&mail.mailgun.apiKey=mailgun-private-key&mail.mailgun.webhookSigningKey=mailgun-private-signing-key",
+    ))).await;
+    assert!(headers[header::LOCATION].to_str().unwrap().starts_with("/owner/settings/email?"));
+    let (_, html) = get(&state, path, Some(&cookie)).await;
+    assert!(html.contains(r#"<details id="email-mailgun" open>"#));
+    assert!(!html.contains("mailgun-private-key"));
+    assert!(!html.contains("mailgun-private-signing-key"));
+    assert_eq!(state.live().mail().tenant_provider, "mailgun");
+    assert_eq!(state.live().mail().ses.pass.as_deref(), Some("ses-private-password"));
     let (_, html) = get(&state, "/owner/settings/billing", Some(&cookie)).await;
     assert!(!html.contains(r#"form="settings-form""#), "admin must not receive an owner-only Save button");
     assert!(html.contains("Owner only"));
+}
+
+#[tokio::test]
+async fn billing_saves_provider_and_credentials_together() {
+    let (state, _dir) = platform().await;
+    let owner = as_operator(&state, StaffRole::Owner).await;
+    let path = "/owner/settings/billing";
+
+    let (status, headers, _) = send(&state, "POST", path, Some(&owner), Some(concat!(
+        "billing.provider=polar&billing.polar.accessToken=fixture-token",
+        "&billing.polar.webhookSecret=fixture-secret",
+        "&__present.billing.polar.sandbox=1&billing.polar.sandbox=1",
+        "&__present.billing.paddle.sandbox=1",
+    ))).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(headers[header::LOCATION].to_str().unwrap().starts_with("/owner/settings/billing?ok="));
+    assert_eq!(state.live().billing_provider(), "polar");
+    assert!(state.live().polar().sandbox);
+    assert!(!state.live().is_overridden("billing.paddle.sandbox"));
+
+    let (_, page) = get(&state, path, Some(&owner)).await;
+    assert!(page.contains(r#"<details id="billing-polar" open>"#));
+    assert!(page.contains(r#"<details id="billing-stripe">"#));
+    assert!(!page.contains("fixture-token"));
+    assert!(!page.contains("fixture-secret"));
+
+    let _ = send(&state, "POST", path, Some(&owner), Some(concat!(
+        "billing.provider=polar&billing.polar.accessToken=&billing.polar.webhookSecret=",
+        "&__present.billing.polar.sandbox=1&billing.polar.sandbox=1",
+    ))).await;
+    assert!(state.live().provider_is_configured("polar"));
+
+    let _ = send(&state, "POST", path, Some(&owner), Some(
+        "billing.polar.accessToken=should-not-save&platform.name=should-not-save",
+    )).await;
+    assert_eq!(state.live().polar().access_token.as_deref(), Some("fixture-token"));
 }
 
 /// The screen that makes a platform able to charge.
@@ -510,16 +589,16 @@ async fn plan_product_ids_are_settable_without_a_restart() {
     let (state, _dir) = platform().await;
     let cookie = as_operator(&state, StaffRole::Owner).await;
 
-    // Lemon Squeezy selected, with credentials but no variant ids: the state a
+    // Polar selected, with credentials but no product ids: the state a
     // platform is in on its first day.
     state
         .settings
         .save(
             &state.db,
             &[
-                ("billing.lemonsqueezy.apiKey".into(), Some(serde_json::json!("ls_key"))),
-                ("billing.lemonsqueezy.storeId".into(), Some(serde_json::json!("4242"))),
-                ("billing.provider".into(), Some(serde_json::json!("lemonsqueezy"))),
+                ("billing.polar.accessToken".into(), Some(serde_json::json!("polar_oat_test"))),
+                ("billing.polar.webhookSecret".into(), Some(serde_json::json!("polar_whs_test"))),
+                ("billing.provider".into(), Some(serde_json::json!("polar"))),
             ],
             StaffRole::Owner,
             "test",
@@ -530,7 +609,7 @@ async fn plan_product_ids_are_settable_without_a_restart() {
     assert_eq!(
         state.live().purchasable_plans().len(),
         0,
-        "nothing can be bought until a variant id is set"
+        "nothing can be bought until a product id is set"
     );
 
     let (status, body) = get(&state, "/owner/plans", Some(&cookie)).await;
@@ -540,12 +619,12 @@ async fn plan_product_ids_are_settable_without_a_restart() {
     // of the screen existing.
     assert!(body.contains("Nothing can be bought yet"), "got no warning");
     // A field per plan, named for the plan and the provider, and labelled with
-    // what Lemon Squeezy actually calls the thing.
-    assert!(body.contains(r#"name="id.starter.lemonsqueezy""#), "got {body}");
-    assert!(body.contains("Variant ID"));
-    // And the endpoint the operator has to paste into Lemon Squeezy.
-    assert!(body.contains("/webhooks/lemonsqueezy"));
-    assert!(body.contains("subscription_payment_recovered"), "the events to enable");
+    // what Polar actually calls the thing.
+    assert!(body.contains(r#"name="id.starter.polar""#), "got {body}");
+    assert!(body.contains("Product ID"));
+    // And the endpoint the operator has to paste into Polar.
+    assert!(body.contains("/webhooks/polar"));
+    assert!(body.contains("subscription.created, subscription.updated"), "the events to enable");
 
     // Set one, the way the form posts it.
     let (status, _, _) = send(
@@ -553,7 +632,7 @@ async fn plan_product_ids_are_settable_without_a_restart() {
         "POST",
         "/owner/plans",
         Some(&cookie),
-        Some("id.starter.lemonsqueezy=812345&id.creator.lemonsqueezy="),
+        Some("id.starter.polar=07521167-2b19-420a-9714-754d4b1d84ac&id.creator.polar="),
     )
     .await;
     assert_eq!(status, StatusCode::SEE_OTHER);
@@ -561,25 +640,25 @@ async fn plan_product_ids_are_settable_without_a_restart() {
     // Live immediately — no restart, which is the requirement.
     let live = state.live();
     assert_eq!(
-        live.plan("starter").unwrap().price_id("lemonsqueezy"),
-        Some("812345"),
+        live.plan("starter").unwrap().price_id("polar"),
+        Some("07521167-2b19-420a-9714-754d4b1d84ac"),
         "the id is in the live catalogue"
     );
     assert_eq!(live.purchasable_plans().len(), 1, "and that plan is now on sale");
     // The blank one was not invented.
-    assert_eq!(live.plan("creator").unwrap().price_id("lemonsqueezy"), None);
+    assert_eq!(live.plan("creator").unwrap().price_id("polar"), None);
 
-    // The webhook path can now resolve a plan from that variant, which is
+    // The webhook path can now resolve a plan from that product, which is
     // what makes a renewal apply the right limits.
     assert_eq!(
-        pro_billing::plan_for_price(&live.plans(), "lemonsqueezy", "812345")
+        pro_billing::plan_for_price(&live.plans(), "polar", "07521167-2b19-420a-9714-754d4b1d84ac")
             .map(|p| p.slug.clone()),
         Some("starter".to_string())
     );
 
     // The screen now reflects it, and stops warning.
     let (_, body) = get(&state, "/owner/plans", Some(&cookie)).await;
-    assert!(body.contains(r#"value="812345""#));
+    assert!(body.contains(r#"value="07521167-2b19-420a-9714-754d4b1d84ac""#));
     assert!(!body.contains("Nothing can be bought yet"));
     assert!(body.contains("On sale"));
 
@@ -590,11 +669,11 @@ async fn plan_product_ids_are_settable_without_a_restart() {
         "POST",
         "/owner/plans",
         Some(&cookie),
-        Some("id.starter.lemonsqueezy="),
+        Some("id.starter.polar="),
     )
     .await;
     assert_eq!(status, StatusCode::SEE_OTHER);
-    assert_eq!(state.live().plan("starter").unwrap().price_id("lemonsqueezy"), None);
+    assert_eq!(state.live().plan("starter").unwrap().price_id("polar"), None);
 }
 
 /// Product ids are billing credentials in all but name, so they are the
@@ -614,12 +693,12 @@ async fn only_an_owner_may_set_product_ids() {
         "POST",
         "/owner/plans",
         Some(&cookie),
-        Some("id.starter.lemonsqueezy=812345"),
+        Some("id.starter.polar=07521167-2b19-420a-9714-754d4b1d84ac"),
     )
     .await;
     assert_eq!(status, StatusCode::SEE_OTHER, "refused, back to the page");
     assert_eq!(
-        state.live().plan("starter").unwrap().price_id("lemonsqueezy"),
+        state.live().plan("starter").unwrap().price_id("polar"),
         None,
         "nothing was written"
     );
@@ -631,7 +710,7 @@ async fn the_plans_form_refuses_what_it_does_not_know() {
     let (state, _dir) = platform().await;
     let cookie = as_operator(&state, StaffRole::Owner).await;
 
-    for hostile in ["id.no-such-plan.lemonsqueezy=x", "id.starter.notaprovider=x"] {
+    for hostile in ["id.no-such-plan.polar=x", "id.starter.notaprovider=x"] {
         let (status, _, _) =
             send(&state, "POST", "/owner/plans", Some(&cookie), Some(hostile)).await;
         assert_eq!(status, StatusCode::SEE_OTHER, "{hostile}");
@@ -1310,6 +1389,16 @@ async fn a_customer_sees_only_their_own_domains() {
         get(&state, &format!("/dashboard/domains/{}", their_domain.id), Some(&cookie)).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert!(!body.contains("theirs.localhost"));
+
+    let (status, headers, _) = send(
+        &state,
+        "POST",
+        &format!("/dashboard/domains/{}/dns/setup", their_domain.id),
+        Some(&cookie),
+        Some(""),
+    ).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(headers[header::LOCATION].to_str().unwrap().contains("No%20such%20domain"));
 }
 
 #[tokio::test]
@@ -1342,6 +1431,11 @@ async fn a_domain_is_connected_managed_and_removed_from_its_own_page() {
     assert!(body.contains("Waiting for DNS"), "its state, in words");
     assert!(body.contains("CNAME"), "the record that routes it");
     assert!(body.contains(&added.verification_token), "and the ownership token");
+    assert!(body.contains("_ghost-pro-challenge.blog"));
+    assert!(body.contains("Connect automatically"));
+    assert!(body.contains(&format!(r#"action="{page}/dns/setup""#)));
+    assert!(body.contains("Set up DNS manually"));
+    assert!(body.contains("leave TTL at its default"));
     assert!(body.contains("Check now"));
     assert!(body.contains("Added"), "its history");
     assert!(!body.contains("Verification token"), "the raw record is the console's");
@@ -1366,6 +1460,66 @@ async fn a_domain_is_connected_managed_and_removed_from_its_own_page() {
     let location = headers.get(header::LOCATION).unwrap().to_str().unwrap();
     assert!(location.starts_with("/dashboard/domains?"), "back to the list: {location}");
     assert!(pro_db::domains::find_by_host(&state.db, "blog.example.com").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn domain_connect_return_requires_a_fresh_token_and_still_checks_dns() {
+    let (state, _dir) = platform().await;
+    let (account, cookie) = as_customer(&state).await;
+    let tenant = seed_site(&state, &account.id, "adas-journal").await;
+    let domain = pro_db::domains::add(
+        &state.db,
+        &tenant.id,
+        "blog.example.invalid",
+        pro_core::DomainKind::Custom,
+        false,
+    )
+    .await
+    .unwrap();
+    let page = format!("/dashboard/domains/{}", domain.id);
+    let setup_page = format!("{page}/dns/setup");
+    let (status, manual) = get(&state, &setup_page, Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(manual.contains("Set up DNS manually"));
+    assert!(manual.contains("find the DNS provider"));
+
+    let (_, _, manual) = send(
+        &state,
+        "POST",
+        &setup_page,
+        Some(&cookie),
+        Some(""),
+    )
+    .await;
+    assert!(manual.contains("Set up DNS manually"));
+    assert!(manual.contains("find the DNS provider"));
+
+    let token = pro_db::tokens::issue(
+        &state.db,
+        pro_db::tokens::DOMAIN_CONNECT,
+        "account",
+        &account.id,
+        serde_json::json!({ "domain_id": domain.id }),
+    )
+    .await
+    .unwrap();
+    let callback = format!("{page}/dns/finish/{token}");
+    let (status, headers, _) = send(&state, "GET", &callback, Some(&cookie), None).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(headers[header::LOCATION]
+        .to_str()
+        .unwrap()
+        .contains("DNS%20is%20being%20verified"));
+    let checked = pro_db::domains::get(&state.db, &domain.id).await.unwrap();
+    assert_ne!(checked.status, pro_core::DomainStatus::Active);
+    assert!(checked.last_checked_at.is_some());
+
+    let (status, headers, _) = send(&state, "GET", &callback, Some(&cookie), None).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(headers[header::LOCATION]
+        .to_str()
+        .unwrap()
+        .contains("expired%20or%20already%20been%20used"));
 }
 
 #[tokio::test]

@@ -129,7 +129,7 @@ impl Provider for Paddle {
         signature::verify_paddle(body, header, self.webhook_secret.as_deref().unwrap_or(""))
     }
 
-    fn event_id(&self, body: &Value) -> String {
+    fn event_id(&self, body: &Value, _headers: &WebhookHeaders) -> String {
         body["event_id"].as_str().unwrap_or_default().to_string()
     }
 
@@ -186,6 +186,7 @@ impl Provider for Paddle {
                     canceled_at: normalise_date(data.get("canceled_at")),
                     account_id: data["custom_data"]["account_id"].as_str().map(str::to_string),
                     tenant_id: data["custom_data"]["tenant_id"].as_str().map(str::to_string),
+                    ..Default::default()
                 }))
             }
 
@@ -304,9 +305,9 @@ mod tests {
     /// differently — getting this wrong silently disables idempotency.
     #[test]
     fn reads_the_event_id_from_paddles_envelope() {
-        assert_eq!(paddle().event_id(&json!({"event_id": "evt_abc"})), "evt_abc");
+        assert_eq!(paddle().event_id(&json!({"event_id": "evt_abc"}), &WebhookHeaders::default()), "evt_abc");
         // Stripe's field name must not accidentally work.
-        assert_eq!(paddle().event_id(&json!({"id": "evt_abc"})), "");
+        assert_eq!(paddle().event_id(&json!({"id": "evt_abc"}), &WebhookHeaders::default()), "");
     }
 
     #[test]

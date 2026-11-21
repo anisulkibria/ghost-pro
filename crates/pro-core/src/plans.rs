@@ -48,10 +48,10 @@ pub struct Plan {
     pub currency: String,
     /// What this plan is called at each payment provider, keyed by provider
     /// slug: `stripe` → a price id (`price_…`), `paddle` → a price id
-    /// (`pri_…`), `lemonsqueezy` → a variant id (`"812345"`).
+    /// (`pri_…`), `polar` → a recurring product UUID.
     ///
-    /// A map rather than three fields because the platform can be pointed at
-    /// any one of the three — and an operator who migrates between them wants
+    /// A map because the platform can be pointed at
+    /// any supported provider — and an operator who migrates between them wants
     /// both ids live at once during the changeover, with existing
     /// subscriptions still billing at the old provider while new signups go to
     /// the new one. A plan with no id for the *active* provider is not for
@@ -831,11 +831,11 @@ mod tests {
         assert!(!plan.is_purchasable("stripe"), "no ids configured yet");
 
         plan.price_ids.insert("stripe".into(), "price_123".into());
-        plan.price_ids.insert("lemonsqueezy".into(), "812345".into());
+        plan.price_ids.insert("polar".into(), "07521167-2b19-420a-9714-754d4b1d84ac".into());
         assert_eq!(plan.price_id("stripe"), Some("price_123"));
-        assert_eq!(plan.price_id("lemonsqueezy"), Some("812345"));
+        assert_eq!(plan.price_id("polar"), Some("07521167-2b19-420a-9714-754d4b1d84ac"));
         assert!(plan.is_purchasable("stripe"));
-        assert!(plan.is_purchasable("lemonsqueezy"));
+        assert!(plan.is_purchasable("polar"));
         // Not sold at Paddle, so a Paddle-configured platform must not list it.
         assert!(!plan.is_purchasable("paddle"));
 

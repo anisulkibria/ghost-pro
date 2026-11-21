@@ -3,7 +3,7 @@
 //! The structural odd one out, and the differences are not cosmetic. Each of
 //! them is a thing the other three providers do that Gumroad simply does not:
 //!
-//! * **No checkout API.** Stripe, Paddle and Lemon Squeezy are all asked to
+//! * **No checkout API.** Stripe, Paddle and Polar are all asked to
 //!   *create* a checkout and hand back a URL. Gumroad has no such call: a
 //!   customer is sent to the product's own permalink, with the platform's
 //!   metadata appended as query parameters. So nothing is reserved
@@ -297,7 +297,7 @@ impl Provider for Gumroad {
     /// of a membership, which is exactly the grain needed. Subscription
     /// resources carry no sale, so they are keyed on what they are plus when
     /// they happened.
-    fn event_id(&self, body: &Value) -> String {
+    fn event_id(&self, body: &Value, _headers: &WebhookHeaders) -> String {
         if let Some(sale) = text(&body["sale_id"]).or_else(|| text(&body["order_number"])) {
             return sale;
         }
@@ -379,6 +379,7 @@ impl Provider for Gumroad {
                     canceled_at: None,
                     account_id: param(body, "account_id"),
                     tenant_id: param(body, "tenant_id"),
+                    ..Default::default()
                 }))
                 .map(|event| {
                     if renewal {
@@ -745,14 +746,14 @@ mod tests {
     /// produce one — a retried ping would otherwise be applied twice.
     #[test]
     fn a_sale_is_keyed_on_its_charge() {
-        assert_eq!(gr().event_id(&json!({"sale_id": "s_99"})), "s_99");
+        assert_eq!(gr().event_id(&json!({"sale_id": "s_99"}), &WebhookHeaders::default()), "s_99");
         // Each renewal is its own charge, which is the grain that lets a
         // renewal through while a retry of the same charge is caught.
         assert_eq!(
-            gr().event_id(&json!({"sale_id": "s_100", "is_recurring_charge": "true"})),
+            gr().event_id(&json!({"sale_id": "s_100", "is_recurring_charge": "true"}), &WebhookHeaders::default()),
             "s_100"
         );
-        assert_eq!(gr().event_id(&json!({"order_number": "12345"})), "12345");
+        assert_eq!(gr().event_id(&json!({"order_number": "12345"}), &WebhookHeaders::default()), "12345");
     }
 
     #[test]
@@ -761,7 +762,7 @@ mod tests {
             "resource_name": "subscription_ended",
             "subscription_id": "sub_1",
             "ended_at": "2026-03-01T00:00:00Z"
-        }));
+        }), &WebhookHeaders::default());
         assert_eq!(id, "subscription_ended:sub_1:2026-03-01T00:00:00Z");
     }
 
@@ -770,7 +771,7 @@ mod tests {
     /// swallow it, which is strictly worse.
     #[test]
     fn an_unkeyable_ping_gets_no_id_rather_than_a_made_up_one() {
-        assert_eq!(gr().event_id(&json!({})), "");
+        assert_eq!(gr().event_id(&json!({}), &WebhookHeaders::default()), "");
     }
 
     // ---- interpretation ---------------------------------------------------
@@ -1008,6 +1009,7 @@ mod tests {
     async fn cancellation_is_declared_unsupported() {
         assert!(!gr().can_cancel());
         let subscription = Subscription {
+            provider_version: None,
             id: "s1".into(),
             account_id: "acc_1".into(),
             tenant_id: Some("ten_1".into()),

@@ -1,26 +1,4 @@
-//! End-to-end tests for the billing webhook pipeline, through Lemon Squeezy.
-//!
-//! This is the path that decides whether a paying customer's site stays up,
-//! and it had no test at all. Every case here goes through the real HTTP
-//! route: the body is signed the way Lemon Squeezy signs it, posted to
-//! `/webhooks/lemonsqueezy`, and the assertions are about what ended up in
-//! the database and what happened to the tenant — not about what `interpret`
-//! returned.
-//!
-//! Lemon Squeezy specifically because it is the provider this platform sells
-//! through. The provider-neutral half of the pipeline — claiming an event id,
-//! resolving an account, applying a plan, suspending a site — is the same for
-//! all four, so exercising it once here covers it for all of them.
-//!
-//! Three things make the real route worth testing rather than just the
-//! translation:
-//!
-//! * the signature is verified over the **raw bytes**, so anything that
-//!   re-serialises the body breaks it, and only an end-to-end test notices;
-//! * the event id is claimed **before** acting, which is the whole of the
-//!   defence against a retry granting a second subscription;
-//! * applying a plan writes the tenant's config file and may restart it, so
-//!   "the subscription moved" and "the site moved" are different claims.
+//! End-to-end tests for signed Polar webhooks and their effects on subscriptions and sites.
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -29,9 +7,9 @@ use std::sync::Arc;
 use tower::ServiceExt;
 
 const HOST: &str = "pro.localhost:8080";
-const SECRET: &str = "ls_webhook_secret";
-const STARTER_VARIANT: &str = "812345";
-const CREATOR_VARIANT: &str = "812346";
+const SECRET: &str = "polar_whs_test";
+const STARTER_PRODUCT: &str = "07521167-2b19-420a-9714-754d4b1d84ac";
+const CREATOR_PRODUCT: &str = "0d023bce-1930-48c8-b6c9-f113c8619747";
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -43,14 +21,14 @@ struct Platform {
     dir: tempdir::Dir,
 }
 
-/// A platform selling through Lemon Squeezy, with both plans priced.
+/// A platform selling through Polar, with both plans priced.
 async fn platform() -> Platform {
     build_platform(serde_json::json!({
-        "provider": "lemonsqueezy",
+        "provider": "polar",
         "dunningGraceDays": 14,
-        "lemonsqueezy": {
-            "apiKey": "ls_api_key",
-            "storeId": "4242",
+        "polar": {
+            "accessToken": "polar_oat_test",
+            "sandbox": true,
             "webhookSecret": SECRET,
         },
     }))
@@ -79,10 +57,10 @@ async fn build_platform(billing: serde_json::Value) -> Platform {
     }))
     .unwrap();
     config.plans = pro_core::plans::default_plans();
-    // The variant ids a real operator would set on /owner/plans. Put in the
+    // The product IDs a real operator would set on /owner/plans. Put in the
     // file here so the fixture is one object rather than a settings write.
-    config.plans[0].price_ids.insert("lemonsqueezy".into(), STARTER_VARIANT.into());
-    config.plans[1].price_ids.insert("lemonsqueezy".into(), CREATOR_VARIANT.into());
+    config.plans[0].price_ids.insert("polar".into(), STARTER_PRODUCT.into());
+    config.plans[1].price_ids.insert("polar".into(), CREATOR_PRODUCT.into());
     // Gumroad maps a plan to a product *permalink* rather than an id, and one
     // test posts a Gumroad ping to prove the form-encoded path works.
     config.plans[0].price_ids.insert("gumroad".into(), "starter-plan".into());
@@ -203,20 +181,29 @@ impl Platform {
         (status, headers, String::from_utf8_lossy(&bytes).to_string())
     }
 
-    /// Post a signed Lemon Squeezy event, as Lemon Squeezy would.
-    async fn post(&self, event: &serde_json::Value) -> (StatusCode, String) {
-        let body = serde_json::to_vec(event).unwrap();
-        self.post_raw(&body, &sign(&body, SECRET)).await
+    async fn post(&self, event: &Webhook) -> (StatusCode, String) {
+        let body = serde_json::to_vec(&event.payload).unwrap();
+        self.post_signed(&event.id, &body, &body, SECRET).await
     }
 
-    /// Post with an arbitrary signature, for the verification cases.
-    async fn post_raw(&self, body: &[u8], signature: &str) -> (StatusCode, String) {
+    async fn post_signed(
+        &self, id: &str, body: &[u8], signed_body: &[u8], secret: &str,
+    ) -> (StatusCode, String) {
+        let timestamp = chrono::Utc::now().timestamp();
+        self.post_raw(id, timestamp, body, &sign(id, timestamp, signed_body, secret)).await
+    }
+
+    async fn post_raw(
+        &self, id: &str, timestamp: i64, body: &[u8], signature: &str,
+    ) -> (StatusCode, String) {
         let request = Request::builder()
             .method("POST")
-            .uri("/webhooks/lemonsqueezy")
+            .uri("/webhooks/polar")
             .header(header::HOST, HOST)
             .header(header::CONTENT_TYPE, "application/json")
-            .header("x-signature", signature)
+            .header("webhook-id", id)
+            .header("webhook-timestamp", timestamp.to_string())
+            .header("webhook-signature", signature)
             .body(Body::from(body.to_vec()))
             .unwrap();
         let response = pro_web::entry(self.state.clone()).oneshot(request).await.unwrap();
@@ -226,7 +213,7 @@ impl Platform {
     }
 
     async fn subscription(&self, provider_id: &str) -> Option<pro_core::Subscription> {
-        pro_db::subscriptions::find_by_provider_id(&self.state.db, "lemonsqueezy", provider_id)
+        pro_db::subscriptions::find_by_provider_id(&self.state.db, "polar", provider_id)
             .await
             .unwrap()
     }
@@ -236,48 +223,53 @@ impl Platform {
     }
 }
 
-/// Lemon Squeezy's `X-Signature`: a hex HMAC-SHA256 of the raw body.
-fn sign(body: &[u8], secret: &str) -> String {
+fn sign(id: &str, timestamp: i64, body: &[u8], secret: &str) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine};
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
     let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(format!("{id}.{timestamp}.").as_bytes());
     mac.update(body);
-    hex::encode(mac.finalize().into_bytes())
+    format!("v1,{}", STANDARD.encode(mac.finalize().into_bytes()))
 }
 
-/// A subscription event in Lemon Squeezy's JSON:API shape.
+struct Webhook {
+    id: String,
+    payload: serde_json::Value,
+}
+
 fn subscription_event(
     name: &str,
     webhook_id: &str,
     subscription_id: &str,
-    variant: &str,
-    attrs: serde_json::Value,
-    custom: serde_json::Value,
-) -> serde_json::Value {
-    let mut attributes = serde_json::json!({
+    product: &str,
+    fields: serde_json::Value,
+    checkout: serde_json::Value,
+) -> Webhook {
+    let mut data = serde_json::json!({
+        "id": subscription_id,
         "status": "active",
-        "customer_id": 55443,
-        "variant_id": variant.parse::<i64>().unwrap(),
-        "cancelled": false,
+        "customer_id": "55443",
+        "customer": { "id": "55443", "external_id": checkout["account_id"] },
+        "product_id": product,
+        "cancel_at_period_end": false,
+        "metadata": { "tenant_id": checkout["tenant_id"] },
+        "modified_at": chrono::Utc::now().to_rfc3339(),
     });
-    if let (Some(base), Some(extra)) = (attributes.as_object_mut(), attrs.as_object()) {
-        for (k, v) in extra {
-            base.insert(k.clone(), v.clone());
-        }
+    for (key, value) in fields.as_object().unwrap() {
+        data[key] = value.clone();
     }
-    serde_json::json!({
-        "meta": { "event_name": name, "webhook_id": webhook_id, "custom_data": custom },
-        "data": { "type": "subscriptions", "id": subscription_id, "attributes": attributes }
-    })
+    Webhook {
+        id: webhook_id.into(),
+        payload: serde_json::json!({"type": name, "timestamp": pro_core::now_iso(), "data": data}),
+    }
 }
 
-/// A payment event, which names its subscription in the attributes.
-fn payment_event(name: &str, webhook_id: &str, subscription_id: i64) -> serde_json::Value {
-    serde_json::json!({
-        "meta": { "event_name": name, "webhook_id": webhook_id, "custom_data": {} },
-        "data": { "type": "subscription-invoices", "id": "inv_1",
-                  "attributes": { "subscription_id": subscription_id } }
-    })
+fn payment_event(webhook_id: &str, subscription_id: &str, status: &str) -> Webhook {
+    subscription_event(
+        "subscription.updated", webhook_id, subscription_id, STARTER_PRODUCT,
+        serde_json::json!({ "status": status }), serde_json::json!({}),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -291,26 +283,26 @@ async fn an_unsigned_or_wrongly_signed_event_is_refused() {
     let p = platform().await;
     let (account, tenant) = p.seed().await;
     let event = subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_1",
         "sub_1",
-        CREATOR_VARIANT,
+        CREATOR_PRODUCT,
         serde_json::json!({}),
         serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id }),
     );
-    let body = serde_json::to_vec(&event).unwrap();
+    let body = serde_json::to_vec(&event.payload).unwrap();
 
     // Signed with the wrong secret.
-    let (status, _) = p.post_raw(&body, &sign(&body, "not-the-secret")).await;
+    let (status, _) = p.post_signed(&event.id, &body, &body, "not-the-secret").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     // Not signed at all.
-    let (status, _) = p.post_raw(&body, "").await;
+    let (status, _) = p.post_raw(&event.id, chrono::Utc::now().timestamp(), &body, "").await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     // A valid signature over *different* bytes, which is what a replay of one
     // event's signature onto another's body looks like.
-    let (status, _) = p.post_raw(&body, &sign(b"{}", SECRET)).await;
+    let (status, _) = p.post_signed(&event.id, &body, b"{}", SECRET).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     // Nothing was recorded, and the site did not move.
@@ -327,23 +319,23 @@ async fn the_signature_is_over_the_raw_bytes() {
     let p = platform().await;
     let (account, tenant) = p.seed().await;
     let event = subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_raw",
         "sub_raw",
-        STARTER_VARIANT,
+        STARTER_PRODUCT,
         serde_json::json!({}),
         serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id }),
     );
 
     // Pretty-printed: same JSON, different bytes.
-    let pretty = serde_json::to_vec_pretty(&event).unwrap();
-    let (status, _) = p.post_raw(&pretty, &sign(&pretty, SECRET)).await;
+    let pretty = serde_json::to_vec_pretty(&event.payload).unwrap();
+    let (status, _) = p.post_signed(&event.id, &pretty, &pretty, SECRET).await;
     assert_eq!(status, StatusCode::OK, "the bytes that were signed are the bytes that count");
     assert!(p.subscription("sub_raw").await.is_some());
 
     // And the compact spelling's signature does not verify the pretty one.
-    let compact = serde_json::to_vec(&event).unwrap();
-    let (status, _) = p.post_raw(&pretty, &sign(&compact, SECRET)).await;
+    let compact = serde_json::to_vec(&event.payload).unwrap();
+    let (status, _) = p.post_signed(&event.id, &pretty, &compact, SECRET).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
@@ -361,11 +353,11 @@ async fn a_new_subscription_entitles_the_site() {
 
     let (status, body) = p
         .post(&subscription_event(
-            "subscription_created",
+            "subscription.created",
             "wh_1",
             "sub_1",
-            CREATOR_VARIANT,
-            serde_json::json!({ "renews_at": renews }),
+            CREATOR_PRODUCT,
+            serde_json::json!({ "current_period_end": renews }),
             serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id }),
         ))
         .await;
@@ -375,7 +367,7 @@ async fn a_new_subscription_entitles_the_site() {
     assert_eq!(stored.account_id, account.id);
     assert_eq!(stored.tenant_id.as_deref(), Some(tenant.id.as_str()));
     assert_eq!(stored.status, "active");
-    assert_eq!(stored.plan_slug, "creator", "resolved from the variant id");
+    assert_eq!(stored.plan_slug, "creator", "resolved from the product ID");
     assert_eq!(stored.current_period_end.as_deref(), Some(renews.as_str()));
     assert!(stored.is_entitled());
 
@@ -398,6 +390,65 @@ async fn a_new_subscription_entitles_the_site() {
     assert!(written.contains("limits"), "got {written}");
 }
 
+#[tokio::test]
+async fn incomplete_checkout_cannot_open_a_site() {
+    let p = platform().await;
+    let (account, tenant) = p.seed().await;
+    pro_provision::suspend_site(
+        &p.state.db, &p.state.config, &p.state.supervisor, &tenant,
+        pro_core::suspension::AWAITING_PAYMENT,
+    ).await.unwrap();
+
+    for (id, status) in [("wh_pending", "incomplete"), ("wh_abandoned", "incomplete_expired")] {
+        let result = p.post(&subscription_event(
+            "subscription.created", id, "sub_pending", STARTER_PRODUCT,
+            serde_json::json!({ "status": status }),
+            serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id }),
+        )).await;
+        assert_eq!(result.0, StatusCode::OK);
+    }
+
+    assert!(p.subscription("sub_pending").await.is_none());
+    assert_eq!(p.tenant(&tenant.id).await.status, TenantStatus::Suspended);
+}
+
+#[tokio::test]
+async fn an_older_snapshot_cannot_reactivate_a_revoked_subscription() {
+    let p = platform().await;
+    let (account, tenant) = p.seed().await;
+    let checkout = serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id });
+    let revoked = subscription_event(
+        "subscription.updated", "wh_new", "sub_ordered", STARTER_PRODUCT,
+        serde_json::json!({ "status": "canceled", "modified_at": "2026-11-21T01:00:01.012345Z" }),
+        checkout.clone(),
+    );
+    let active = subscription_event(
+        "subscription.created", "wh_old", "sub_ordered", STARTER_PRODUCT,
+        serde_json::json!({ "status": "active", "modified_at": "2026-11-21T01:00:01.012344Z" }),
+        checkout,
+    );
+
+    assert_eq!(p.post(&revoked).await.0, StatusCode::OK);
+    let (status, response) = p.post(&active).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(response.contains("ignored older subscription update"), "{response}");
+    assert_eq!(p.subscription("sub_ordered").await.unwrap().status, "canceled");
+    assert_eq!(p.tenant(&tenant.id).await.status, TenantStatus::Suspended);
+}
+
+#[tokio::test]
+async fn polar_signature_authenticates_delivery_id_and_timestamp() {
+    let p = platform().await;
+    let body = br#"{"type":"order.paid","data":{}}"#;
+    let now = chrono::Utc::now().timestamp();
+    let (status, _) = p.post_raw("other", now, body, &sign("original", now, body, SECRET)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let stale = now - pro_billing::signature::MAX_AGE_SECS - 1;
+    let (status, _) = p.post_raw("original", stale, body, &sign("original", stale, body, SECRET)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
 /// A trial is entitled, and the dashboard needs the date it ends.
 #[tokio::test]
 async fn a_trial_is_entitled_and_dated() {
@@ -407,18 +458,18 @@ async fn a_trial_is_entitled_and_dated() {
 
     let (status, _) = p
         .post(&subscription_event(
-            "subscription_created",
+            "subscription.created",
             "wh_trial",
             "sub_trial",
-            STARTER_VARIANT,
-            serde_json::json!({ "status": "on_trial", "trial_ends_at": trial_ends }),
+            STARTER_PRODUCT,
+            serde_json::json!({ "status": "trialing", "trial_end": trial_ends }),
             serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id }),
         ))
         .await;
     assert_eq!(status, StatusCode::OK);
 
     let stored = p.subscription("sub_trial").await.unwrap();
-    assert_eq!(stored.status, "trialing", "on_trial is this provider's word for it");
+    assert_eq!(stored.status, "trialing");
     assert!(stored.is_trialing());
     assert!(stored.is_entitled(), "a trial runs the site");
     assert_eq!(stored.trial_ends_at.as_deref(), Some(trial_ends.as_str()));
@@ -435,10 +486,10 @@ async fn a_retried_event_is_applied_once() {
     let p = platform().await;
     let (account, tenant) = p.seed().await;
     let event = subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_dup",
         "sub_dup",
-        CREATOR_VARIANT,
+        CREATOR_PRODUCT,
         serde_json::json!({}),
         serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id }),
     );
@@ -470,10 +521,10 @@ async fn different_events_for_one_subscription_both_apply() {
 
     let (status, _) = p
         .post(&subscription_event(
-            "subscription_created",
+            "subscription.created",
             "wh_a",
             "sub_1",
-            STARTER_VARIANT,
+            STARTER_PRODUCT,
             serde_json::json!({}),
             custom.clone(),
         ))
@@ -484,10 +535,10 @@ async fn different_events_for_one_subscription_both_apply() {
     // An upgrade, a different webhook id.
     let (status, body) = p
         .post(&subscription_event(
-            "subscription_updated",
+            "subscription.updated",
             "wh_b",
             "sub_1",
-            CREATOR_VARIANT,
+            CREATOR_PRODUCT,
             serde_json::json!({}),
             custom,
         ))
@@ -510,16 +561,16 @@ async fn a_failed_payment_starts_dunning_without_suspending() {
     let custom = serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id });
 
     p.post(&subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_1",
         "998877",
-        STARTER_VARIANT,
+        STARTER_PRODUCT,
         serde_json::json!({}),
         custom,
     ))
     .await;
 
-    let (status, _) = p.post(&payment_event("subscription_payment_failed", "wh_2", 998877)).await;
+    let (status, _) = p.post(&payment_event("wh_2", "998877", "past_due")).await;
     assert_eq!(status, StatusCode::OK);
 
     let stored = p.subscription("998877").await.unwrap();
@@ -533,12 +584,7 @@ async fn a_failed_payment_starts_dunning_without_suspending() {
     );
 }
 
-/// The regression guard for the worst bug this integration had.
-///
-/// `subscription_payment_recovered` is Lemon Squeezy's word for a previously
-/// failed payment finally going through. It was unhandled, so a customer who
-/// paid stayed `past_due` and the housekeeping sweep suspended their site at
-/// the end of the grace period — after they had paid.
+/// A successful retry updates the subscription and restores a suspended site.
 #[tokio::test]
 async fn a_recovered_payment_clears_dunning_and_restores_the_site() {
     let p = platform().await;
@@ -546,15 +592,15 @@ async fn a_recovered_payment_clears_dunning_and_restores_the_site() {
     let custom = serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id });
 
     p.post(&subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_1",
         "998877",
-        STARTER_VARIANT,
+        STARTER_PRODUCT,
         serde_json::json!({}),
         custom,
     ))
     .await;
-    p.post(&payment_event("subscription_payment_failed", "wh_2", 998877)).await;
+    p.post(&payment_event("wh_2", "998877", "past_due")).await;
 
     // The grace period ran out and the sweep suspended the site, which is the
     // state a customer is in when they finally pay.
@@ -572,7 +618,7 @@ async fn a_recovered_payment_clears_dunning_and_restores_the_site() {
 
     // Now the payment comes good.
     let (status, body) = p
-        .post(&payment_event("subscription_payment_recovered", "wh_3", 998877))
+        .post(&payment_event("wh_3", "998877", "active"))
         .await;
     assert_eq!(status, StatusCode::OK, "got {body}");
 
@@ -587,33 +633,11 @@ async fn a_recovered_payment_clears_dunning_and_restores_the_site() {
     );
 }
 
-/// A refund is money going back out, so it enters dunning like a decline.
-#[tokio::test]
-async fn a_refunded_payment_enters_dunning() {
-    let p = platform().await;
-    let (account, tenant) = p.seed().await;
-    p.post(&subscription_event(
-        "subscription_created",
-        "wh_1",
-        "998877",
-        STARTER_VARIANT,
-        serde_json::json!({}),
-        serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id }),
-    ))
-    .await;
-
-    let (status, _) =
-        p.post(&payment_event("subscription_payment_refunded", "wh_2", 998877)).await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(p.subscription("998877").await.unwrap().status, "past_due");
-}
-
 // ---------------------------------------------------------------------------
 // Plan changes
 // ---------------------------------------------------------------------------
 
-/// The other bug: an upgrade arrives as `subscription_plan_changed`, and while
-/// it was ignored the customer paid for Creator and kept Starter's limits.
+/// A product change replaces the limits on the previously purchased plan.
 #[tokio::test]
 async fn a_plan_change_moves_the_site() {
     let p = platform().await;
@@ -621,10 +645,10 @@ async fn a_plan_change_moves_the_site() {
     let custom = serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id });
 
     p.post(&subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_1",
         "sub_1",
-        STARTER_VARIANT,
+        STARTER_PRODUCT,
         serde_json::json!({}),
         custom.clone(),
     ))
@@ -633,10 +657,10 @@ async fn a_plan_change_moves_the_site() {
 
     let (status, body) = p
         .post(&subscription_event(
-            "subscription_plan_changed",
+            "subscription.updated",
             "wh_2",
             "sub_1",
-            CREATOR_VARIANT,
+            CREATOR_PRODUCT,
             serde_json::json!({}),
             custom,
         ))
@@ -658,10 +682,10 @@ async fn a_downgrade_applies_too() {
     let custom = serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id });
 
     p.post(&subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_1",
         "sub_1",
-        CREATOR_VARIANT,
+        CREATOR_PRODUCT,
         serde_json::json!({}),
         custom.clone(),
     ))
@@ -669,10 +693,10 @@ async fn a_downgrade_applies_too() {
     assert_eq!(p.tenant(&tenant.id).await.plan_slug, "creator");
 
     p.post(&subscription_event(
-        "subscription_updated",
+        "subscription.updated",
         "wh_2",
         "sub_1",
-        STARTER_VARIANT,
+        STARTER_PRODUCT,
         serde_json::json!({}),
         custom,
     ))
@@ -684,9 +708,7 @@ async fn a_downgrade_applies_too() {
 // Ending a subscription
 // ---------------------------------------------------------------------------
 
-/// Lemon Squeezy's `cancelled` means "will not renew", with the site live
-/// until `ends_at`. Reading it as immediate would cut a paying customer off
-/// early — they have paid for the rest of the period.
+/// A scheduled cancellation keeps the paid subscription active.
 #[tokio::test]
 async fn a_cancellation_leaves_the_site_up_until_the_period_ends() {
     let p = platform().await;
@@ -694,10 +716,10 @@ async fn a_cancellation_leaves_the_site_up_until_the_period_ends() {
     let custom = serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id });
 
     p.post(&subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_1",
         "sub_1",
-        STARTER_VARIANT,
+        STARTER_PRODUCT,
         serde_json::json!({}),
         custom.clone(),
     ))
@@ -709,14 +731,14 @@ async fn a_cancellation_leaves_the_site_up_until_the_period_ends() {
     let ends = pro_core::days_from_now(20);
     let (status, _) = p
         .post(&subscription_event(
-            "subscription_cancelled",
+            "subscription.canceled",
             "wh_2",
             "sub_1",
-            STARTER_VARIANT,
+            STARTER_PRODUCT,
             serde_json::json!({
-                "status": "cancelled",
-                "cancelled": true,
-                "ends_at": ends,
+                "status": "active",
+                "cancel_at_period_end": true,
+                "current_period_end": ends,
             }),
             custom,
         ))
@@ -743,10 +765,10 @@ async fn an_expired_subscription_suspends_the_site() {
     let custom = serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id });
 
     p.post(&subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_1",
         "sub_1",
-        STARTER_VARIANT,
+        STARTER_PRODUCT,
         serde_json::json!({}),
         custom.clone(),
     ))
@@ -754,11 +776,11 @@ async fn an_expired_subscription_suspends_the_site() {
 
     let (status, body) = p
         .post(&subscription_event(
-            "subscription_expired",
+            "subscription.revoked",
             "wh_2",
             "sub_1",
-            STARTER_VARIANT,
-            serde_json::json!({ "status": "expired" }),
+            STARTER_PRODUCT,
+            serde_json::json!({ "status": "unpaid" }),
             custom,
         ))
         .await;
@@ -774,9 +796,7 @@ async fn an_expired_subscription_suspends_the_site() {
     assert!(tenant.suspended_reason.is_some(), "and it says why");
 }
 
-/// `unpaid` means opposite things at Stripe and Lemon Squeezy: Stripe is still
-/// dunning, Lemon Squeezy has given up. Mapping both to one status would
-/// either suspend early or never suspend at all.
+/// Polar reports unpaid when it exhausts payment retries.
 #[tokio::test]
 async fn unpaid_is_terminal_at_this_provider() {
     let p = platform().await;
@@ -784,19 +804,19 @@ async fn unpaid_is_terminal_at_this_provider() {
     let custom = serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id });
 
     p.post(&subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_1",
         "sub_1",
-        STARTER_VARIANT,
+        STARTER_PRODUCT,
         serde_json::json!({}),
         custom.clone(),
     ))
     .await;
     p.post(&subscription_event(
-        "subscription_updated",
+        "subscription.updated",
         "wh_2",
         "sub_1",
-        STARTER_VARIANT,
+        STARTER_PRODUCT,
         serde_json::json!({ "status": "unpaid" }),
         custom,
     ))
@@ -815,27 +835,29 @@ async fn unpaid_is_terminal_at_this_provider() {
 #[tokio::test]
 async fn an_unhandled_event_is_acknowledged() {
     let p = platform().await;
-    let event = serde_json::json!({
-        "meta": { "event_name": "license_key_created", "webhook_id": "wh_lic" },
-        "data": { "id": "lic_1", "attributes": {} }
-    });
+    let event = Webhook {
+        id: "wh_product".into(),
+        payload: serde_json::json!({ "type": "product.created", "data": { "id": "product_1" } }),
+    };
     let (status, body) = p.post(&event).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("ignored"), "got {body}");
 }
 
 /// An order event names an order, not a subscription. For a subscription
-/// product the matching `subscription_created` arrives too, so this one has
+/// product the matching `subscription.created` arrives too, so this one has
 /// nothing to do.
 #[tokio::test]
 async fn order_events_are_acknowledged_without_acting() {
     let p = platform().await;
     let (account, _) = p.seed().await;
-    let event = serde_json::json!({
-        "meta": { "event_name": "order_created", "webhook_id": "wh_order",
-                  "custom_data": { "account_id": account.id } },
-        "data": { "id": "ord_1", "attributes": { "status": "paid" } }
-    });
+    let event = Webhook {
+        id: "wh_order".into(),
+        payload: serde_json::json!({
+            "type": "order.paid",
+            "data": { "id": "ord_1", "status": "paid", "customer": { "external_id": account.id } }
+        }),
+    };
     let (status, body) = p.post(&event).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("ignored"), "got {body}");
@@ -855,19 +877,19 @@ async fn order_events_are_acknowledged_without_acting() {
 async fn an_unattributable_event_is_recorded_for_an_operator() {
     let p = platform().await;
     let event = subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_orphan",
         "sub_orphan",
-        STARTER_VARIANT,
+        STARTER_PRODUCT,
         serde_json::json!({}),
-        // No account_id, and a customer id this platform has never seen.
+        // No external account ID, and a customer ID this platform has never seen.
         serde_json::json!({}),
     );
     let (status, body) = p.post(&event).await;
     assert_eq!(
         status,
         StatusCode::OK,
-        "accepted, so Lemon Squeezy stops resending: {body}"
+        "accepted, so Polar stops resending: {body}"
     );
     assert!(body.contains("accepted_with_error"), "got {body}");
 
@@ -875,9 +897,9 @@ async fn an_unattributable_event_is_recorded_for_an_operator() {
     let failed = pro_db::audit::failed_webhooks(&p.state.db, 50).await.unwrap();
     assert_eq!(failed.len(), 1, "an operator has to be able to see this");
     let (provider, event_id, event_type, error) = &failed[0];
-    assert_eq!(provider, "lemonsqueezy");
+    assert_eq!(provider, "polar");
     assert_eq!(event_id, "wh_orphan");
-    assert_eq!(event_type, "subscription_created");
+    assert_eq!(event_type, "subscription.created");
     assert!(!error.is_empty(), "with a reason");
 }
 
@@ -890,10 +912,10 @@ async fn an_operator_can_replay_a_failed_event() {
     // Arrives before the account exists, which is how a webhook overtakes a
     // signup that is still in flight.
     let event = subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_replay",
         "sub_replay",
-        CREATOR_VARIANT,
+        CREATOR_PRODUCT,
         serde_json::json!({}),
         serde_json::json!({ "account_id": "acc_not_yet", "tenant_id": "ten_not_yet" }),
     );
@@ -907,17 +929,17 @@ async fn an_operator_can_replay_a_failed_event() {
     // bytes that passed it on arrival.
     let (account, tenant) = p.seed().await;
     let event = subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_replay2",
         "sub_replay",
-        CREATOR_VARIANT,
+        CREATOR_PRODUCT,
         serde_json::json!({}),
         serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id }),
     );
     let (status, _) = p.post(&event).await;
     assert_eq!(status, StatusCode::OK);
 
-    let outcome = pro_web::webhooks::replay_event(&p.state, "lemonsqueezy", "wh_replay2")
+    let outcome = pro_web::webhooks::replay_event(&p.state, "polar", "wh_replay2")
         .await
         .unwrap();
     assert!(!outcome.is_empty(), "the operator is told what the replay did");
@@ -946,7 +968,7 @@ async fn an_unconfigured_provider_is_refused() {
 #[tokio::test]
 async fn a_gumroad_ping_needs_its_token() {
     let p = platform().await;
-    // Configure Gumroad alongside Lemon Squeezy — webhooks are accepted from
+    // Configure Gumroad alongside Polar — webhooks are accepted from
     // every configured provider, not only the active one.
     p.state
         .settings
@@ -1040,17 +1062,13 @@ async fn a_new_site_is_closed_until_the_payment_lands() {
     assert_eq!(closed.status, TenantStatus::Suspended);
     assert!(closed.is_suspended_for_billing(), "the payment pipeline must recognise it");
 
-    // The customer pays. Lemon Squeezy — like Stripe's
-    // `checkout.session.completed` — reports this as a subscription coming
-    // into existence, not as a payment, so the site has to open on *this*
-    // event. Opening only on a payment event would leave it closed until an
-    // invoice happened to follow.
+    // The active subscription opens the site once checkout completes.
     let (status, body) = p
         .post(&subscription_event(
-            "subscription_created",
+            "subscription.created",
             "wh_1",
             "778899",
-            STARTER_VARIANT,
+            STARTER_PRODUCT,
             serde_json::json!({}),
             serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id }),
         ))
@@ -1081,10 +1099,10 @@ async fn a_payment_does_not_reopen_a_site_an_operator_shut() {
     let custom = serde_json::json!({ "account_id": account.id, "tenant_id": tenant.id });
 
     p.post(&subscription_event(
-        "subscription_created",
+        "subscription.created",
         "wh_1",
         "665544",
-        STARTER_VARIANT,
+        STARTER_PRODUCT,
         serde_json::json!({}),
         custom.clone(),
     ))
@@ -1103,13 +1121,13 @@ async fn a_payment_does_not_reopen_a_site_an_operator_shut() {
     .unwrap();
 
     // Every way a payment can arrive.
-    p.post(&payment_event("subscription_payment_success", "wh_2", 665544)).await;
-    p.post(&payment_event("subscription_payment_recovered", "wh_3", 665544)).await;
+    p.post(&payment_event("wh_2", "665544", "active")).await;
+    p.post(&payment_event("wh_3", "665544", "active")).await;
     p.post(&subscription_event(
-        "subscription_updated",
+        "subscription.updated",
         "wh_4",
         "665544",
-        STARTER_VARIANT,
+        STARTER_PRODUCT,
         serde_json::json!({ "status": "active" }),
         custom,
     ))

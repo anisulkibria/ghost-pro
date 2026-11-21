@@ -1,0 +1,34 @@
+{
+  "providerId": "vuuut.com",
+  "providerName": "Vuuut Pro",
+  "serviceId": "apex-dual",
+  "serviceName": "Vuuut Pro Root domain (IPv4 and IPv6)",
+  "version": 1,
+  "description": "Connect your domain to a Vuuut Pro site.",
+  "syncPubKeyDomain": "domainconnect.vuuut.com",
+  "syncRedirectDomain": "vuuut.com",
+  "variableDescription": "%ipv4% contains public IPv4 address of the Vuuut Pro deployment. %ipv6% contains public IPv6 address of the Vuuut Pro deployment. %ownership% contains domain ownership token without the ghost-pro-verify= prefix.",
+  "records": [
+    {
+      "type": "A",
+      "host": "@",
+      "pointsTo": "%ipv4%",
+      "ttl": 600
+    },
+    {
+      "type": "AAAA",
+      "host": "@",
+      "pointsTo": "%ipv6%",
+      "ttl": 600
+    },
+    {
+      "type": "TXT",
+      "host": "_ghost-pro-challenge",
+      "data": "ghost-pro-verify=%ownership%",
+      "ttl": 600,
+      "essential": "OnApply",
+      "txtConflictMatchingMode": "Prefix",
+      "txtConflictMatchingPrefix": "ghost-pro-verify="
+    }
+  ]
+}

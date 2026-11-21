@@ -159,7 +159,7 @@ async fn check_txt(
     false
 }
 
-fn resolver() -> Result<hickory_resolver::TokioResolver> {
+pub(crate) fn resolver() -> Result<hickory_resolver::TokioResolver> {
     // The system resolver, so an operator's own DNS choices — a local
     // forwarder, a split-horizon zone — are honoured rather than bypassed.
     // A platform whose resolver cannot be built is misconfigured in a way
@@ -197,11 +197,21 @@ pub struct DnsRecord {
 /// forbidden by the DNS specification and only works where a provider offers a
 /// proprietary flattening — so it gets `A` records instead.
 pub fn instructions(domain: &str, token: &str, expect: &Expectation) -> Instructions {
+    instructions_for_zone(domain, token, expect, None)
+}
+
+pub fn instructions_for_zone(
+    domain: &str,
+    token: &str,
+    expect: &Expectation,
+    zone: Option<&str>,
+) -> Instructions {
     let domain = normalize_host(domain);
-    let is_apex = domain.matches('.').count() <= 1;
+    let zone = zone.or_else(|| psl::domain_str(&domain)).unwrap_or(&domain);
+    let host = zone_host(&domain, zone).unwrap_or("");
     let mut records = Vec::new();
 
-    if is_apex {
+    if host.is_empty() {
         for address in &expect.addresses {
             records.push(DnsRecord {
                 kind: if address.is_ipv4() { "A" } else { "AAAA" },
@@ -211,23 +221,39 @@ pub fn instructions(domain: &str, token: &str, expect: &Expectation) -> Instruct
             });
         }
     } else {
-        let label = domain.split('.').next().unwrap_or("www").to_string();
         records.push(DnsRecord {
             kind: "CNAME",
-            name: label,
+            name: host.to_string(),
             value: format!("{}.", expect.cname_target.trim_end_matches('.')),
-            note: "Preferred: keeps working if the platform's address changes.",
+            note: "Keeps working if the platform's address changes.",
         });
     }
 
+    let challenge = if host.is_empty() {
+        "_ghost-pro-challenge".into()
+    } else {
+        format!("_ghost-pro-challenge.{host}")
+    };
     records.push(DnsRecord {
         kind: "TXT",
-        name: if is_apex { "_ghost-pro-challenge".into() } else { "_ghost-pro-challenge".into() },
+        name: challenge,
         value: token.to_string(),
-        note: "Optional. Proves you own the domain before you switch traffic over.",
+        note: "Optional. Proves control before you switch traffic over.",
     });
 
     Instructions { records }
+}
+
+pub fn is_apex(domain: &str, zone: Option<&str>) -> bool {
+    zone.or_else(|| psl::domain_str(domain)).unwrap_or(domain) == domain
+}
+
+/// Relative DNS owner name in the selected zone. The empty string is the apex.
+pub(crate) fn zone_host<'a>(domain: &'a str, zone: &str) -> Option<&'a str> {
+    if domain == zone {
+        return Some("");
+    }
+    domain.strip_suffix(zone)?.strip_suffix('.')
 }
 
 #[cfg(test)]
@@ -297,14 +323,29 @@ mod tests {
     /// control before cutting traffic over.
     #[test]
     fn always_offers_the_ownership_record() {
-        for domain in ["customer.com", "blog.customer.com"] {
+        for (domain, host) in [
+            ("customer.com", "_ghost-pro-challenge"),
+            ("blog.customer.com", "_ghost-pro-challenge.blog"),
+        ] {
             let i = instructions(domain, "ghost-pro-verify=abc", &expect());
             let txt = i.records.iter().find(|r| r.kind == "TXT").expect("a TXT record");
             assert_eq!(txt.value, "ghost-pro-verify=abc");
             // At a dedicated name, so it cannot collide with SPF or DMARC at
             // the apex.
-            assert_eq!(txt.name, "_ghost-pro-challenge");
+            assert_eq!(txt.name, host);
         }
+    }
+
+    #[test]
+    fn record_names_are_relative_to_the_authoritative_zone() {
+        let i = instructions("www.blog.customer.co.uk", "t", &expect());
+        assert_eq!(i.records[0].name, "www.blog");
+        assert_eq!(i.records[1].name, "_ghost-pro-challenge.www.blog");
+
+        let i = instructions_for_zone("blog.customer.co.uk", "t", &expect(), Some("blog.customer.co.uk"));
+        assert_eq!(i.records[0].kind, "A");
+        assert_eq!(i.records[0].name, "@");
+        assert_eq!(i.records[1].name, "_ghost-pro-challenge");
     }
 
     /// A hostname with a port or a trailing dot must still be understood.

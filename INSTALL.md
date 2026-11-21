@@ -265,6 +265,89 @@ Every value can also be set from the environment, with `__` to nest —
 over the file, which is what makes one checkout serve both a development and a
 production deployment.
 
+### Polar billing
+
+1. In the Polar organization, create a recurring product for each plan and
+   billing interval you sell. In **Owner → Plans**, put the product UUID in the
+   corresponding **Polar Product ID** field. The config-file equivalent is
+   `plans[].priceIds.polar`.
+2. Create a Polar organization access token with `checkouts:write`,
+   `customer_sessions:write`, and `subscriptions:write`. In
+   **Owner → Settings → Billing**, expand **Polar** under **Payment processor
+   credentials**. Enter the token, set the environment, and enter the signing
+   secret for `POST /webhooks/polar`. Subscribe the
+   endpoint to `subscription.created` and `subscription.updated`.
+3. In **Owner → Settings → Billing**, select **Polar** as the active provider.
+   For file or environment configuration use `billing.provider` and
+   `billing.polar.{accessToken,webhookSecret,sandbox}`, or
+   `PRO_BILLING__PROVIDER`, `PRO_BILLING__POLAR__ACCESS_TOKEN`,
+   `PRO_BILLING__POLAR__WEBHOOK_SECRET`, and `PRO_BILLING__POLAR__SANDBOX`.
+4. Use a separate Polar sandbox organization, token, and product IDs for local
+   testing. With the CLI signed into the sandbox, run
+   `polar webhook listen 8080/webhooks/polar` and use the secret from
+   `polar webhook listen --print-secret` in the local configuration.
+
+For a deployment switching from Lemon Squeezy, replace the old
+`billing.provider` value in your config file or environment before upgrading.
+The database migration clears the retired credentials and switches any saved
+provider selection from Lemon Squeezy to Polar. Historical subscriptions
+retain their original provider and IDs. Coordinate existing renewals and
+saved payment methods with Polar before moving paying customers.
+See [Polar's migration guide](https://polar.sh/docs/migrate-lemon-squeezy).
+
+### Domain Connect
+
+Customers can find their DNS provider and see manual setup instructions on
+their domain’s page. To enable automatic approval, deploy the dashboard at a
+public HTTPS URL and use a publicly delegated domain you control for the
+provider ID and signing key. The [bundled templates](./domain-connect) use
+`vuuut.com`. To change it, update the filenames, `providerId`,
+`syncPubKeyDomain`, and `syncRedirectDomain` in the templates, then set the
+same provider ID in `pro.json`.
+
+Generate a private signing key in the deployment directory and export its
+public key as base64.
+
+```bash
+(umask 077 && openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out domain-connect.pem)
+openssl pkey -in domain-connect.pem -pubout -outform DER | openssl base64 -A | fold -w 200
+```
+
+Publish each line as a separate TXT record at
+`_dcpubkeyv1.domainconnect.vuuut.com` for the bundled templates. Set the
+values to `p=1,a=RS256,d=<first line>`, `p=2,a=RS256,d=<second line>`,
+continuing in order. Keep the private key in the deployment directory.
+
+Add the following to `pro.json`. Update `providerId` and `keyId` if you use
+a different template identifier or signing key label.
+
+```json
+"domainConnect": {
+  "providerId": "vuuut.com",
+  "privateKeyFile": "domain-connect.pem",
+  "keyId": "_dcpubkeyv1"
+}
+```
+
+The subdomain template uses `subdomainBase` as the CNAME target. Root-domain
+templates use `publicAddresses` with one address per configured IP family.
+
+1. Run `dc-template-linter -cloudflare -tolerate info domain-connect/*.json`.
+   Test the records with sample values in the online editor and copy the test
+   links. The template adds `ghost-pro-verify=` to the `ownership` input.
+   [Domain Connect submission guide](https://github.com/Domain-Connect/Templates#submitting-a-pull-request)
+2. Put the templates in the root of a fork of the registry. Open a pull
+   request using its PR template and include the editor test links.
+   [Domain Connect template registry](https://github.com/Domain-Connect/Templates)
+3. After the PR merges, email `domain-connect@cloudflare.com` with the
+   merged template links, the signing key TXT hostname, and a logo. Request
+   **DNS only** as the default proxy status so Vuuut Pro can verify the
+   routing records. You can include a Cloudflare account ID for a test rollout.
+   [Cloudflare onboarding instructions](https://developers.cloudflare.com/dns/reference/domain-connect/)
+
+Once Cloudflare publishes the matching template, **Connect automatically**
+offers **Continue to Cloudflare** on eligible domain pages.
+
 ### Changing the defaults `init` writes
 
 ```bash
@@ -384,7 +467,7 @@ which `SIGKILL` skips.
 
 ## Managed email with Amazon SES or Mailgun
 
-Open **Console → Settings → Amazon SES**, enter the AWS region and SES
+Open **Console → Settings → Email → Amazon SES**, then enter the AWS region and SES
 SMTP username/password, and save. For credentials downloaded through Mail Manager,
 also paste the CSV's **SMTP Endpoint** into **SES SMTP endpoint**. Use the plain
 **Username** and **Password** columns; SMTP handles Base64 encoding itself.
@@ -448,7 +531,7 @@ are not ingested through SNS. Mailgun's existing event handling remains availabl
 SES newsletters reuse connections across batches and send one personalized message
 per subscriber, with a `List-Unsubscribe` header. Explicit temporary SMTP refusals
 are retried with backoff; permanent refusals are recorded as failed recipients.
-Use **Amazon SES → Newsletter messages per second** (`mail.ses.maxSendRate`) to
+Use **Email → Amazon SES → Newsletter messages per second** (`mail.ses.maxSendRate`) to
 set the per-newsletter rate (default 1). Allocate your SES account rate across
 concurrent tenant sends and reserve capacity for transactional email; this setting
 is not a shared account-wide quota coordinator. AWS enforces account quotas.
@@ -457,12 +540,11 @@ is not a shared account-wide quota coordinator. AWS enforces account quotas.
 ## Console settings pages
 
 `/owner/settings` is a searchable directory, matching the CMS settings layout.
-Open General settings, Signup & security, Billing, a payment provider, Email,
-Amazon SES, or Mailgun to edit that section. Each page has a Save button and a
-back link. Saving returns to the same section and leaves other sections alone.
-Provider credentials remain write-only, and role restrictions still apply.
-Search matches setting names and descriptions and links to individual fields.
-Staff, Plans, and History remain available from the directory.
+Open General settings, Signup & security, Billing, or Email. Billing contains
+payment processor credentials, and Email contains the Amazon SES and Mailgun
+settings. Each page has a Save button and a back link. Provider credentials
+remain write-only and role restrictions apply. Search links to individual
+fields. The directory also links to Staff, Plans, and History.
 
 
 ## Monthly email allowances and usage

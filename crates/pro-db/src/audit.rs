@@ -325,7 +325,7 @@ mod tests {
         assert_eq!(claim_webhook(&pool, "stripe", "1", "a", "{}").await.unwrap(), WebhookClaim::Fresh);
         assert_eq!(claim_webhook(&pool, "paddle", "1", "a", "{}").await.unwrap(), WebhookClaim::Fresh);
         assert_eq!(
-            claim_webhook(&pool, "lemonsqueezy", "1", "a", "{}").await.unwrap(),
+            claim_webhook(&pool, "polar", "1", "a", "{}").await.unwrap(),
             WebhookClaim::Fresh
         );
     }

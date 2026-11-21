@@ -90,7 +90,8 @@ async fn billing_inner(
         for tenant in &tenants {
             let subscription = subscriptions
                 .iter()
-                .find(|s| s.tenant_id.as_deref() == Some(tenant.id.as_str()));
+                .filter(|s| s.tenant_id.as_deref() == Some(tenant.id.as_str()))
+                .max_by_key(|s| (s.is_entitled(), s.provider != "manual", &s.created_at));
             let plan = live.plan(&tenant.plan_slug);
             let plan_name = plan
                 .as_ref()
@@ -149,7 +150,8 @@ async fn billing_inner(
             };
 
             let (manage, cancel) = match subscription {
-                Some(s) if s.provider != "manual" && s.provider_subscription_id.is_some() => {
+                Some(s) if s.provider_subscription_id.is_some()
+                    && live.provider_is_configured(&s.provider) => {
                     // Built from the subscription's *own* provider, not the
                     // platform's current one: what a customer can do with a
                     // subscription is decided by where it lives, and a
@@ -200,6 +202,23 @@ async fn billing_inner(
                 _ => (String::new(), String::new()),
             };
 
+            let subscribe = if live.billing_provider() == "polar"
+                && tenant.status == pro_core::TenantStatus::Active
+                && subscription.is_some_and(|sub| {
+                    sub.provider == "manual" && matches!(sub.status.as_str(), "trialing" | "past_due")
+                })
+                && plan.as_ref().is_some_and(|plan| plan.is_purchasable("polar"))
+            {
+                view::action_button(
+                    &format!("/dashboard/sites/{}/pay", tenant.id),
+                    "Subscribe",
+                    "outlined small",
+                    None,
+                )
+            } else {
+                String::new()
+            };
+
             body.push_str(&view::rows(&view::row(
                 "sites",
                 "blue",
@@ -217,9 +236,10 @@ async fn billing_inner(
                     },
                 ),
                 &format!(
-                    r#"{manage}{cancel}<a class="btn tonal small" href="/dashboard/billing?site={id}#plans">Change plan</a>"#,
+                    r#"{manage}{cancel}{subscribe}<a class="btn tonal small" href="/dashboard/billing?site={id}#plans">Change plan</a>"#,
                     manage = manage,
                     cancel = cancel,
+                    subscribe = subscribe,
                     id = view::attr(&tenant.id),
                 ),
             )));
@@ -357,11 +377,8 @@ async fn change_plan_inner(
     let tenant = auth::owned_tenant(state, &account, &form.tenant_id).await?;
     let live = state.live();
 
-    let plan = live
-        .config()
-        .plan(form.plan.trim())
-        .ok_or_else(|| ProError::BadRequest("That plan is not available.".into()))?
-        .clone();
+    let plan = live.plan(form.plan.trim())
+        .ok_or_else(|| ProError::BadRequest("That plan is not available.".into()))?;
 
     if plan.slug == tenant.plan_slug {
         return Ok(redirect_with(
@@ -406,13 +423,29 @@ async fn change_plan_inner(
 
     let provider = pro_billing::require(&live)?;
 
+    if !plan.is_purchasable(provider.name()) {
+        return Err(ProError::BadRequest("That plan is not available for checkout.".into()));
+    }
+
     // End the subscription this site already has before starting another,
     // or a plan change becomes two live subscriptions and a double bill. The
     // old one is asked to run to its period end, so a customer who abandons
     // the new checkout keeps what they have already paid for rather than
     // losing the site mid-change.
     if let Some(existing) = pro_db::subscriptions::for_tenant(&state.db, &tenant.id).await? {
-        let live_sub = matches!(existing.status.as_str(), "active" | "trialing" | "past_due");
+        let live_sub = existing.is_entitled() && existing.provider_subscription_id.is_some();
+        if live_sub && (existing.provider == "polar" || provider.name() == "polar") {
+            if existing.provider == provider.name() {
+                provider.change_plan(&existing, &plan).await?;
+                return Ok(redirect_with(
+                    "/dashboard/billing",
+                    Flash::ok("Your subscription plan is being updated by Polar."),
+                ));
+            }
+            return Err(ProError::Conflict(
+                "This site still has a subscription with another provider. Contact support to move it.".into(),
+            ));
+        }
         if live_sub
             && existing.provider == provider.name()
             && existing.provider_subscription_id.is_some()
@@ -539,27 +572,28 @@ pub async fn cancel_subscription(
 
         let at_period_end = provider.cancel_subscription(&subscription).await?;
 
-        // The provider's webhook will state the end when it lands; this is
-        // the platform's own record of what was asked for, so the page can
-        // say "Ending" without waiting for it.
-        pro_db::subscriptions::upsert(
-            &state.db,
-            pro_db::subscriptions::Upsert {
-                account_id: &subscription.account_id,
-                tenant_id: subscription.tenant_id.as_deref(),
-                plan_slug: Some(&subscription.plan_slug),
-                provider: &subscription.provider,
-                provider_subscription_id: subscription.provider_subscription_id.as_deref(),
-                provider_customer_id: subscription.provider_customer_id.as_deref(),
-                status: Some(&subscription.status),
-                current_period_start: subscription.current_period_start.as_deref(),
-                current_period_end: subscription.current_period_end.as_deref(),
-                trial_ends_at: subscription.trial_ends_at.as_deref(),
-                cancel_at_period_end: Some(at_period_end),
-                canceled_at: (!at_period_end).then(pro_core::now_iso).as_deref(),
-            },
-        )
-        .await?;
+        // Polar applies the complete cancellation snapshot from its webhook.
+        // Avoid overwriting that snapshot if it arrived during the API call.
+        if provider.name() != "polar" {
+            pro_db::subscriptions::upsert(
+                &state.db,
+                pro_db::subscriptions::Upsert {
+                    account_id: &subscription.account_id,
+                    tenant_id: subscription.tenant_id.as_deref(),
+                    plan_slug: Some(&subscription.plan_slug),
+                    provider: &subscription.provider,
+                    provider_subscription_id: subscription.provider_subscription_id.as_deref(),
+                    provider_customer_id: subscription.provider_customer_id.as_deref(),
+                    status: Some(&subscription.status),
+                    current_period_start: subscription.current_period_start.as_deref(),
+                    current_period_end: subscription.current_period_end.as_deref(),
+                    trial_ends_at: subscription.trial_ends_at.as_deref(),
+                    cancel_at_period_end: Some(at_period_end),
+                    canceled_at: (!at_period_end).then(pro_core::now_iso).as_deref(),
+                },
+            )
+            .await?;
+        }
 
         pro_db::audit::record(
             &state.db,

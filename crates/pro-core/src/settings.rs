@@ -27,7 +27,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 use crate::config::{
-    Config, GumroadConfig, LemonSqueezyConfig, MailConfig, PaddleConfig, StripeConfig,
+    Config, GumroadConfig, MailConfig, PaddleConfig, PolarConfig, StripeConfig, BILLING_PROVIDERS,
 };
 use crate::models::StaffRole;
 use crate::error::{ProError, Result};
@@ -118,7 +118,7 @@ pub static REGISTRY: &[SettingDef] = &[
             ("none", "No billing (provision by hand)"),
             ("stripe", "Stripe"),
             ("paddle", "Paddle"),
-            ("lemonsqueezy", "Lemon Squeezy"),
+            ("polar", "Polar"),
             ("gumroad", "Gumroad"),
         ]),
         min_role: StaffRole::Owner,
@@ -215,44 +215,34 @@ pub static REGISTRY: &[SettingDef] = &[
         min_role: StaffRole::Owner,
         fallback: |c| Value::Bool(c.billing.paddle.sandbox),
     },
-    // ---- Lemon Squeezy ---------------------------------------------------
+    // ---- Polar -----------------------------------------------------------
     SettingDef {
-        key: "billing.lemonsqueezy.apiKey",
-        group: "Lemon Squeezy",
-        label: "API key",
-        help: "Created under Settings → API in your Lemon Squeezy dashboard.",
+        key: "billing.polar.accessToken",
+        group: "Polar",
+        label: "Organization access token",
+        help: "Create a token for the Polar organization in the selected environment.",
         kind: Kind::Secret,
         min_role: StaffRole::Owner,
-        fallback: |c| opt(&c.billing.lemonsqueezy.api_key),
+        fallback: |c| opt(&c.billing.polar.access_token),
     },
     SettingDef {
-        key: "billing.lemonsqueezy.storeId",
-        group: "Lemon Squeezy",
-        label: "Store ID",
-        help: "The numeric id of the store checkouts are created in.",
-        kind: Kind::Text,
-        min_role: StaffRole::Owner,
-        fallback: |c| opt(&c.billing.lemonsqueezy.store_id),
-    },
-    SettingDef {
-        key: "billing.lemonsqueezy.webhookSecret",
-        group: "Lemon Squeezy",
+        key: "billing.polar.webhookSecret",
+        group: "Polar",
         label: "Webhook signing secret",
-        help: "The signing secret of the webhook you pointed at /webhooks/lemonsqueezy, \
-               used to verify X-Signature. Send the subscription_* events (all twelve); \
-               order, license, customer, affiliate and dispute events are not used.",
+        help: "Add /webhooks/polar as a Polar webhook endpoint. Subscribe to \
+               subscription.created and subscription.updated, and paste its signing secret here.",
         kind: Kind::Secret,
         min_role: StaffRole::Owner,
-        fallback: |c| opt(&c.billing.lemonsqueezy.webhook_secret),
+        fallback: |c| opt(&c.billing.polar.webhook_secret),
     },
     SettingDef {
-        key: "billing.lemonsqueezy.testMode",
-        group: "Lemon Squeezy",
-        label: "Create checkouts in test mode",
-        help: "Test-mode checkouts take no real money.",
+        key: "billing.polar.sandbox",
+        group: "Polar",
+        label: "Use Polar sandbox",
+        help: "Use the sandbox organization, token, and product IDs for test payments.",
         kind: Kind::Bool,
         min_role: StaffRole::Owner,
-        fallback: |c| Value::Bool(c.billing.lemonsqueezy.test_mode),
+        fallback: |c| Value::Bool(c.billing.polar.sandbox),
     },
     // ---- which product each plan is, at each provider --------------------
     //
@@ -265,7 +255,7 @@ pub static REGISTRY: &[SettingDef] = &[
         key: "billing.priceIds",
         group: "Billing",
         label: "Plan product ids",
-        help: "Which product or variant each plan is, at each provider. Set these on the \
+        help: "The product or price identifier for each plan at each provider. Set these on the \
                Plans screen.",
         kind: Kind::Managed,
         min_role: StaffRole::Owner,
@@ -747,7 +737,7 @@ impl Effective {
     ///
     /// A merge, not a replacement: an override names one provider for one
     /// plan, and every other id the config file declares is left alone. So an
-    /// operator adding a Lemon Squeezy variant does not silently drop the
+    /// operator adding a Polar product does not silently drop the
     /// Stripe price that existing customers are still billed on.
     pub fn plans(&self) -> Vec<crate::plans::Plan> {
         let overrides = self.overrides.get("billing.priceIds").and_then(Value::as_object);
@@ -758,27 +748,26 @@ impl Effective {
                 let mut normalized = plan.clone();
                 normalized.max_emails_per_period = Some(self.overrides.get("billing.emailLimits")
                     .and_then(|v| v.get(&plan.slug)).and_then(Value::as_i64).unwrap_or_else(|| plan.email_allowance()));
-                let plan = &normalized;
-                let Some(for_plan) = overrides
+                normalized.price_ids.retain(|provider, _| BILLING_PROVIDERS.contains(&provider.as_str()));
+                if let Some(for_plan) = overrides
                     .and_then(|o| o.get(&plan.slug))
                     .and_then(Value::as_object)
-                else {
-                    return plan.clone();
-                };
-                let mut plan = plan.clone();
-                for (provider, id) in for_plan {
-                    match id.as_str().map(str::trim) {
-                        // A blank clears it, so a mistyped id can be removed
-                        // rather than only replaced.
-                        Some("") | None => {
-                            plan.price_ids.remove(provider);
+                {
+                    for (provider, id) in for_plan {
+                        if !BILLING_PROVIDERS.contains(&provider.as_str()) {
+                            continue;
                         }
-                        Some(id) => {
-                            plan.price_ids.insert(provider.clone(), id.to_string());
+                        match id.as_str().map(str::trim) {
+                            Some("") | None => {
+                                normalized.price_ids.remove(provider);
+                            }
+                            Some(id) => {
+                                normalized.price_ids.insert(provider.clone(), id.to_string());
+                            }
                         }
                     }
                 }
-                plan
+                normalized
             })
             .collect()
     }
@@ -849,12 +838,11 @@ impl Effective {
         }
     }
 
-    pub fn lemonsqueezy(&self) -> LemonSqueezyConfig {
-        LemonSqueezyConfig {
-            api_key: self.opt_string("billing.lemonsqueezy.apiKey"),
-            store_id: self.opt_string("billing.lemonsqueezy.storeId"),
-            webhook_secret: self.opt_string("billing.lemonsqueezy.webhookSecret"),
-            test_mode: self.bool("billing.lemonsqueezy.testMode"),
+    pub fn polar(&self) -> PolarConfig {
+        PolarConfig {
+            access_token: self.opt_string("billing.polar.accessToken"),
+            webhook_secret: self.opt_string("billing.polar.webhookSecret"),
+            sandbox: self.bool("billing.polar.sandbox"),
         }
     }
 
@@ -876,10 +864,7 @@ impl Effective {
             "none" => true,
             "stripe" => self.stripe().secret_key.is_some(),
             "paddle" => self.paddle().api_key.is_some(),
-            "lemonsqueezy" => {
-                let ls = self.lemonsqueezy();
-                ls.api_key.is_some() && ls.store_id.is_some()
-            }
+            "polar" => self.polar().is_configured(),
             // The ping token counts as a credential here, not a nicety:
             // without it every ping is refused, so a Gumroad with a token
             // missing cannot take a single renewal.
@@ -901,7 +886,7 @@ impl Effective {
         match provider {
             "stripe" => self.stripe().webhook_secret,
             "paddle" => self.paddle().webhook_secret,
-            "lemonsqueezy" => self.lemonsqueezy().webhook_secret,
+            "polar" => self.polar().webhook_secret,
             "gumroad" => self.gumroad().ping_token,
             _ => None,
         }
@@ -912,8 +897,9 @@ impl Effective {
     /// created at a provider keeps sending events there after new signups move
     /// away, and dropping those would mean missing renewals and cancellations.
     pub fn configured_providers(&self) -> Vec<String> {
-        ["stripe", "paddle", "lemonsqueezy", "gumroad"]
-            .into_iter()
+        BILLING_PROVIDERS
+            .iter()
+            .copied()
             .filter(|p| self.provider_is_configured(p))
             .map(str::to_string)
             .collect()
@@ -1053,18 +1039,18 @@ mod tests {
     fn a_console_product_id_reaches_the_catalogue() {
         let e = eff(&[(
             "billing.priceIds",
-            serde_json::json!({ "starter": { "lemonsqueezy": "812345" } }),
+            serde_json::json!({ "starter": { "polar": "07521167-2b19-420a-9714-754d4b1d84ac" } }),
         )]);
         assert_eq!(
-            e.plan("starter").unwrap().price_id("lemonsqueezy"),
-            Some("812345")
+            e.plan("starter").unwrap().price_id("polar"),
+            Some("07521167-2b19-420a-9714-754d4b1d84ac")
         );
-        assert!(e.plan("starter").unwrap().is_purchasable("lemonsqueezy"));
+        assert!(e.plan("starter").unwrap().is_purchasable("polar"));
         // Untouched plans are untouched.
-        assert_eq!(e.plan("creator").unwrap().price_id("lemonsqueezy"), None);
+        assert_eq!(e.plan("creator").unwrap().price_id("polar"), None);
     }
 
-    /// A merge, not a replacement. An operator adding a Lemon Squeezy variant
+    /// A merge, not a replacement. An operator adding a Polar product
     /// must not silently drop the Stripe price that existing customers are
     /// still billed on — that would orphan every one of them.
     #[test]
@@ -1075,14 +1061,14 @@ mod tests {
             std::sync::Arc::new(cfg),
             [(
                 "billing.priceIds".to_string(),
-                serde_json::json!({ "starter": { "lemonsqueezy": "812345" } }),
+                serde_json::json!({ "starter": { "polar": "07521167-2b19-420a-9714-754d4b1d84ac" } }),
             )]
             .into_iter()
             .collect(),
         );
         let starter = e.plan("starter").unwrap();
         assert_eq!(starter.price_id("stripe"), Some("price_file"), "the file's id survives");
-        assert_eq!(starter.price_id("lemonsqueezy"), Some("812345"), "and the new one is there");
+        assert_eq!(starter.price_id("polar"), Some("07521167-2b19-420a-9714-754d4b1d84ac"), "and the new one is there");
     }
 
     /// The console can override an id the file already set, which is how a
@@ -1128,12 +1114,12 @@ mod tests {
     #[test]
     fn only_plans_with_an_id_at_the_active_provider_are_on_sale() {
         let e = eff(&[
-            ("billing.provider", Value::String("lemonsqueezy".into())),
-            ("billing.lemonsqueezy.apiKey", Value::String("k".into())),
-            ("billing.lemonsqueezy.storeId", Value::String("4242".into())),
+            ("billing.provider", Value::String("polar".into())),
+            ("billing.polar.accessToken", Value::String("k".into())),
+            ("billing.polar.webhookSecret", Value::String("polar_whs_test".into())),
             (
                 "billing.priceIds",
-                serde_json::json!({ "starter": { "lemonsqueezy": "812345" } }),
+                serde_json::json!({ "starter": { "polar": "07521167-2b19-420a-9714-754d4b1d84ac" } }),
             ),
         ]);
         let on_sale: Vec<String> = e.purchasable_plans().into_iter().map(|p| p.slug).collect();
@@ -1180,13 +1166,13 @@ mod tests {
     #[test]
     fn console_overrides_the_file() {
         let e = eff(&[
-            ("billing.provider", Value::String("lemonsqueezy".into())),
-            ("billing.lemonsqueezy.apiKey", Value::String("ls_key".into())),
-            ("billing.lemonsqueezy.storeId", Value::String("4242".into())),
+            ("billing.provider", Value::String("polar".into())),
+            ("billing.polar.accessToken", Value::String("polar_oat_test".into())),
+            ("billing.polar.webhookSecret", Value::String("polar_whs_test".into())),
         ]);
-        assert_eq!(e.billing_provider(), "lemonsqueezy");
+        assert_eq!(e.billing_provider(), "polar");
         assert!(e.is_overridden("billing.provider"));
-        assert!(e.provider_is_configured("lemonsqueezy"));
+        assert!(e.provider_is_configured("polar"));
     }
 
     /// Both providers keep working for webhooks while only one takes new
@@ -1208,9 +1194,9 @@ mod tests {
         let e = eff(&[]);
         assert!(e.provider_is_configured("stripe"));
         assert!(!e.provider_is_configured("paddle"));
-        // Lemon Squeezy needs both a key and a store.
-        let partial = eff(&[("billing.lemonsqueezy.apiKey", Value::String("k".into()))]);
-        assert!(!partial.provider_is_configured("lemonsqueezy"));
+        // Polar needs an access token and a signing secret.
+        let partial = eff(&[("billing.polar.accessToken", Value::String("k".into()))]);
+        assert!(!partial.provider_is_configured("polar"));
     }
 
     /// Secrets are stored but never served back to a browser.
@@ -1248,16 +1234,6 @@ mod tests {
         assert_eq!(validate("signup.enabled", "0").unwrap(), Some(Value::Bool(false)));
     }
 
-    /// A numeric-looking id must stay a string, or it stops matching what the
-    /// provider's API returns.
-    #[test]
-    fn store_ids_stay_strings() {
-        assert_eq!(
-            validate("billing.lemonsqueezy.storeId", "4242").unwrap(),
-            Some(Value::String("4242".into()))
-        );
-    }
-
     /// A default plan that has been deleted from the catalogue must not break
     /// signup.
     #[test]
@@ -1279,8 +1255,8 @@ mod tests {
             "billing.stripe.secretKey",
             "billing.stripe.webhookSecret",
             "billing.paddle.apiKey",
-            "billing.lemonsqueezy.apiKey",
-            "billing.lemonsqueezy.storeId",
+            "billing.polar.accessToken",
+            "billing.polar.webhookSecret",
             "billing.requirePaymentUpFront",
         ] {
             assert!(can_edit(key, StaffRole::Owner), "owner must be able to set {key}");
@@ -1341,10 +1317,10 @@ mod tests {
     #[test]
     fn a_webhook_secret_is_readable_per_provider() {
         let e = eff(&[
-            ("billing.lemonsqueezy.webhookSecret", Value::String("ls_whsec".into())),
+            ("billing.polar.webhookSecret", Value::String("polar_whs_test".into())),
             ("billing.gumroad.pingToken", Value::String("tok".into())),
         ]);
-        assert_eq!(e.webhook_secret("lemonsqueezy").as_deref(), Some("ls_whsec"));
+        assert_eq!(e.webhook_secret("polar").as_deref(), Some("polar_whs_test"));
         // Gumroad signs nothing, so its ping token is the same thing by
         // another name and must answer here too.
         assert_eq!(e.webhook_secret("gumroad").as_deref(), Some("tok"));
