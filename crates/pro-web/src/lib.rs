@@ -184,6 +184,8 @@ fn platform_routes() -> Router<AppState> {
         .route("/owner/staff", get(console::staff_page).post(console::create_staff))
         .route("/owner/staff/{id}/role", post(console::set_staff_role))
         .route("/owner/staff/{id}/toggle", post(console::toggle_staff))
+        .route("/owner/account", get(console::account_page))
+        .route("/owner/account/password", post(console::change_password))
         .route("/owner/activity", get(console::activity))
         .route("/owner/jobs/{id}/retry", post(console::retry_job))
         // ---- billing webhooks --------------------------------------------
@@ -239,9 +241,39 @@ pub fn entry(state: AppState) -> Router {
 async fn host_gate(
     State(state): State<AppState>,
     client: client_ip::ClientAddr,
-    request: Request,
+    mut request: Request,
     next: axum::middleware::Next,
 ) -> Response {
+    // HTTP/2 (what every browser negotiates over TLS) carries the hostname in
+    // the `:authority` pseudo-header, which hyper exposes as the URI's
+    // authority — there is no `Host` header at all. Copy it across first, so
+    // this gate, every handler and the tenant proxy all see one `Host`.
+    if !request.headers().contains_key(axum::http::header::HOST) {
+        let authority = request
+            .uri()
+            .authority()
+            .and_then(|a| axum::http::HeaderValue::from_str(a.as_str()).ok());
+        if let Some(value) = authority {
+            request.headers_mut().insert(axum::http::header::HOST, value);
+        }
+    }
+    // HTTP/2 also lets a browser send each cookie as its own `cookie` header
+    // (RFC 9113 §8.2.3), and Chrome does once there is more than one. Every
+    // reader here — and the HTTP/1.1 tenant behind the proxy — expects the
+    // single `a=1; b=2` form, so join them back into one.
+    if request.headers().get_all(axum::http::header::COOKIE).iter().count() > 1 {
+        let joined = request
+            .headers()
+            .get_all(axum::http::header::COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect::<Vec<_>>()
+            .join("; ");
+        if let Ok(value) = axum::http::HeaderValue::from_str(&joined) {
+            request.headers_mut().insert(axum::http::header::COOKIE, value);
+        }
+    }
+
     let host = request
         .headers()
         .get(axum::http::header::HOST)
@@ -309,6 +341,15 @@ async fn serve_tenant(
     let target = pro_proxy::target(&state.db, &tenant_id)
         .await
         .ok_or_else(|| ProError::NotFound("No site is configured here.".into()))?;
+
+    // Before waking anything: a secondary hostname is only ever a redirect.
+    // (Method and path are copied out: a `&Request` held across an await
+    // would make this future `!Send`.)
+    let method = request.method().clone();
+    let path = request.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/").to_string();
+    if let Some(redirect) = canonical_redirect(state, &tenant_id, host, &method, &path).await {
+        return Ok(redirect);
+    }
 
     // Hibernation, made invisible: start the site and wait rather than
     // failing. The visitor sees a slow page, which is the whole bargain that
@@ -481,6 +522,83 @@ pub async fn open_backup(
 ///
 /// Shared by the dashboard's "Check now" button and the background sweeper, so
 /// both reach the same conclusion and write the same state.
+/// A site still on its built-in subdomain takes its first connected custom
+/// domain as its address, the way Ghost(Pro) does: connecting a domain means
+/// "this is my site's address now". Once a custom domain is primary, a later
+/// one is left alone — the customer chooses between their own domains.
+///
+/// Best effort: the domain is already live and routable, so a failure here is
+/// logged and leaves the customer the "Make primary" button.
+async fn promote_first_custom_domain(state: &AppState, domain: &pro_core::Domain) {
+    if domain.kind != pro_core::DomainKind::Custom || domain.is_primary {
+        return;
+    }
+    let result: Result<bool> = async {
+        let current = pro_db::domains::primary_for_tenant(&state.db, &domain.tenant_id).await?;
+        if current.is_some_and(|p| p.kind == pro_core::DomainKind::Custom) {
+            return Ok(false);
+        }
+        let tenant = pro_db::tenants::get(&state.db, &domain.tenant_id).await?;
+        pro_db::domains::set_primary(&state.db, &tenant.id, &domain.id).await?;
+        pro_provision::update_primary_domain(&state.db, &state.config, &state.supervisor, &tenant)
+            .await?;
+        state.hosts.invalidate_all();
+        Ok(true)
+    }
+    .await;
+    match result {
+        Ok(true) => {
+            pro_db::audit::record(
+                &state.db,
+                "system",
+                "domain.primary_changed",
+                Some(&domain.tenant_id),
+                None,
+                serde_json::json!({"domain_id": domain.id, "domain": domain.domain, "automatic": true}),
+            )
+            .await;
+        }
+        Ok(false) => {}
+        Err(e) => tracing::warn!("could not make {} the primary domain: {e}", domain.domain),
+    }
+}
+
+/// Where a request for `host` should be sent instead, when it is one of a
+/// site's secondary hostnames. A site answers on exactly one address — its
+/// primary domain — and every other hostname it owns (the built-in
+/// subdomain, a `www.` alias) redirects there with the path intact. Serving
+/// the same site on several origins splits its sign-in cookies and members
+/// API across them, and duplicates every page for search engines.
+async fn canonical_redirect(
+    state: &AppState,
+    tenant_id: &str,
+    host: &str,
+    method: &axum::http::Method,
+    path: &str,
+) -> Option<Response> {
+    let primary = pro_db::domains::primary_for_tenant(&state.db, tenant_id).await.ok()??;
+    if primary.status != pro_core::DomainStatus::Active
+        || pro_core::normalize_host(host) == pro_core::normalize_host(&primary.domain)
+    {
+        return None;
+    }
+    let location = format!("{}{}", state.config.public_origin(&primary.domain), path);
+    // 301 for reads; 308 keeps a form POST a POST rather than turning it into
+    // a GET that drops its body.
+    let status = if matches!(*method, axum::http::Method::GET | axum::http::Method::HEAD) {
+        axum::http::StatusCode::MOVED_PERMANENTLY
+    } else {
+        axum::http::StatusCode::PERMANENT_REDIRECT
+    };
+    Some(
+        Response::builder()
+            .status(status)
+            .header(axum::http::header::LOCATION, location)
+            .body(axum::body::Body::empty())
+            .ok()?,
+    )
+}
+
 pub async fn verify_domain_now(
     state: &AppState,
     domain: &pro_core::Domain,
@@ -515,6 +633,8 @@ pub async fn verify_domain_now(
             serde_json::json!({"domain": domain.domain}),
         )
         .await;
+
+        promote_first_custom_domain(state, domain).await;
 
         // Tell the customer, since this is the step they were waiting on and
         // DNS propagation means they have no idea when it finished.

@@ -121,6 +121,10 @@ impl Forwarder {
         *request.uri_mut() = format!("http://127.0.0.1:{port}{path_and_query}")
             .parse()
             .map_err(|e| ProError::internal(format!("could not build tenant uri: {e}")))?;
+        // The tenant hop is plain HTTP/1.1 whatever the browser spoke. A
+        // request still marked HTTP/2 (every browser over TLS) is refused by
+        // the HTTP/1 client with `UserUnsupportedVersion`, i.e. a 503.
+        *request.version_mut() = axum::http::Version::HTTP_11;
 
         let response = self.client.request(request).await.map_err(|e| {
             // A tenant that was up a moment ago and is not now: the sweeper
@@ -290,5 +294,31 @@ mod tests {
         }
         // Host is rewritten rather than dropped, so it must not be in the list.
         assert!(!HOP_BY_HOP.contains(&"host"));
+    }
+
+    /// A browser on HTTP/2 must still reach a tenant, which only speaks
+    /// HTTP/1.1 on loopback. Before the version was rewritten every such
+    /// request failed with `UserUnsupportedVersion` and the visitor saw a 503.
+    #[tokio::test]
+    async fn an_http2_request_is_forwarded_to_an_http1_tenant() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let app = axum::Router::new().route("/", axum::routing::get(|| async { "tenant" }));
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let request = axum::http::Request::builder()
+            .uri("https://dripthemes.example/")
+            .version(axum::http::Version::HTTP_2)
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = Forwarder::new()
+            .send(request, port, None, "dripthemes.example", "https")
+            .await
+            .expect("an HTTP/2 request reaches the HTTP/1.1 tenant");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(&body[..], b"tenant");
     }
 }

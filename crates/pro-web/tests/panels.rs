@@ -391,6 +391,7 @@ async fn every_console_page_renders() {
         "/owner/settings",
         "/owner/staff",
         "/owner/activity",
+        "/owner/account",
         &format!("/owner/sites/{}", tenant.id),
         &format!("/owner/customers/{}", account.id),
     ] {
@@ -1137,6 +1138,152 @@ async fn a_customers_hostname_cannot_reach_the_console() {
     let body = String::from_utf8_lossy(&body);
     assert!(!body.contains("Operator sign in"), "no console on a foreign host");
     assert!(body.contains("Domain not connected"), "and it says what to do instead");
+}
+
+/// An operator changes their own password from the console. It needs the
+/// current password, a matching repeat and the staff minimum; a change signs
+/// the login out everywhere, and only the new password signs back in.
+#[tokio::test]
+async fn an_operator_changes_their_own_password() {
+    let (state, _dir) = platform().await;
+    let cookie = as_operator(&state, StaffRole::Support).await;
+    let old = "a-very-long-operator-password";
+    let new = "a-brand-new-operator-password";
+
+    // Reachable from the rail's name block, for every role.
+    let (status, body) = get(&state, "/owner/account", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains(r#"href="/owner/account""#), "the rail links to the page");
+    assert!(body.contains(r#"action="/owner/account/password""#));
+    assert!(body.contains("ops@example.com"));
+
+    let attempt = |current: &str, new_password: &str, confirm: &str| {
+        format!("current={current}&new_password={new_password}&confirm_password={confirm}")
+    };
+    for (form, message) in [
+        (attempt("wrong-password-entirely", new, new), "current password is not correct"),
+        (attempt(old, new, "a-brand-new-typo-password"), "do not match"),
+        (attempt(old, "too-short", "too-short"), "at least 12 characters"),
+        (attempt(old, old, old), "different from the current one"),
+    ] {
+        let (status, headers, _) =
+            send(&state, "POST", "/owner/account/password", Some(&cookie), Some(&form)).await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let back = headers[header::LOCATION].to_str().unwrap().to_string();
+        assert!(back.starts_with("/owner/account"), "refused back to the form: {back}");
+        let (_, page) = get(&state, &back, Some(&cookie)).await;
+        assert!(page.contains(message), "expected {message:?} after {form}");
+    }
+    assert!(pro_db::staff::authenticate(&state.db, "ops@example.com", old).await.is_ok());
+
+    // Without a session nothing changes.
+    send(&state, "POST", "/owner/account/password", None, Some(&attempt(old, new, new))).await;
+    assert!(pro_db::staff::authenticate(&state.db, "ops@example.com", old).await.is_ok());
+
+    let (status, headers, _) = send(
+        &state,
+        "POST",
+        "/owner/account/password",
+        Some(&cookie),
+        Some(&attempt(old, new, new)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(headers[header::LOCATION].to_str().unwrap().starts_with("/owner/signin"));
+
+    // Signed out everywhere, this session included.
+    let (status, _) = get(&state, "/owner/account", Some(&cookie)).await;
+    assert_ne!(status, StatusCode::OK, "the old session must not survive");
+    assert!(pro_db::staff::authenticate(&state.db, "ops@example.com", old).await.is_err());
+    assert!(pro_db::staff::authenticate(&state.db, "ops@example.com", new).await.is_ok());
+}
+
+/// A site answers on its primary domain only. Its built-in subdomain — and any
+/// other hostname it owns — redirects there permanently, path and query
+/// intact, so sign-in cookies and the members API live on one origin.
+#[tokio::test]
+async fn a_secondary_hostname_redirects_to_the_primary_domain() {
+    let (state, _dir) = platform().await;
+    let (account, _) = as_customer(&state).await;
+    let tenant = seed_site(&state, &account.id, "drip").await;
+    let custom = pro_db::domains::add(
+        &state.db,
+        &tenant.id,
+        "drip-example.com",
+        pro_core::DomainKind::Custom,
+        false,
+    )
+    .await
+    .unwrap();
+    pro_db::domains::set_status(&state.db, &custom.id, pro_core::DomainStatus::Active, None)
+        .await
+        .unwrap();
+    pro_db::domains::set_primary(&state.db, &tenant.id, &custom.id).await.unwrap();
+
+    let hit = |method: &str, host: &str| {
+        Request::builder()
+            .method(method)
+            .uri("/members/signup/?ref=nav")
+            .header(header::HOST, host)
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    let response = pro_web::entry(state.clone()).oneshot(hit("GET", "drip.localhost")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::MOVED_PERMANENTLY);
+    let location = response.headers()[header::LOCATION].to_str().unwrap();
+    assert!(location.starts_with("http://drip-example.com"), "{location}");
+    assert!(location.ends_with("/members/signup/?ref=nav"), "path and query kept: {location}");
+
+    // A form POST stays a POST.
+    let response = pro_web::entry(state.clone()).oneshot(hit("POST", "drip.localhost")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
+
+    // And the other way round once the subdomain is primary again.
+    let builtin = pro_db::domains::find_by_host(&state.db, "drip.localhost").await.unwrap().unwrap();
+    pro_db::domains::set_primary(&state.db, &tenant.id, &builtin.id).await.unwrap();
+    state.hosts.invalidate_all();
+    let response = pro_web::entry(state.clone()).oneshot(hit("GET", "drip-example.com")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::MOVED_PERMANENTLY);
+    assert!(response.headers()[header::LOCATION].to_str().unwrap().starts_with("http://drip.localhost"));
+}
+
+/// HTTP/2 — what every browser negotiates over TLS — sends no `Host` header;
+/// the hostname arrives as the URI's authority. The platform has to recognise
+/// itself from that too, or a browser sees "Domain not connected" everywhere.
+#[tokio::test]
+async fn an_http2_request_with_only_an_authority_reaches_the_platform() {
+    let (state, _dir) = platform().await;
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("http://{HOST}/owner/signin"))
+        .version(axum::http::Version::HTTP_2)
+        .body(Body::empty())
+        .unwrap();
+    assert!(request.headers().get(header::HOST).is_none());
+    let response = pro_web::entry(state.clone()).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+    assert!(String::from_utf8_lossy(&body).contains("Operator sign in"));
+}
+
+/// Over HTTP/2 Chrome sends each cookie as its own `cookie` header once there
+/// is more than one. A sign-in cookie that is not the first of them must still
+/// be seen, or signing in just reloads the sign-in page.
+#[tokio::test]
+async fn a_session_cookie_in_a_second_http2_cookie_header_still_signs_in() {
+    let (state, _dir) = platform().await;
+    let operator = as_operator(&state, StaffRole::Owner).await;
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("http://{HOST}/owner/dashboard"))
+        .version(axum::http::Version::HTTP_2)
+        .header(header::COOKIE, "pro_theme=dark")
+        .header(header::COOKIE, operator)
+        .body(Body::empty())
+        .unwrap();
+    let response = pro_web::entry(state.clone()).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK, "the second cookie header was ignored");
 }
 
 /// Every page carries the policy that makes the script-free design system a

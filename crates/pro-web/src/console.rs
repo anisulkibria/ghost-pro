@@ -40,6 +40,7 @@ pub(crate) enum Tab {
     Settings,
     Staff,
     Activity,
+    Account,
 }
 
 fn nav(active: Tab) -> Vec<NavItem> {
@@ -51,6 +52,7 @@ fn nav(active: Tab) -> Vec<NavItem> {
         NavItem::new("Settings", "/owner/settings", "settings", "pink", active == Tab::Settings),
         NavItem::new("Staff", "/owner/staff", "shield", "amber", active == Tab::Staff),
         NavItem::new("Activity", "/owner/activity", "history", "slate", active == Tab::Activity),
+        NavItem::new("Account", "/owner/account", "person", "purple", active == Tab::Account),
     ]
 }
 
@@ -69,7 +71,7 @@ pub(crate) fn shell(
     let who = Who {
         name: member.name.clone(),
         detail: member.role.label().to_string(),
-        href: None,
+        href: Some("/owner/account".into()),
         signout: "/owner/signout".into(),
     };
     reply::html(view::page(Page {
@@ -2621,6 +2623,143 @@ pub async fn toggle_staff(
         )
         .await;
         Ok(redirect_with("/owner/staff", Flash::ok("Updated.")))
+    }.await)
+}
+
+// ---------------------------------------------------------------------------
+// Your account
+// ---------------------------------------------------------------------------
+
+/// The signed-in operator's own page: who they are, and a password change.
+/// Every role may use it — it only ever touches the caller's own login.
+pub async fn account_page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    let chrome = state.chrome(&headers);
+    reply::or_page_or_signin(
+        "/owner/signin",
+        &chrome,
+        account_inner(&state, chrome.theme, &headers, &query).await,
+    )
+}
+
+async fn account_inner(
+    state: &AppState,
+    theme: Theme,
+    headers: &HeaderMap,
+    query: &HashMap<String, String>,
+) -> Result<Response> {
+    let member = auth::staff(state, headers).await?;
+
+    let fact = |icon: &str, tint: &str, label: &str, value: &str| {
+        format!(
+            r#"<div class="row"><span class="ic tint-{tint}">{icon}</span>
+<div class="body"><span class="title">{value}</span><span class="detail">{label}</span></div></div>"#,
+            tint = tint,
+            icon = view::svg(icon),
+            value = esc(value),
+            label = esc(label),
+        )
+    };
+    let body = format!(
+        r#"{head}{section_you}<div class="card rows">{name}{email}{role}</div>
+{section_password}<div class="card padded">{password}</div>"#,
+        head = view::page_head("Your account", "Your own console login.", ""),
+        section_you = view::section("Your details"),
+        name = fact("people", "purple", "Name", &member.name),
+        email = fact("mail", "blue", "Email", &member.email),
+        role = fact("shield", "amber", "Role", member.role.label()),
+        section_password = view::section("Change password"),
+        password = view::form(
+            "/owner/account/password",
+            &format!(
+                r#"{current}{new}{confirm}
+<button class="btn" type="submit">{lock} Change password</button>"#,
+                current = view::field("current", "Current password", "password", "", None, true),
+                new = view::field(
+                    "new_password",
+                    "New password",
+                    "password",
+                    "",
+                    Some("At least 12 characters. This signs you out everywhere, including here."),
+                    true
+                ),
+                confirm = view::field(
+                    "confirm_password",
+                    "Repeat new password",
+                    "password",
+                    "",
+                    None,
+                    true
+                ),
+                lock = view::svg("lock"),
+            )
+        ),
+    );
+
+    Ok(shell(
+        state,
+        theme,
+        "Your account",
+        Tab::Account,
+        &member,
+        Flash::from_query(query).as_ref(),
+        &body,
+    ))
+}
+
+/// Lenient in the extractor, strict in the handler: a missing field is a
+/// "not correct" message, not a bare 422 from axum.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct StaffPasswordForm {
+    pub current: String,
+    pub new_password: String,
+    pub confirm_password: String,
+}
+
+pub async fn change_password(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<StaffPasswordForm>,
+) -> Response {
+    let chrome = state.chrome(&headers);
+    reply::or_redirect("/owner/account", &chrome, async {
+        auth::require_same_origin(&headers, &state.config.host())?;
+        let member = auth::staff(&state, &headers).await?;
+
+        // The session alone is not enough: it is exactly what a stolen cookie
+        // gives an attacker, who could otherwise lock the operator out.
+        if !pro_db::accounts::verify_password(&form.current, &member.password_hash) {
+            return Err(ProError::BadRequest("Your current password is not correct.".into()));
+        }
+        // An operator has no emailed reset, so a typo here is a lock-out.
+        if form.new_password != form.confirm_password {
+            return Err(ProError::BadRequest("The two new passwords do not match.".into()));
+        }
+        if form.new_password == form.current {
+            return Err(ProError::BadRequest(
+                "Choose a password different from the current one.".into(),
+            ));
+        }
+        // Enforces the staff minimum and ends every session for this login.
+        pro_db::staff::set_password(&state.db, &member.id, &form.new_password).await?;
+
+        pro_db::audit::record(
+            &state.db,
+            &format!("staff:{}", member.id),
+            "staff.password_changed",
+            None,
+            None,
+            serde_json::json!({"staff": member.id}),
+        )
+        .await;
+        Ok(redirect_with(
+            "/owner/signin",
+            Flash::ok("Password changed. Sign in with the new one."),
+        ))
     }.await)
 }
 
