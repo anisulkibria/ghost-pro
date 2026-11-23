@@ -27,6 +27,7 @@ use pro_core::{ProError, Result};
 pub mod auth;
 pub mod client_ip;
 pub mod console;
+pub mod updates;
 pub mod dashboard;
 pub mod dashboard_billing;
 pub mod domains;
@@ -184,6 +185,8 @@ fn platform_routes() -> Router<AppState> {
         .route("/owner/staff", get(console::staff_page).post(console::create_staff))
         .route("/owner/staff/{id}/role", post(console::set_staff_role))
         .route("/owner/staff/{id}/toggle", post(console::toggle_staff))
+        .route("/owner/updates", get(updates::page))
+        .route("/owner/updates/run", post(updates::run))
         .route("/owner/account", get(console::account_page))
         .route("/owner/account/password", post(console::change_password))
         .route("/owner/activity", get(console::activity))

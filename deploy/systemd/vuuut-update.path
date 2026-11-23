@@ -1,0 +1,11 @@
+# Starts vuuut-update.service when the console asks for an update by writing
+# request.json (Owner console → Updates → Update now).
+[Unit]
+Description=Watch for Vuuut update requests from the console
+
+[Path]
+PathExists=/opt/Ghost/vuuut-pro/run/data/updates/request.json
+Unit=vuuut-update.service
+
+[Install]
+WantedBy=multi-user.target

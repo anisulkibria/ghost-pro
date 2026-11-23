@@ -164,6 +164,7 @@ async fn serve_platform() -> Result<()> {
     tokio::spawn(pro_web::worker::run_click(state.clone()));
     tokio::spawn(pro_web::worker::run_hibernation(state.clone()));
     tokio::spawn(pro_web::worker::run_housekeeping(state.clone()));
+    tokio::spawn(pro_web::updates::run_updates(state.clone()));
 
     // ---- shutdown --------------------------------------------------------
     //

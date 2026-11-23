@@ -1,0 +1,17 @@
+# Fetch, sync and build a Vuuut update as root. The console (running as the
+# unprivileged vuuut user) restarts and migrates the sites afterwards.
+[Unit]
+Description=Build a Vuuut update requested from the console
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/Ghost/vuuut-pro/deploy/vuuut-update.sh
+Environment=UPDATE_DIR=/opt/Ghost/vuuut-pro/run/data/updates
+Environment=VUUUT_DIR=/opt/Ghost/vuuut
+Environment=CLONE_DIR=/opt/Ghost/update/vuuut
+Environment=RUN_USER=vuuut
+Environment=CARGO_ENV=/root/.cargo/env
+Environment=HOME=/root
+TimeoutStartSec=3600

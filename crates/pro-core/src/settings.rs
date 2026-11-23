@@ -512,6 +512,35 @@ pub static REGISTRY: &[SettingDef] = &[
         min_role: StaffRole::Admin,
         fallback: |c| opt(&c.mail.from_name),
     },
+    // ---- Updates ---------------------------------------------------------
+    SettingDef {
+        key: "updates.repository",
+        group: "Updates",
+        label: "Vuuut repository",
+        help: "The GitHub repository the console updates Vuuut from, as owner/name.",
+        kind: Kind::Text,
+        min_role: StaffRole::Owner,
+        fallback: |_| Value::String("anisulkibria/rust-ghost".into()),
+    },
+    SettingDef {
+        key: "updates.branch",
+        group: "Updates",
+        label: "Branch",
+        help: "Which branch an update installs. Blank means main.",
+        kind: Kind::Text,
+        min_role: StaffRole::Owner,
+        fallback: |_| Value::String("main".into()),
+    },
+    SettingDef {
+        key: "updates.githubToken",
+        group: "Updates",
+        label: "GitHub access token",
+        help: "A fine-grained token with read-only Contents access to that repository. \
+               Needed for a private repository; leave empty for a public one.",
+        kind: Kind::Secret,
+        min_role: StaffRole::Owner,
+        fallback: |_| Value::Null,
+    },
 ];
 
 fn opt(v: &Option<String>) -> Value {
@@ -815,6 +844,22 @@ impl Effective {
 
     pub fn require_payment_up_front(&self) -> bool {
         self.bool("billing.requirePaymentUpFront")
+    }
+
+    /// `owner/name` of the repository Vuuut updates come from.
+    pub fn updates_repository(&self) -> String {
+        self.string("updates.repository").trim().trim_matches('/').to_string()
+    }
+
+    /// The branch an update installs; `main` when blank.
+    pub fn updates_branch(&self) -> String {
+        let b = self.string("updates.branch").trim().to_string();
+        if b.is_empty() { "main".into() } else { b }
+    }
+
+    /// The GitHub token for a private repository, if one is set.
+    pub fn updates_token(&self) -> Option<String> {
+        self.opt_string("updates.githubToken")
     }
 
     pub fn dunning_grace_days(&self) -> i64 {

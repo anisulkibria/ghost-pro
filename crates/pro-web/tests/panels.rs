@@ -1782,3 +1782,72 @@ async fn an_admin_removes_a_domain_from_the_console() {
     let events = pro_db::audit::list(&state.db, Some(&tenant.id), None, 10, 0).await.unwrap();
     assert!(events.iter().any(|e| e.action == "domain.removed" && e.actor.starts_with("staff:")));
 }
+
+/// The console's Updates screen: only an owner reaches it, Update now hands
+/// the root script a request (with the token), a second click while one runs
+/// is refused, and a finished build is rolled out and recorded.
+#[tokio::test]
+async fn an_owner_updates_vuuut_from_the_console() {
+    let (state, _dir) = platform().await;
+    let updates = state.config.data_dir().join("updates");
+
+    let admin = as_operator(&state, StaffRole::Admin).await;
+    let (status, _, _) = send(&state, "GET", "/owner/updates", Some(&admin), None).await;
+    assert_ne!(status, StatusCode::OK, "an administrator does not reach the updater");
+    let (_, headers, _) = send(&state, "POST", "/owner/updates/run", Some(&admin), Some("")).await;
+    assert!(!updates.join("request.json").exists(), "nor can an administrator start one: {headers:?}");
+
+    pro_db::staff::create(&state.db, "boss@example.com", "Ada", "another-very-long-password", StaffRole::Owner).await.unwrap();
+    let (_, headers, _) = send(&state, "POST", "/owner/signin", None, Some("email=boss@example.com&password=another-very-long-password")).await;
+    let owner = session_from(&headers);
+
+    let (status, page) = get(&state, "/owner/updates", Some(&owner)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("Update now") && page.contains("Not recorded"), "{page}");
+    assert!(page.contains("anisulkibria/rust-ghost"), "the default repository is shown");
+
+    let (status, headers, _) = send(&state, "POST", "/owner/updates/run", Some(&owner), Some("")).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(headers[header::LOCATION].to_str().unwrap().contains("Update%20started"), "{headers:?}");
+    let request: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(updates.join("request.json")).unwrap()).unwrap();
+    assert_eq!(request["repository"], "anisulkibria/rust-ghost");
+    assert_eq!(request["branch"], "main");
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(std::fs::metadata(updates.join("request.json")).unwrap().permissions().mode() & 0o777, 0o600, "it can carry a token");
+    let st = pro_web::updates::status(&state);
+    assert_eq!(st.state, "requested");
+    assert_eq!(st.requested_by, "boss@example.com");
+
+    // A second click while that one runs changes nothing.
+    std::fs::remove_file(updates.join("request.json")).unwrap();
+    let (_, headers, _) = send(&state, "POST", "/owner/updates/run", Some(&owner), Some("")).await;
+    assert!(headers[header::LOCATION].to_str().unwrap().contains("already%20running"), "{headers:?}");
+    assert!(!updates.join("request.json").exists());
+    let (_, page) = get(&state, "/owner/updates", Some(&owner)).await;
+    assert!(page.contains(r#"http-equiv="refresh""#) && !page.contains("Update now"), "a running update refreshes the page and holds the button");
+
+    // The script reports a finished build; the worker rolls it out.
+    let mut built = st.clone();
+    built.state = "built".into();
+    built.commit = "0123456789abcdef0123456789abcdef01234567".into();
+    std::fs::write(updates.join("status.json"), serde_json::to_string(&built).unwrap()).unwrap();
+    pro_web::updates::tick(&state).await.unwrap();
+    let done = pro_web::updates::status(&state);
+    assert_eq!(done.state, "done", "{}", done.message);
+    assert!(!done.finished_at.is_empty());
+    assert_eq!(pro_web::updates::installed(&state).commit, built.commit);
+    let (_, page) = get(&state, "/owner/updates", Some(&owner)).await;
+    assert!(page.contains("0123456") && page.contains("Update now") && !page.contains(r#"http-equiv="refresh""#), "{page}");
+
+    // A request the root service never picks up is reported, not left spinning.
+    let mut stale = done.clone();
+    stale.state = "requested".into();
+    stale.updated_at = "2020-01-01T00:00:00Z".into();
+    std::fs::write(updates.join("status.json"), serde_json::to_string(&stale).unwrap()).unwrap();
+    std::fs::write(updates.join("request.json"), "{}").unwrap();
+    pro_web::updates::tick(&state).await.unwrap();
+    let failed = pro_web::updates::status(&state);
+    assert_eq!(failed.state, "failed");
+    assert!(failed.message.contains("vuuut-update.path"), "{}", failed.message);
+    assert!(!updates.join("request.json").exists(), "the stale request is withdrawn");
+}

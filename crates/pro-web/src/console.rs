@@ -40,6 +40,7 @@ pub(crate) enum Tab {
     Settings,
     Staff,
     Activity,
+    Updates,
     Account,
 }
 
@@ -52,6 +53,7 @@ fn nav(active: Tab) -> Vec<NavItem> {
         NavItem::new("Settings", "/owner/settings", "settings", "pink", active == Tab::Settings),
         NavItem::new("Staff", "/owner/staff", "shield", "amber", active == Tab::Staff),
         NavItem::new("Activity", "/owner/activity", "history", "slate", active == Tab::Activity),
+        NavItem::new("Updates", "/owner/updates", "rocket", "blue", active == Tab::Updates),
         NavItem::new("Account", "/owner/account", "person", "purple", active == Tab::Account),
     ]
 }
@@ -1462,6 +1464,7 @@ const SETTINGS_SECTIONS: &[SettingsSection] = &[
     SettingsSection { slug: "signup", title: "Signup & security", group: "Signup", icon: "shield", tint: "teal", summary: "Account registration · Email verification · Disposable addresses" },
     SettingsSection { slug: "billing", title: "Billing", group: "Billing", icon: "billing", tint: "green", summary: "Payment providers · Credentials · Checkout · Payment recovery" },
     SettingsSection { slug: "email", title: "Email", group: "Mail", icon: "mail", tint: "blue", summary: "Transactional email · Amazon SES · Mailgun · Usage limits" },
+    SettingsSection { slug: "updates", title: "Updates", group: "Updates", icon: "rocket", tint: "blue", summary: "Vuuut repository · Branch · GitHub access token" },
 ];
 
 fn settings_section(slug: &str) -> Result<&'static SettingsSection> {
