@@ -31,7 +31,7 @@
 //!
 //! The visual language — the tonal palette, 999px buttons, 24px cards, 40px
 //! tinted leading icons, the outlined floating-label field, the nav rail — is
-//! the one in `crates/ghost-admin-ui/src/lib.rs`, so moving between the
+//! the one in `crates/vuuut-admin-ui/src/lib.rs`, so moving between the
 //! platform dashboard and a site's own admin does not feel like two products.
 
 // ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ fn icon(name: &str) -> &'static str {
         "lock" => r#"<path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2z"/>"#,
         "warn" => r#"<path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>"#,
         "info" => r#"<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>"#,
-        "ghost" => r#"<path d="M12 2a8 8 0 0 0-8 8v10.6c0 .7.85 1.05 1.35.55l1.9-1.9 2.2 2.2c.3.3.78.3 1.08 0L12 20l1.47 1.45c.3.3.78.3 1.08 0l2.2-2.2 1.9 1.9c.5.5 1.35.15 1.35-.55V10a8 8 0 0 0-8-8zm-3 8.5A1.5 1.5 0 1 1 10.5 9 1.5 1.5 0 0 1 9 10.5zm6 0A1.5 1.5 0 1 1 16.5 9 1.5 1.5 0 0 1 15 10.5z"/>"#,
+        "vuuut" => r#"<path d="M12 2a8 8 0 0 0-8 8v10.6c0 .7.85 1.05 1.35.55l1.9-1.9 2.2 2.2c.3.3.78.3 1.08 0L12 20l1.47 1.45c.3.3.78.3 1.08 0l2.2-2.2 1.9 1.9c.5.5 1.35.15 1.35-.55V10a8 8 0 0 0-8-8zm-3 8.5A1.5 1.5 0 1 1 10.5 9 1.5 1.5 0 0 1 9 10.5zm6 0A1.5 1.5 0 1 1 16.5 9 1.5 1.5 0 0 1 15 10.5z"/>"#,
         "dns" => r#"<path d="M20 13H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1v-6c0-.55-.45-1-1-1zM7 19c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM20 3H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1V4c0-.55-.45-1-1-1zM7 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>"#,
         "key" => r#"<path d="M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>"#,
         "rocket" => r#"<path d="M12 2.5c3.5 2.1 5.5 5.9 5.5 9.8 0 1.6-.3 3.1-.9 4.5l-1.8-1.1c.4-1.1.7-2.2.7-3.4 0-2.9-1.3-5.7-3.5-7.5C9.8 6.6 8.5 9.4 8.5 12.3c0 1.2.2 2.3.7 3.4l-1.8 1.1c-.6-1.4-.9-2.9-.9-4.5 0-3.9 2-7.7 5.5-9.8zM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-3.4 9.1 1.6-1v2.6c0 .5-.6.8-1 .5l-1.3-1c-.3-.3-.3-.8 0-1.1l.7-.7v.7zm6.8 0 .7.7c.3.3.3.8 0 1.1l-1.3 1c-.4.3-1 0-1-.5v-2.6l1.6 1v-.7z"/>"#,
@@ -157,7 +157,7 @@ pub fn svg_stroke(name: &str) -> String {
 
 /// Which colour scheme a visitor has asked for.
 ///
-/// Ghost calls this "night shift" and keeps it per user; there is no user here
+/// Vuuut calls this "night shift" and keeps it per user; there is no user here
 /// on the public pages, so it rides in a cookie and is resolved server-side.
 /// `System` is the one choice the server cannot settle, and it is the only one
 /// that needs the media query in the stylesheet.
@@ -252,7 +252,7 @@ const DARK: &str = r#"
 const BASE: &str = r#"
 /* ---------------------------------------------------------------------------
    Material 3 — a tonal palette generated from Ghost's brand pink (#FF1A75),
-   light and dark schemes, and M3 component styles. The same system the Ghost
+   light and dark schemes, and M3 component styles. The same system the Vuuut
    CMS port's admin uses, so the two surfaces read as one product.
 --------------------------------------------------------------------------- */
 :root {
@@ -426,7 +426,7 @@ html.dark .rail { --rail-top: #32172a; --rail-mid: #24172d; --rail-bottom: #151c
 .shell .content { padding-top: 16px; }
 
 /* ---- appearance menu ----
-   Ghost's own switcher offers Dark, Light and System from the account menu.
+   Vuuut's own switcher offers Dark, Light and System from the account menu.
    Same trio here — in the rail foot beside sign-out on the panels, in the top
    bar on the public pages, and in the corner of the chrome-free auth and error
    pages — and with no script, so each row is a one-button form that posts the
@@ -1286,7 +1286,7 @@ pub fn public_page(p: Page) -> String {
 
 /// A centred, chrome-free page: sign-in, sign-up, reset, and the error pages.
 ///
-/// `heading` and `sub` sit above the card, as Ghost's own auth screens do;
+/// `heading` and `sub` sit above the card, as Vuuut's own auth screens do;
 /// `body` is the card's contents.
 ///
 /// Chrome-free does not mean appearance-free: these are the pages a signed-out
@@ -1609,7 +1609,7 @@ pub fn empty(heading: &str, body: &str, cta: Option<(&str, &str)>) -> String {
     format!(
         r#"<div class="card"><div class="empty"><span class="ic">{glyph}</span>
 <h2>{heading}</h2><p>{body}</p>{button}</div></div>"#,
-        glyph = svg("ghost"),
+        glyph = svg("vuuut"),
         heading = esc(heading),
         body = esc(body),
     )

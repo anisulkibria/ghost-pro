@@ -13,11 +13,11 @@
 //!                                     │ loopback
 //!                   ┌─────────────────┼─────────────────┐
 //!                   ▼                 ▼                 ▼
-//!              ghost :21000      ghost :21001      ghost :21002
+//!              vuuut :21000      vuuut :21001      vuuut :21002
 //!              (tenant a)        (tenant b)        (tenant c)
 //! ```
 //!
-//! Each tenant is an unmodified `ghost` binary with its own directory,
+//! Each tenant is an unmodified `vuuut` binary with its own directory,
 //! database and config. Nothing here links against the CMS.
 mod cli;
 mod serve;
@@ -84,11 +84,11 @@ async fn serve_platform() -> Result<()> {
     // used instead. The platform works either way, but an operator reading
     // `pro.json` would otherwise have no way to know why it disagrees with
     // what is running.
-    if config.ghost_binary_is_rehomed() {
+    if config.vuuut_binary_is_rehomed() {
         tracing::warn!(
-            "paths.ghostBinary ({}) does not exist, so a Vuuut checkout next to this one is \
+            "paths.vuuutBinary ({}) does not exist, so a Vuuut checkout next to this one is \
              being used instead. Update pro.json to silence this",
-            config.paths.ghost_binary,
+            config.paths.vuuut_binary,
         );
     }
 

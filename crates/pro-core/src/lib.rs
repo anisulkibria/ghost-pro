@@ -8,7 +8,7 @@
 //! ## How this platform relates to the CMS
 //!
 //! Vuuut is a single-site server: one process, one SQLite database, one
-//! `url`. It already knows how to be hosted — `ghost_db::limits` reads a
+//! `url`. It already knows how to be hosted — `vuuut_db::limits` reads a
 //! `hostSettings` block out of its config and enforces plan ceilings from the
 //! inside, exactly as Ghost does on Ghost Pro.
 //!
@@ -38,6 +38,7 @@ pub mod error;
 pub mod ids;
 pub mod models;
 pub mod plans;
+pub mod secret_box;
 pub mod settings;
 
 pub use config::Config;

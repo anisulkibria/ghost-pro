@@ -13,7 +13,7 @@
 #
 #   * Tenant sites are child processes of it. SIGTERM makes it stop each one
 #     politely so every tenant closes its SQLite database cleanly; SIGKILL
-#     does not, and leaves Ghost processes running on the tenant ports holding
+#     does not, and leaves Vuuut processes running on the tenant ports holding
 #     databases open. So `stop` waits generously for SIGTERM, and only forces
 #     as a last resort — then says what it orphaned and how to clear it.
 set -euo pipefail
@@ -52,7 +52,8 @@ if [ -n "${VUUUT_DIR:-}" ]; then
         exit 1
     fi
     VUUUT_DIR=$(cd "$VUUUT_DIR" && pwd)
-    export PRO_PATHS__GHOST_BINARY=${PRO_PATHS__GHOST_BINARY:-$VUUUT_DIR/target/release/ghost}
+    # PRO_PATHS__GHOST_BINARY is the pre-rename name, still honoured.
+    export PRO_PATHS__VUUUT_BINARY=${PRO_PATHS__VUUUT_BINARY:-${PRO_PATHS__GHOST_BINARY:-$VUUUT_DIR/target/release/vuuut}}
     export PRO_PATHS__THEME_SOURCE=${PRO_PATHS__THEME_SOURCE:-$VUUUT_DIR/content/themes}
 fi
 
@@ -242,18 +243,20 @@ require_tenant_bin() {
 
     # Not built yet. If the path names a CMS checkout, build it rather than
     # telling the operator to.
-    if [[ "$tenant_bin" = */target/release/ghost ]]; then
-        checkout=${tenant_bin%/target/release/ghost}
-        if [ -f "$checkout/Cargo.toml" ] && [ -f "$checkout/crates/ghost/Cargo.toml" ]; then
+    # The binary is `vuuut`; checkouts from before the rename build `ghost`.
+    if [[ "$tenant_bin" = */target/release/* ]]; then
+        local bin_name=${tenant_bin##*/}
+        checkout=${tenant_bin%/target/release/*}
+        if [ -f "$checkout/Cargo.toml" ] && [ -f "$checkout/crates/$bin_name/Cargo.toml" ]; then
             echo "no tenant CMS binary — building Vuuut in ${checkout}…"
             cargo build --release --manifest-path "$checkout/Cargo.toml" \
-                --target-dir "$checkout/target" --bin ghost
+                --target-dir "$checkout/target" --bin "$bin_name"
         fi
     fi
     if [ ! -f "$tenant_bin" ] || [ ! -x "$tenant_bin" ]; then
         echo "tenant CMS binary is missing or not executable: $tenant_bin" >&2
         echo "Clone Vuuut next to this directory and build it with cargo build --release," >&2
-        echo "or set paths.ghostBinary in $PRO_DIR/pro.json." >&2
+        echo "or set paths.vuuutBinary in $PRO_DIR/pro.json." >&2
         return 1
     fi
 }
@@ -538,7 +541,7 @@ usage: ./run.sh <command>
 environment (also read from ./.env, which is gitignored — see .env.example):
   PRO_DIR               deployment directory (default: ./run)
   VUUUT_DIR             the Vuuut checkout tenants run from, when it is not
-                        next to this directory (sets PRO_PATHS__GHOST_BINARY
+                        next to this directory (sets PRO_PATHS__VUUUT_BINARY
                         and PRO_PATHS__THEME_SOURCE)
   PRO_SERVER__PORT      override the edge port from pro.json
   PRO_URL               platform URL override (also written by init)

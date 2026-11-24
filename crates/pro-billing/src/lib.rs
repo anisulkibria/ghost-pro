@@ -2,7 +2,7 @@
 //! Polar or Gumroad.
 //!
 //! Only the platform's own subscriptions are here. A *tenant's* member
-//! payments are that site's business and run through its own Ghost (today,
+//! payments are that site's business and run through its own Vuuut (today,
 //! Stripe Connect — gated by the `paid_memberships` plan flag).
 //!
 //! ## The shape of the abstraction

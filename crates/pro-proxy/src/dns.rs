@@ -375,7 +375,7 @@ mod tests {
     #[tokio::test]
     async fn an_unresolvable_domain_is_a_verdict_not_an_error() {
         let result =
-            check("this-domain-does-not-exist-ghost-pro-test.invalid", "token", &expect()).await;
+            check("this-domain-does-not-exist-vuuut-pro-test.invalid", "token", &expect()).await;
         let verdict = result.expect("a failed lookup is not an error");
         assert!(!verdict.is_servable());
     }

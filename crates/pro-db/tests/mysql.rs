@@ -12,7 +12,7 @@
 //! MySQL still passes `cargo test`. To run them:
 //!
 //! ```sh
-//! docker run -d --name ghostpro-mysql -e MYSQL_ROOT_PASSWORD=rootpw -p 13306:3306 mysql:8
+//! docker run -d --name vuuut-pro-mysql -e MYSQL_ROOT_PASSWORD=rootpw -p 13306:3306 mysql:8
 //! PRO_TEST_MYSQL_URL='mysql://root:rootpw@127.0.0.1:13306' cargo test -p pro-db --test mysql
 //! ```
 //!

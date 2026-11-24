@@ -172,7 +172,7 @@ pub fn redact(url: &str) -> String {
 
 /// Where a tenant's own database lives.
 ///
-/// A tenant is a whole Ghost site, and its data is not the platform's: posts,
+/// A tenant is a whole Vuuut site, and its data is not the platform's: posts,
 /// members, staff logins. Each tenant therefore gets a database of its own
 /// under both engines, and the platform never puts two tenants in one schema
 /// — a prefix bug in a shared schema would be a cross-customer data leak,

@@ -388,7 +388,7 @@ async fn change_plan_inner(
     }
 
     // Downgrading below what a site already uses would leave it over its new
-    // ceiling the moment it restarted. Ghost itself handles being over a limit
+    // ceiling the moment it restarted. Vuuut itself handles being over a limit
     // gracefully — it refuses *new* members rather than deleting any — so this
     // is a warning rather than a refusal, but the customer should know.
     let usage = pro_db::usage::latest(&state.db, &tenant.id).await.unwrap_or(None);

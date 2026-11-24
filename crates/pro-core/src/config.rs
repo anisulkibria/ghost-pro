@@ -1,7 +1,7 @@
 //! Platform configuration: `pro.json`, overridable by `PRO_*` environment
 //! variables.
 //!
-//! Layered the same way Ghost's own config is, and for the same reason — an
+//! Layered the same way Vuuut's own config is, and for the same reason — an
 //! operator edits a file, a container sets environment variables, and neither
 //! has to know about the other:
 //!
@@ -9,9 +9,9 @@
 //! 2. `pro.json` in the working directory
 //! 3. the defaults below
 //!
-//! Unlike Ghost's loader, a `PRO_*` value that parses as JSON is *used* as
+//! Unlike Vuuut's loader, a `PRO_*` value that parses as JSON is *used* as
 //! JSON. That matters: the tenant-facing half of this platform has to write
-//! whole objects (a plan's limits, a provider's keys) and Ghost's loader turns
+//! whole objects (a plan's limits, a provider's keys) and Vuuut's loader turns
 //! `{"a":1}` into the string `"{\"a\":1}"`, which silently becomes a config
 //! value nothing can read. Writing an object from the environment is rare but
 //! being unable to is worse.
@@ -32,7 +32,7 @@ pub struct Config {
     ///
     /// Kept separate from `url` because they are usually different hosts:
     /// the dashboard at `pro.example.com` and sites at `*.example.com`, or a
-    /// dedicated `*.ghost.example.com` so that no tenant slug can ever
+    /// dedicated `*.vuuut.example.com` so that no tenant slug can ever
     /// collide with a platform route.
     pub subdomain_base: String,
     #[serde(default)]
@@ -143,10 +143,11 @@ pub struct PathsConfig {
     /// directories, certificates, backups, logs.
     #[serde(default = "default_data_dir")]
     pub data_dir: String,
-    /// The `ghost` binary tenant processes are spawned from. Looked up on
-    /// `PATH` when it is a bare name.
-    #[serde(default = "default_ghost_binary")]
-    pub ghost_binary: String,
+    /// The `vuuut` binary tenant processes are spawned from. Looked up on
+    /// `PATH` when it is a bare name. The pre-rename key `ghostBinary` is
+    /// still read; see [`rename_legacy_keys`].
+    #[serde(default = "default_vuuut_binary")]
+    pub vuuut_binary: String,
     /// Themes copied into every new tenant. Points at a Vuuut
     /// `content/themes` directory.
     #[serde(default)]
@@ -157,7 +158,7 @@ impl Default for PathsConfig {
     fn default() -> Self {
         Self {
             data_dir: default_data_dir(),
-            ghost_binary: default_ghost_binary(),
+            vuuut_binary: default_vuuut_binary(),
             theme_source: None,
         }
     }
@@ -167,8 +168,8 @@ fn default_data_dir() -> String {
     "data".into()
 }
 
-fn default_ghost_binary() -> String {
-    "ghost".into()
+fn default_vuuut_binary() -> String {
+    "vuuut".into()
 }
 
 /// Which database engine the platform and its tenants run on.
@@ -240,7 +241,7 @@ pub struct TenantsConfig {
     /// Stop a tenant that has had no request for this long, and start it again
     /// on the next one.
     ///
-    /// This is what makes density possible: an idle Rust Ghost still holds its
+    /// This is what makes density possible: an idle Rust Vuuut still holds its
     /// pools and caches, and most sites on a hosting platform are idle most of
     /// the time. `0` keeps every tenant running.
     #[serde(default = "default_idle_timeout")]
@@ -273,7 +274,7 @@ impl Default for TenantsConfig {
 }
 
 fn default_port_floor() -> u16 {
-    // Clear of Ghost's own 2368-and-upwards range and of the ephemeral range
+    // Clear of Vuuut's own 2368-and-upwards range and of the ephemeral range
     // most kernels allocate from, so a tenant port is neither taken by a
     // comparison install nor stolen by an outbound connection.
     21_000
@@ -491,7 +492,7 @@ pub struct GumroadConfig {
 /// ready, your card was declined.
 ///
 /// Nothing to do with the newsletters a tenant sends — those go through that
-/// tenant's own Ghost mail config, which is separate on purpose so one
+/// tenant's own Vuuut mail config, which is separate on purpose so one
 /// tenant's sending reputation cannot be spent by another's.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -661,7 +662,7 @@ pub const RESERVED_SLUGS: &[&str] = &[
     "staging", "dev", "demo", "localhost", "internal", "private", "secure", "ssl", "login",
     "signin", "signup", "register", "account", "accounts", "auth", "oauth", "sso", "password",
     "reset", "verify", "payment", "payments", "pay", "checkout", "invoice", "invoices",
-    "subscribe", "unsubscribe", "webhook", "webhooks", "ghost", "about", "contact", "legal",
+    "subscribe", "unsubscribe", "webhook", "webhooks", "ghost", "vuuut", "about", "contact", "legal",
     "privacy", "terms", "security", "abuse", "postmaster", "hostmaster", "webmaster", "root",
     "system", "metrics", "health", "monitor", "backup", "backups",
 ];
@@ -683,6 +684,8 @@ impl Config {
             let raw = std::fs::read_to_string(&file)?;
             let val: serde_json::Value = serde_json::from_str(&raw)
                 .map_err(|e| ProError::Config(format!("{}: {e}", file.display())))?;
+            let mut val = val;
+            rename_legacy_keys(&mut val, false);
             merge_into(&mut merged, val);
         }
         // A per-environment file layered on top, so one checkout can hold both
@@ -693,10 +696,15 @@ impl Config {
             let raw = std::fs::read_to_string(&env_file)?;
             let val: serde_json::Value = serde_json::from_str(&raw)
                 .map_err(|e| ProError::Config(format!("{}: {e}", env_file.display())))?;
+            let mut val = val;
+            rename_legacy_keys(&mut val, false);
             merge_into(&mut merged, val);
         }
 
         apply_env_overrides(&mut merged);
+        // An old `PRO_PATHS__GHOST_BINARY` arrives here as `ghostBinary`, and
+        // the environment outranks every file, so it replaces what they set.
+        rename_legacy_keys(&mut merged, true);
 
         let mut cfg: Config = serde_json::from_value(merged)
             .map_err(|e| ProError::Config(format!("invalid config: {e}")))?;
@@ -820,7 +828,7 @@ impl Config {
     /// lives in, not to whatever directory the process happened to be started
     /// from. That is what makes a config portable between machines: the
     /// binary and themes this platform needs belong to a *different* checkout
-    /// (Vuuut), and `../../Vuuut/target/release/ghost` names it
+    /// (Vuuut), and `../../Vuuut/target/release/vuuut` names it
     /// correctly wherever the pair is cloned, while an absolute path names it
     /// on exactly one machine. A clone that had to be hand-edited before it
     /// would start is the thing being avoided here.
@@ -837,7 +845,7 @@ impl Config {
         self.resolve_path(&self.paths.data_dir)
     }
 
-    /// The `ghost` binary as a path, or `None` when it is a bare name that
+    /// The `vuuut` binary as a path, or `None` when it is a bare name that
     /// should be looked up on `PATH` the way a shell would.
     ///
     /// A configured path that no longer exists is treated as the stale hint
@@ -848,15 +856,15 @@ impl Config {
     /// machine, the deployment directory is copied to a new host. In every
     /// one of those cases the checkout is still next to this one, and
     /// refusing to start over its name would be pedantry. See
-    /// [`crate::checkout`]; [`Self::ghost_binary_is_rehomed`] reports when
+    /// [`crate::checkout`]; [`Self::vuuut_binary_is_rehomed`] reports when
     /// this has happened so the operator is told rather than left guessing.
-    pub fn ghost_binary_path(&self) -> Option<PathBuf> {
-        let p = Path::new(&self.paths.ghost_binary);
+    pub fn vuuut_binary_path(&self) -> Option<PathBuf> {
+        let p = Path::new(&self.paths.vuuut_binary);
         // A bare name belongs to `PATH`, and this does not second-guess it.
         if !p.is_absolute() && p.components().count() <= 1 {
             return None;
         }
-        let configured = self.resolve_path(&self.paths.ghost_binary);
+        let configured = self.resolve_path(&self.paths.vuuut_binary);
         if configured.is_file() {
             return Some(configured);
         }
@@ -864,10 +872,10 @@ impl Config {
         // precisely so the config survives being cloned elsewhere, and
         // re-deriving it is restoring its meaning. An absolute path is this
         // machine's deliberate answer — an operator who names
-        // `/opt/vuuut/target/release/ghost` wants that file, and quietly
+        // `/opt/vuuut/target/release/vuuut` wants that file, and quietly
         // running a different binary found next door would be a worse
         // outcome than refusing to start. So it stands, and fails loudly.
-        if Path::new(&self.paths.ghost_binary).is_absolute() {
+        if Path::new(&self.paths.vuuut_binary).is_absolute() {
             return Some(configured);
         }
         match crate::checkout::discover_binary(&self.base_dir) {
@@ -878,18 +886,18 @@ impl Config {
         }
     }
 
-    /// Whether [`Self::ghost_binary_path`] had to go looking.
+    /// Whether [`Self::vuuut_binary_path`] had to go looking.
     ///
     /// True when the configured path does not exist but a checkout nearby
     /// does. The platform runs either way; this is what lets it say so once
     /// at startup instead of silently diverging from its own config file.
-    pub fn ghost_binary_is_rehomed(&self) -> bool {
-        let p = Path::new(&self.paths.ghost_binary);
+    pub fn vuuut_binary_is_rehomed(&self) -> bool {
+        let p = Path::new(&self.paths.vuuut_binary);
         if !p.is_absolute() && p.components().count() <= 1 {
             return false;
         }
         !p.is_absolute()
-            && !self.resolve_path(&self.paths.ghost_binary).is_file()
+            && !self.resolve_path(&self.paths.vuuut_binary).is_file()
             && crate::checkout::discover_binary(&self.base_dir).is_some()
     }
 
@@ -1117,7 +1125,7 @@ impl Config {
     }
 
     /// The url a tenant's site is reachable at, which becomes the `url` in its
-    /// own Ghost config and therefore the base of every link it emits.
+    /// own Vuuut config and therefore the base of every link it emits.
     pub fn tenant_url(&self, slug: &str) -> String {
         self.public_origin(&self.tenant_host(slug))
     }
@@ -1205,7 +1213,7 @@ fn default_config_value(env: &str) -> serde_json::Value {
         "url": if dev { "http://localhost:8080" } else { "" },
         "subdomainBase": if dev { "localhost" } else { "" },
         "server": { "host": "0.0.0.0", "httpPort": if dev { 0 } else { 80 } },
-        "paths": { "dataDir": "data", "ghostBinary": "ghost" },
+        "paths": { "dataDir": "data", "vuuutBinary": "vuuut" },
         "tenants": {},
         "ssl": { "enabled": false },
         "billing": { "provider": "none" },
@@ -1218,6 +1226,22 @@ fn default_config_value(env: &str) -> serde_json::Value {
 /// Deep-merge `src` over `dst`, object by object. A non-object replaces
 /// whatever was there, so an array in a config file wins outright rather than
 /// being concatenated — which is what makes `plans` a replacement.
+/// Move keys from before the ghost → vuuut rename to their current names.
+///
+/// Each file is renamed before it is merged, so a layer that still says
+/// `ghostBinary` overrides the layer beneath it exactly as `vuuutBinary`
+/// would; inside one file, the current name wins. After the environment is
+/// applied, a `ghostBinary` can only have come from `PRO_PATHS__GHOST_BINARY`,
+/// and the environment outranks every file, so then the old name wins.
+fn rename_legacy_keys(layer: &mut serde_json::Value, old_wins: bool) {
+    let Some(paths) = layer.get_mut("paths").and_then(|p| p.as_object_mut()) else { return };
+    if let Some(old) = paths.remove("ghostBinary") {
+        if old_wins || !paths.contains_key("vuuutBinary") {
+            paths.insert("vuuutBinary".into(), old);
+        }
+    }
+}
+
 fn merge_into(dst: &mut serde_json::Value, src: serde_json::Value) {
     match (dst, src) {
         (serde_json::Value::Object(d), serde_json::Value::Object(s)) => {
@@ -1264,7 +1288,7 @@ fn set_path(cfg: &mut serde_json::Value, path: &[String], val: serde_json::Value
 
 /// Interpret an environment value as the JSON it looks like.
 ///
-/// Objects and arrays are parsed, which is the difference from Ghost's loader
+/// Objects and arrays are parsed, which is the difference from Vuuut's loader
 /// and the reason this platform can set a whole plan or a provider's keys from
 /// the environment. Everything else is scalar-parsed, with one deliberate
 /// exception: a long numeric identifier stays a string so it still matches
@@ -1339,7 +1363,7 @@ mod tests {
         let checkout = root.join("vuuut");
         std::fs::create_dir_all(checkout.join("content/themes/casper")).unwrap();
         std::fs::create_dir_all(checkout.join("target/release")).unwrap();
-        std::fs::write(checkout.join("target/release/ghost"), b"#!/bin/sh\n").unwrap();
+        std::fs::write(checkout.join("target/release/vuuut"), b"#!/bin/sh\n").unwrap();
         let base = root.join("vuuut-pro/run");
         std::fs::create_dir_all(&base).unwrap();
         (root, base)
@@ -1354,12 +1378,12 @@ mod tests {
         let mut c = cfg();
         c.base_dir = base;
         // What setup wrote before the rename.
-        c.paths.ghost_binary = "../../Vuuut-old/target/release/ghost".into();
+        c.paths.vuuut_binary = "../../Vuuut-old/target/release/vuuut".into();
         c.paths.theme_source = Some("../../Vuuut-old/content/themes".into());
 
-        assert_eq!(real(c.ghost_binary_path()), real(Some(root.join("vuuut/target/release/ghost"))));
+        assert_eq!(real(c.vuuut_binary_path()), real(Some(root.join("vuuut/target/release/vuuut"))));
         assert_eq!(real(c.theme_source_path()), real(Some(root.join("vuuut/content/themes"))));
-        assert!(c.ghost_binary_is_rehomed(), "the operator is not being told");
+        assert!(c.vuuut_binary_is_rehomed(), "the operator is not being told");
 
         std::fs::remove_dir_all(&root).ok();
     }
@@ -1370,11 +1394,11 @@ mod tests {
         let (root, base) = side_by_side();
         let mut c = cfg();
         c.base_dir = base;
-        c.paths.ghost_binary = "../../vuuut/target/release/ghost".into();
+        c.paths.vuuut_binary = "../../vuuut/target/release/vuuut".into();
         c.paths.theme_source = Some("../../vuuut/content/themes".into());
 
-        assert_eq!(real(c.ghost_binary_path()), real(Some(root.join("vuuut/target/release/ghost"))));
-        assert!(!c.ghost_binary_is_rehomed());
+        assert_eq!(real(c.vuuut_binary_path()), real(Some(root.join("vuuut/target/release/vuuut"))));
+        assert!(!c.vuuut_binary_is_rehomed());
 
         std::fs::remove_dir_all(&root).ok();
     }
@@ -1388,10 +1412,10 @@ mod tests {
         std::fs::create_dir_all(&base).unwrap();
         let mut c = cfg();
         c.base_dir = base.clone();
-        c.paths.ghost_binary = "../../nowhere/target/release/ghost".into();
+        c.paths.vuuut_binary = "../../nowhere/target/release/vuuut".into();
 
-        assert_eq!(c.ghost_binary_path(), Some(base.join("../../nowhere/target/release/ghost")));
-        assert!(!c.ghost_binary_is_rehomed());
+        assert_eq!(c.vuuut_binary_path(), Some(base.join("../../nowhere/target/release/vuuut")));
+        assert!(!c.vuuut_binary_is_rehomed());
 
         std::fs::remove_dir_all(&root).ok();
     }
@@ -1404,12 +1428,12 @@ mod tests {
         let (root, base) = side_by_side();
         let mut c = cfg();
         c.base_dir = base;
-        c.paths.ghost_binary = "/nonexistent/ghost".into();
+        c.paths.vuuut_binary = "/nonexistent/vuuut".into();
         c.paths.theme_source = Some("/nonexistent/themes".into());
 
-        assert_eq!(c.ghost_binary_path(), Some(PathBuf::from("/nonexistent/ghost")));
+        assert_eq!(c.vuuut_binary_path(), Some(PathBuf::from("/nonexistent/vuuut")));
         assert_eq!(c.theme_source_path(), Some(PathBuf::from("/nonexistent/themes")));
-        assert!(!c.ghost_binary_is_rehomed());
+        assert!(!c.vuuut_binary_is_rehomed());
 
         std::fs::remove_dir_all(&root).ok();
     }
@@ -1421,10 +1445,10 @@ mod tests {
         let (root, base) = side_by_side();
         let mut c = cfg();
         c.base_dir = base;
-        c.paths.ghost_binary = "ghost".into();
+        c.paths.vuuut_binary = "vuuut".into();
 
-        assert_eq!(c.ghost_binary_path(), None);
-        assert!(!c.ghost_binary_is_rehomed());
+        assert_eq!(c.vuuut_binary_path(), None);
+        assert!(!c.vuuut_binary_is_rehomed());
 
         std::fs::remove_dir_all(&root).ok();
     }
@@ -1592,7 +1616,7 @@ mod tests {
     }
 
     /// Objects from the environment have to survive as objects — the whole
-    /// reason this loader differs from Ghost's.
+    /// reason this loader differs from Vuuut's.
     #[test]
     fn env_values_parse_as_json_when_they_are_json() {
         assert_eq!(parse_env_value("true"), serde_json::json!(true));
@@ -1666,11 +1690,26 @@ mod tests {
     }
 
     #[test]
+    fn the_pre_rename_binary_key_is_still_read() {
+        let mut file = serde_json::json!({ "paths": { "ghostBinary": "/old" } });
+        rename_legacy_keys(&mut file, false);
+        assert_eq!(file["paths"], serde_json::json!({ "vuuutBinary": "/old" }));
+
+        let mut both = serde_json::json!({ "paths": { "ghostBinary": "/old", "vuuutBinary": "/new" } });
+        rename_legacy_keys(&mut both, false);
+        assert_eq!(both["paths"], serde_json::json!({ "vuuutBinary": "/new" }));
+
+        let mut from_env = serde_json::json!({ "paths": { "ghostBinary": "/env", "vuuutBinary": "/file" } });
+        rename_legacy_keys(&mut from_env, true);
+        assert_eq!(from_env["paths"], serde_json::json!({ "vuuutBinary": "/env" }));
+    }
+
+    #[test]
     fn public_hostnames_are_left_alone() {
         let mut c = cfg();
         for url in [
             "https://pro.example.com",
-            "https://ghost-pro.io",
+            "https://vuuut-pro.io",
             "http://203.0.113.10",
             // Not a reserved suffix, however much it looks like one.
             "https://pro.testing.example.com",

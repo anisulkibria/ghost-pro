@@ -76,7 +76,7 @@ pub fn parse() -> Command {
 
 pub fn print_help() {
     println!(
-        r#"vuuut-pro {version} — managed hosting for Ghost
+        r#"vuuut-pro {version} — managed hosting for Vuuut
 
 USAGE
     vuuut-pro [command] [options]
@@ -92,7 +92,7 @@ COMMANDS
 SETUP OPTIONS
     --url <url>           Where the platform is reached, e.g. https://pro.example.com
     --subdomain-base <d>  Zone for tenant sites, e.g. sites.example.com
-    --ghost-binary <path> Path to the Vuuut `ghost` binary
+    --vuuut-binary <path> Path to the Vuuut `vuuut` binary
     --theme-source <path> Vuuut content/themes to copy into new sites
     --data-dir <path>     Where tenant sites and the database live (default: data)
     --ssl                 Get certificates from Let's Encrypt
@@ -125,7 +125,7 @@ DATABASE
 
 EXAMPLES
     vuuut-pro setup --url https://pro.example.com --subdomain-base sites.example.com \
-        --ghost-binary /opt/ghost-rust/target/release/ghost --ssl --email you@example.com
+        --vuuut-binary /opt/vuuut/target/release/vuuut --ssl --email you@example.com
     vuuut-pro create-staff --email you@example.com --name "Your Name"
     vuuut-pro db
     vuuut-pro doctor
@@ -140,7 +140,7 @@ EXAMPLES
 /// The search itself lives in [`pro_core::checkout`], because `setup` is no
 /// longer the only caller: the running platform repeats it whenever the path
 /// it recorded here has gone stale, so the two must use one list of names.
-fn discover_ghost_rust() -> Option<String> {
+fn discover_vuuut() -> Option<String> {
     let cwd = std::env::current_dir().ok()?;
     pro_core::checkout::discover(&cwd)
 }
@@ -158,7 +158,7 @@ fn discover_ghost_rust() -> Option<String> {
 /// resolve, which is the right answer for a packaged install.
 pub async fn tenant_binary() -> Result<()> {
     let config = Config::load(None)?;
-    if let Some(path) = config.ghost_binary_path() {
+    if let Some(path) = config.vuuut_binary_path() {
         println!("{}", path.display());
     }
     Ok(())
@@ -167,7 +167,7 @@ pub async fn tenant_binary() -> Result<()> {
 /// Write a `pro.json`.
 pub async fn setup(args: Args) -> Result<()> {
     let interactive = std::io::stdin().is_terminal();
-    let discovered = discover_ghost_rust();
+    let discovered = discover_vuuut();
 
     let url = match args.get("url") {
         Some(u) => u.to_string(),
@@ -191,13 +191,13 @@ pub async fn setup(args: Args) -> Result<()> {
     // themes, so the common case needs neither flag.
     let binary_default = discovered
         .as_deref()
-        .map(|d| format!("{d}/target/release/ghost"))
-        .unwrap_or_else(|| "ghost".to_string());
+        .map(|d| format!("{d}/target/release/vuuut"))
+        .unwrap_or_else(|| "vuuut".to_string());
 
-    let ghost_binary = match args.get("ghost-binary") {
+    let vuuut_binary = match args.get("vuuut-binary").or_else(|| args.get("ghost-binary")) {
         Some(p) => p.to_string(),
         None if interactive => {
-            ask("Path to the Vuuut `ghost` binary", Some(&binary_default))?
+            ask("Path to the Vuuut `vuuut` binary", Some(&binary_default))?
         }
         None => binary_default,
     };
@@ -205,8 +205,8 @@ pub async fn setup(args: Args) -> Result<()> {
     // Checked now rather than at the first signup: a wrong path here is the
     // commonest setup mistake, and the failure it causes otherwise appears as
     // a customer's site failing to provision.
-    if ghost_binary.contains('/') && !std::path::Path::new(&ghost_binary).exists() {
-        tracing::warn!("{ghost_binary} does not exist yet — build Vuuut before serving");
+    if vuuut_binary.contains('/') && !std::path::Path::new(&vuuut_binary).exists() {
+        tracing::warn!("{vuuut_binary} does not exist yet — build Vuuut before serving");
     }
 
     let ssl = args.flag("ssl");
@@ -215,7 +215,7 @@ pub async fn setup(args: Args) -> Result<()> {
         "subdomainBase": subdomain_base,
         "paths": {
             "dataDir": args.get("data-dir").unwrap_or("data"),
-            "ghostBinary": ghost_binary,
+            "vuuutBinary": vuuut_binary,
         },
         "ssl": { "enabled": ssl },
         "billing": { "provider": "none" },
@@ -259,16 +259,16 @@ pub async fn setup(args: Args) -> Result<()> {
 
     std::fs::write(&path, serde_json::to_string_pretty(&config)?)?;
     println!("\nWrote {}\n", path.display());
-    if args.get("ghost-binary").is_none() {
+    if args.get("vuuut-binary").or_else(|| args.get("ghost-binary")).is_none() {
         match &discovered {
             Some(d) => println!(
                 "Found a Vuuut checkout at {d} (relative to this directory, so this \
                  config stays valid on other machines).\n"
             ),
             None => println!(
-                "No Vuuut checkout found nearby, so paths.ghostBinary is the bare name \
-                 \"ghost\" and no themes are configured. Clone and build Vuuut, then set \
-                 paths.ghostBinary and paths.themeSource.\n"
+                "No Vuuut checkout found nearby, so paths.vuuutBinary is the bare name \
+                 \"vuuut\" and no themes are configured. Clone and build Vuuut, then set \
+                 paths.vuuutBinary and paths.themeSource.\n"
             ),
         }
     }
@@ -311,18 +311,18 @@ pub async fn doctor() -> Result<()> {
         // Passing while the configured path is stale is still worth saying:
         // the platform runs, but `pro.json` no longer describes what it runs,
         // and the next person to read that file would be misled.
-        Ok(_) if config.ghost_binary_is_rehomed() => check(
+        Ok(_) if config.vuuut_binary_is_rehomed() => check(
             true,
-            "ghost binary",
+            "vuuut binary",
             &format!(
-                "found beside this checkout — paths.ghostBinary ({}) does not exist. \
+                "found beside this checkout — paths.vuuutBinary ({}) does not exist. \
                  Update pro.json to silence this",
-                config.paths.ghost_binary
+                config.paths.vuuut_binary
             ),
         ),
-        Ok(_) => check(true, "ghost binary", "found"),
+        Ok(_) => check(true, "vuuut binary", "found"),
         Err(e) => {
-            check(false, "ghost binary", &e.to_string());
+            check(false, "vuuut binary", &e.to_string());
             problems += 1;
         }
     }

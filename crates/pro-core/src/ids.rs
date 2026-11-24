@@ -8,7 +8,7 @@
 //! time.
 use rand::RngCore;
 
-/// A 24-character lowercase hex id, matching the shape Ghost uses for its own
+/// A 24-character lowercase hex id, matching the shape Vuuut uses for its own
 /// object ids. Not a secret; unique is all it has to be.
 pub fn object_id() -> String {
     let mut bytes = [0u8; 12];
@@ -158,9 +158,9 @@ mod tests {
 
     #[test]
     fn hashes_are_stable() {
-        assert_eq!(sha256_hex("ghost"), sha256_hex("ghost"));
-        assert_eq!(sha256_hex("ghost").len(), 64);
-        assert_ne!(sha256_hex("ghost"), sha256_hex("ghosu"));
+        assert_eq!(sha256_hex("vuuut"), sha256_hex("vuuut"));
+        assert_eq!(sha256_hex("vuuut").len(), 64);
+        assert_ne!(sha256_hex("vuuut"), sha256_hex("vuuuu"));
     }
 
     #[test]

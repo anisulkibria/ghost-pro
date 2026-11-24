@@ -25,6 +25,7 @@ serde_json = { workspace = true }
 hickory-resolver = { workspace = true }
 chrono = { workspace = true }
 psl = "2"
+roxmltree = "0.20"
 reqwest = { workspace = true }
 percent-encoding = { workspace = true }
 base64 = { workspace = true }

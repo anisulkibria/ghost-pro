@@ -1,6 +1,6 @@
 //! The customer's panel: `/dashboard`.
 //!
-//! What a subscriber does here: install a Ghost site, attach their own domain,
+//! What a subscriber does here: install a Vuuut site, attach their own domain,
 //! see what their plan allows, and manage their subscription. The operator
 //! console is a separate surface at `/owner/dashboard` with a separate login — see
 //! [`crate::console`].
@@ -121,7 +121,7 @@ async fn sites_inner(
             notice = notice,
             empty = view::empty(
                 "Install your first site",
-                "A Ghost publication on your own address, ready to write in, in a few seconds.",
+                "A Vuuut publication on your own address, ready to write in, in a few seconds.",
                 if unverified { None } else { Some(("Create a site", "/dashboard/new")) },
             ),
         )
@@ -150,7 +150,7 @@ async fn sites_inner(
 <td>{status} {sleeping}</td>
 <td>{plan}</td>
 <td class="muted">{seen}</td>
-<td class="end"><a class="btn tonal small" href="{origin}/ghost/" rel="noopener" target="_blank">{open} Admin</a></td>
+<td class="end"><a class="btn tonal small" href="{origin}/vuuut/" rel="noopener" target="_blank">{open} Admin</a></td>
 </tr>"#,
                 id = view::attr(&tenant.id),
                 name = esc(&tenant.name),
@@ -736,7 +736,7 @@ async fn site_inner(
             },
         ),
         &format!(
-            r#"<a class="btn" href="{origin}/ghost/" rel="noopener" target="_blank">{open} Open admin</a>"#,
+            r#"<a class="btn" href="{origin}/vuuut/" rel="noopener" target="_blank">{open} Open admin</a>"#,
             origin = attr(&origin),
             open = view::svg("open"),
         ),
@@ -901,7 +901,7 @@ creating a site.</p>"#
                 if let Some(token)=verification {body.push_str(&format!("<p>Add a TXT record at <code>_vuuut-click.{}</code> with value <code>vuuut-click={}</code>.</p>",esc(&host),esc(&token)));}
             }
         }
-        body.push_str(&format!(r#"<p><a href="{origin}/ghost/analytics/click/" target="_blank" rel="noopener">Open native analytics in your site's Admin</a></p><form method="post" action="/dashboard/sites/{id}/click"><button class="btn outlined small" name="action" value="retry">Retry sync</button> <button class="btn outlined small" name="action" value="rotate">Rotate credential</button> <button class="btn outlined small" name="action" value="disconnect">Disconnect</button> <button class="btn outlined small" name="action" value="connect">Reconnect</button></form>"#,origin=attr(&origin),id=attr(&tenant.id)));
+        body.push_str(&format!(r#"<p><a href="{origin}/vuuut/analytics/click/" target="_blank" rel="noopener">Open native analytics in your site's Admin</a></p><form method="post" action="/dashboard/sites/{id}/click"><button class="btn outlined small" name="action" value="retry">Retry sync</button> <button class="btn outlined small" name="action" value="rotate">Rotate credential</button> <button class="btn outlined small" name="action" value="disconnect">Disconnect</button> <button class="btn outlined small" name="action" value="connect">Reconnect</button></form>"#,origin=attr(&origin),id=attr(&tenant.id)));
     }
     body.push_str(&backups_section(state, &tenant).await?);
 
@@ -1151,10 +1151,9 @@ pub async fn add_domain(
     let back = format!("/dashboard/sites/{id}");
     reply::or_redirect(&back, &chrome, async {
         let added = add_domain_inner(&state, &headers, &id, &form.domain).await?;
-        Ok(redirect_with(
-            &format!("/dashboard/domains/{}", added.id),
-            Flash::ok(format!("{} added. Now point its DNS here.", added.domain)),
-        ))
+        let account = auth::account(&state, &headers).await?;
+        let outcome = crate::dns_providers::auto_setup(&state, &account, &added).await;
+        Ok(redirect_with(&format!("/dashboard/domains/{}", added.id), outcome.flash(&added.domain)))
     }.await)
 }
 
@@ -1178,7 +1177,7 @@ pub(crate) async fn add_domain_inner(
         .plan(&tenant.plan_slug)
         .ok_or_else(|| ProError::Config("this site's plan is no longer in the catalogue".into()))?;
 
-    // The platform's own allowance, which Ghost knows nothing about — domains
+    // The platform's own allowance, which Vuuut knows nothing about — domains
     // are the platform's to route.
     let used = pro_db::domains::count_custom(&state.db, &tenant.id).await?;
     if used >= plan.max_custom_domains {

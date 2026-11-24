@@ -1,14 +1,14 @@
 //! Plans, and the `hostSettings` block each one compiles into.
 //!
 //! This is the whole contract between the platform and a tenant. Vuuut
-//! already enforces host limits — `ghost_db::limits::Limits::load` reads
+//! already enforces host limits — `vuuut_db::limits::Limits::load` reads
 //! `hostSettings.limits` out of the site's config and every create path checks
 //! against it. So the platform does not need to police tenants at the edge: it
 //! only has to write the right JSON into the right config file, and the site
 //! enforces its own plan from the inside.
 //!
 //! That is why the limit *names* here are not ours to choose. They are the
-//! names Ghost's `limit-service` knows, and anything else is dropped with a
+//! names Vuuut's `limit-service` knows, and anything else is dropped with a
 //! warning by the site at boot. The set is:
 //!
 //! * counted ceilings — `members`, `staff`, `newsletters`, `limitAutomations`,
@@ -64,7 +64,7 @@ pub struct Plan {
     /// Ceiling on members. `None` is unlimited.
     #[serde(default)]
     pub max_members: Option<i64>,
-    /// Ceiling on staff users. Contributors are free in Ghost's own counting,
+    /// Ceiling on staff users. Contributors are free in Vuuut's own counting,
     /// so this is editors and above plus pending invites.
     #[serde(default)]
     pub max_staff: Option<i64>,
@@ -96,7 +96,7 @@ pub struct Plan {
     ///
     /// Named for the capability rather than the processor on purpose. Today
     /// the CMS has exactly one way to charge a member — Stripe Connect — so
-    /// this compiles to Ghost's `limitStripeConnect` flag and nothing else.
+    /// this compiles to Vuuut's `limitStripeConnect` flag and nothing else.
     /// When the CMS gains further processors, this plan field does not change:
     /// only [`Plan::host_settings`] does, emitting whichever limit names the
     /// CMS has by then. That keeps a stored plan, and every operator's
@@ -122,13 +122,13 @@ pub struct Plan {
     pub public_site_access: bool,
 
     // ---- platform-side allowances -----------------------------------------
-    /// How many custom domains the tenant may attach. Ghost knows nothing
+    /// How many custom domains the tenant may attach. Vuuut knows nothing
     /// about this one; it is enforced here, because domains are the platform's
     /// to route.
     #[serde(default)]
     pub max_custom_domains: i64,
     /// Storage for content (images, media, files), in bytes. Enforced by the
-    /// platform's own accounting, since Ghost has no notion of a disk quota.
+    /// platform's own accounting, since Vuuut has no notion of a disk quota.
     #[serde(default)]
     pub max_storage_bytes: Option<i64>,
     /// Days of trial granted on signup. `0` means payment up front.
@@ -171,7 +171,7 @@ impl Plan {
     /// `billing_url` is where the site's own admin screens send an owner who
     /// hits a limit. Ghost falls back to `https://ghost.org/help/` when the
     /// host supplies none, which would be wrong here — on this platform the
-    /// owner's billing page is ours, not Ghost's.
+    /// owner's billing page is ours, not Vuuut's.
     pub fn host_settings(&self, subscription_start: &str, billing_url: &str) -> Value {
         let mut limits = Map::new();
 
@@ -650,12 +650,12 @@ pub fn suspended_plan() -> Plan {
 mod tests {
     use super::*;
 
-    /// The names written into `hostSettings.limits` have to be ones Ghost's
+    /// The names written into `hostSettings.limits` have to be ones Vuuut's
     /// limit service knows; anything else is dropped at boot with a warning,
     /// which would turn a paid ceiling into no ceiling at all. This is the
-    /// list from `ghost_db::limits`.
+    /// list from `vuuut_db::limits`.
     #[test]
-    fn only_emits_limit_names_ghost_understands() {
+    fn only_emits_limit_names_vuuut_understands() {
         const KNOWN: &[&str] = &[
             "members",
             "staff",
@@ -814,7 +814,7 @@ mod tests {
     }
 
     /// The billing link has to be the platform's, not ghost.org's — the site
-    /// falls back to Ghost's help page when the host sends none.
+    /// falls back to Vuuut's help page when the host sends none.
     #[test]
     fn billing_url_is_the_platforms() {
         let hs = default_plans()[0].host_settings("2026-01-01T00:00:00Z", "https://pro.example/billing");

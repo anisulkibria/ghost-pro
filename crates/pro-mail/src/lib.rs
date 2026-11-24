@@ -364,7 +364,7 @@ mod tests {
                 to: "customer@example.com".into(),
                 to_name: Some("Customer".into()),
                 subject: "Your site is ready".into(),
-                text: "Visit https://alice.sites.example.com/ghost/".into(),
+                text: "Visit https://alice.sites.example.com/vuuut/".into(),
                 html: None,
             })
             .await;

@@ -14,7 +14,7 @@ pub(crate) async fn fetch(state: &AppState, tenant: &Tenant, wake: bool) -> Resu
     let token = crate::worker::mint_admin_token(id, secret)
         .ok_or_else(|| ProError::Unavailable("The site's reporting key is invalid.".into()))?;
     let response = reqwest::Client::builder().timeout(std::time::Duration::from_secs(5)).build()
-        .map_err(ProError::internal)?.get(format!("http://127.0.0.1:{}/ghost/api/admin/email_usage/",tenant.port))
+        .map_err(ProError::internal)?.get(format!("http://127.0.0.1:{}/vuuut/api/admin/email_usage/",tenant.port))
         .header("Authorization",format!("Ghost {token}")).send().await
         .map_err(|_| ProError::Unavailable("Could not reach this site's email report. Check the site is running the current Vuuut binary.".into()))?;
     if !response.status().is_success() {

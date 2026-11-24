@@ -189,7 +189,7 @@ where
     });
 
     if let Err(e) = ConnBuilder::new(TokioExecutor::new())
-        // Upgrades keep websockets working through the proxy, which Ghost's
+        // Upgrades keep websockets working through the proxy, which Vuuut's
         // admin uses for live previews.
         .serve_connection_with_upgrades(TokioIo::new(stream), service)
         .await

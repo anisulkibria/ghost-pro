@@ -1,6 +1,6 @@
 //! Finding the Vuuut checkout tenant sites are run from.
 //!
-//! The platform spawns one CMS process per tenant, so it needs the `ghost`
+//! The platform spawns one CMS process per tenant, so it needs the `vuuut`
 //! binary and — for a new site — the themes to seed it with. Both live in a
 //! Vuuut checkout, normally the sibling of this one, and `pro.json` records
 //! where it was at setup time.
@@ -35,6 +35,12 @@ pub const CHECKOUT_NAMES: [&str; 8] = [
     "Rust-Ghost",
 ];
 
+/// Names the CMS binary is built under, current first.
+///
+/// It was `ghost` until the crate was renamed; an older checkout that has not
+/// been pulled still builds that, and should keep working.
+pub const BINARY_NAMES: [&str; 2] = ["vuuut", "ghost"];
+
 /// How far up to look for a sibling checkout.
 ///
 /// `..` is the usual layout — the two repositories side by side, with the
@@ -48,7 +54,8 @@ const PREFIXES: [&str; 4] = ["..", "../..", "../../..", "../../../.."];
 /// straight after a clone; the binary appears once it has been built. A
 /// directory with the right name and neither is some other directory.
 fn looks_like_checkout(dir: &Path) -> bool {
-    dir.join("content/themes").is_dir() || dir.join("target/release/ghost").is_file()
+    dir.join("content/themes").is_dir()
+        || BINARY_NAMES.iter().any(|b| dir.join("target/release").join(b).is_file())
 }
 
 /// Find a checkout near `base`, returned relative to it.
@@ -71,13 +78,15 @@ pub fn discover(base: &Path) -> Option<String> {
     None
 }
 
-/// Find the `ghost` binary near `base`, when a checkout nearby has one built.
+/// Find the CMS binary near `base`, when a checkout nearby has one built.
 pub fn discover_binary(base: &Path) -> Option<String> {
     for prefix in PREFIXES {
         for name in CHECKOUT_NAMES {
-            let rel = format!("{prefix}/{name}/target/release/ghost");
-            if base.join(&rel).is_file() {
-                return Some(rel);
+            for bin in BINARY_NAMES {
+                let rel = format!("{prefix}/{name}/target/release/{bin}");
+                if base.join(&rel).is_file() {
+                    return Some(rel);
+                }
             }
         }
     }
@@ -97,13 +106,15 @@ pub fn discover_themes(base: &Path) -> Option<String> {
     None
 }
 
-/// The checkout a path like `<checkout>/target/release/ghost` belongs to.
+/// The checkout a path like `<checkout>/target/release/vuuut` belongs to.
 ///
 /// Used to report what to build, and by `run.sh` to build it.
 pub fn checkout_of_binary(binary: &Path) -> Option<PathBuf> {
     let checkout = binary.parent()?.parent()?.parent()?;
-    (checkout.join("Cargo.toml").is_file() && checkout.join("crates/ghost/Cargo.toml").is_file())
-        .then(|| checkout.to_path_buf())
+    let bin = binary.file_name()?.to_str()?;
+    (checkout.join("Cargo.toml").is_file()
+        && checkout.join("crates").join(bin).join("Cargo.toml").is_file())
+    .then(|| checkout.to_path_buf())
 }
 
 #[cfg(test)]
@@ -115,7 +126,7 @@ mod tests {
         std::fs::create_dir_all(checkout.join("content/themes")).unwrap();
         if with_binary {
             std::fs::create_dir_all(checkout.join("target/release")).unwrap();
-            std::fs::write(checkout.join("target/release/ghost"), b"#!/bin/sh\n").unwrap();
+            std::fs::write(checkout.join("target/release/vuuut"), b"#!/bin/sh\n").unwrap();
         }
     }
 
@@ -146,7 +157,7 @@ mod tests {
             let binary = discover_binary(&base).expect("no binary found");
             assert_eq!(
                 base.join(&binary).canonicalize().unwrap(),
-                root.join(name).join("target/release/ghost").canonicalize().unwrap()
+                root.join(name).join("target/release/vuuut").canonicalize().unwrap()
             );
             std::fs::remove_dir_all(&root).ok();
         }

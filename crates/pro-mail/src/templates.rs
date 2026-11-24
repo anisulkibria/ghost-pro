@@ -59,9 +59,9 @@ pub fn verify_email(platform: &str, to: &str, name: &str, link: &str) -> Message
 /// The site is up.
 ///
 /// Carries the admin URL rather than the public one: the next thing a new
-/// customer wants is to write something, and that is behind `/ghost/`.
+/// customer wants is to write something, and that is behind `/vuuut/`.
 pub fn site_ready(platform: &str, to: &str, name: &str, site_url: &str) -> Message {
-    let admin = format!("{}/ghost/", site_url.trim_end_matches('/'));
+    let admin = format!("{}/vuuut/", site_url.trim_end_matches('/'));
     let text = format!(
         "Your site is ready.\n\n\
          Visit it at {site_url}\n\
@@ -274,13 +274,13 @@ mod tests {
     }
 
     /// The next thing a new customer wants is to write, which is behind
-    /// `/ghost/`.
+    /// `/vuuut/`.
     #[test]
     fn site_ready_points_at_the_admin() {
         let m = site_ready("P", "a@b.co", "A", "https://alice.sites.example.com/");
-        assert!(m.text.contains("https://alice.sites.example.com/ghost/"));
+        assert!(m.text.contains("https://alice.sites.example.com/vuuut/"));
         // No doubled slash from the trailing one on the input.
-        assert!(!m.text.contains("com//ghost"));
+        assert!(!m.text.contains("com//vuuut"));
     }
 
     /// The two passwords are different systems, and saying so here is what

@@ -99,7 +99,7 @@ impl Forwarder {
             headers.remove(*name);
         }
 
-        // The tenant's Ghost builds absolute URLs from its configured `url`,
+        // The tenant's Vuuut builds absolute URLs from its configured `url`,
         // not from this header, so `Host` is mostly informational — but it is
         // what a `Host`-based check inside the site would see, so it carries
         // the hostname the visitor actually used.

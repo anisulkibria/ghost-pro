@@ -546,7 +546,7 @@ async fn site_inner(
             created = esc(&view::when(Some(&tenant.created_at))),
         ),
         &format!(
-            r#"<a class="btn outlined" href="{origin}/ghost/" target="_blank" rel="noopener">{open} Open admin</a>"#,
+            r#"<a class="btn outlined" href="{origin}/vuuut/" target="_blank" rel="noopener">{open} Open admin</a>"#,
             origin = attr(&origin),
             open = view::svg("open"),
         ),

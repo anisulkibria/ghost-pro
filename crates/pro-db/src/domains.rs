@@ -182,7 +182,7 @@ pub async fn list_for_tenant(pool: &Db, tenant_id: &str) -> Result<Vec<Domain>> 
     Ok(rows.iter().map(map).collect())
 }
 
-/// The tenant's canonical hostname — what its Ghost `url` is set to.
+/// The tenant's canonical hostname — what its Vuuut `url` is set to.
 pub async fn primary_for_tenant(pool: &Db, tenant_id: &str) -> Result<Option<Domain>> {
     let row = sqlx::query(&format!(
         "SELECT {COLS} FROM domains WHERE tenant_id = ? AND is_primary = 1"

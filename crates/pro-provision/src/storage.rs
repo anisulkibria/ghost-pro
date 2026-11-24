@@ -1,6 +1,6 @@
 //! Measuring what a tenant is using on disk.
 //!
-//! Ghost has no notion of a disk quota, so this is the platform's own
+//! Vuuut has no notion of a disk quota, so this is the platform's own
 //! accounting. It is a directory walk, which is cheap per tenant and
 //! expensive across thousands — so it runs as a background job on a schedule,
 //! never on a request.

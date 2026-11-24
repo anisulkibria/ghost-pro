@@ -210,7 +210,7 @@ pub async fn download(filename: &str, file: tokio::fs::File) -> Response {
     response
 }
 
-/// An error as JSON, in the shape Ghost's own API uses.
+/// An error as JSON, in the shape Vuuut's own API uses.
 pub fn json_error(error: &ProError) -> Response {
     log_if_internal(error);
     json(
@@ -412,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn json_errors_use_ghosts_shape() {
+    fn json_errors_use_vuuuts_shape() {
         let response = json_error(&ProError::NotFound("no site".into()));
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }

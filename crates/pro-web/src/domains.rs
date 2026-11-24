@@ -252,32 +252,41 @@ fn status_banner(state: &AppState, panel: Panel, l: &DomainListing) -> String {
 struct DnsSetup<'a> {
     authority: Option<&'a Authority>,
     approval: Option<&'a str>,
+    /// The account has this DNS host connected, so one click sets it up.
+    connected: bool,
 }
 
-/// Paste-a-token setup: Vuuut Pro writes the records through the provider's API.
-fn token_form(d: &pro_core::Domain, provider: domain_connect::Provider) -> String {
-    let (href, how) = dns_api::token_help(provider).unwrap_or(("", ""));
+/// Paste-credentials setup: Vuuut Pro writes the records through the provider's API.
+fn token_form(state: &AppState, d: &pro_core::Domain, provider: domain_connect::Provider) -> String {
     let name = provider.name();
     view::card(&view::form(
         &format!("/dashboard/domains/{}/dns/apply", d.id),
         &format!(
             r#"<h3>Connect automatically with {name_html}</h3>
-<div class="inline-form">{field}
+<div class="inline-form">{fields}
 <button class="btn" type="submit">{icon} Connect automatically</button></div>
-<p class="hint">{how} <a href="{href}" target="_blank" rel="noopener noreferrer">Create a {name_html} token</a>.
-Vuuut Pro adds the records below for you. The token is used once and never saved.</p>"#,
+<label class="hint" style="display:flex;gap:8px;align-items:center;margin:4px 0">
+<input type="checkbox" name="remember" value="1" checked> Remember for future domains (stored encrypted; manage under <a href="/dashboard/dns-providers">DNS providers</a>)</label>
+{help}<p class="hint">Vuuut Pro adds the records below for you. Untick “remember” to use these credentials for this domain only.</p>"#,
             name_html = esc(name),
-            field = view::field_full(
-                "token",
-                &format!("{name} API token"),
-                "password",
-                "",
-                None,
-                r#" required autocomplete="off" spellcheck="false""#,
-            ),
+            fields = crate::dns_providers::credential_fields(provider, "domain"),
             icon = view::svg("dns"),
-            how = esc(how),
-            href = attr(href),
+            help = crate::dns_providers::credential_help(state, provider),
+        ),
+    ))
+}
+
+/// One click: the account already has this DNS host connected.
+fn connected_form(d: &pro_core::Domain, provider: domain_connect::Provider) -> String {
+    view::card(&view::form(
+        &format!("/dashboard/domains/{}/dns/apply", d.id),
+        &format!(
+            r#"<h3>{name} is connected to your account</h3>
+<div class="inline-form"><button class="btn" type="submit">{icon} Set up with {name}</button></div>
+<p class="hint">Vuuut Pro adds the records below using your saved {name} credentials.
+<a href="/dashboard/dns-providers">Manage DNS providers</a>.</p>"#,
+            name = esc(provider.name()),
+            icon = view::svg("dns"),
         ),
     ))
 }
@@ -313,7 +322,7 @@ fn dns_section(state: &AppState, panel: Panel, l: &DomainListing, setup: DnsSetu
                 esc(provider.name())
             )
         } else if provider.is_some_and(dns_api::supports) {
-            // The token form below the row is the action.
+            // The token (or connected-account) form below the row is the action.
             String::new()
         } else {
             view::action_button(
@@ -344,7 +353,7 @@ fn dns_section(state: &AppState, panel: Panel, l: &DomainListing, setup: DnsSetu
             &button,
         )));
         if let (Some(provider), None) = (provider.filter(|p| dns_api::supports(*p)), setup.approval) {
-            out.push_str(&token_form(d, provider));
+            out.push_str(&if setup.connected { connected_form(d, provider) } else { token_form(state, d, provider) });
         }
     }
 
@@ -755,6 +764,8 @@ async fn customer_list_inner(
         "",
     );
 
+    body.push_str(&crate::dns_providers::summary_card(state, &account).await?);
+
     if listings.is_empty() {
         body.push_str(&view::empty(
             "No domains yet",
@@ -819,7 +830,7 @@ async fn customer_list_inner(
                     r#"<div class="inline-form">{site}{field}
 <button class="btn" type="submit">{add} Add domain</button></div>
 <p class="hint">For example <code>blog.yourcompany.com</code> or <code>yourcompany.com</code>.
-After adding the domain, you can find its DNS provider and see the records to copy for manual setup.</p>"#,
+If its DNS host is <a href="/dashboard/dns-providers">connected</a>, the records are created for you; otherwise you’ll see the setup options next.</p>"#,
                     site = view::select("site", "Site", &options, None, false),
                     field = view::field("domain", "Your own domain", "text", "", None, true),
                     add = view::svg("add"),
@@ -855,10 +866,9 @@ pub async fn customer_connect(
     reply::or_redirect("/dashboard/domains", &chrome, async {
         let added =
             crate::dashboard::add_domain_inner(&state, &headers, &form.site, &form.domain).await?;
-        Ok(redirect_with(
-            &format!("/dashboard/domains/{}", added.id),
-            Flash::ok(format!("{} added. Set up its DNS to connect it.", added.domain)),
-        ))
+        let account = auth::account(&state, &headers).await?;
+        let outcome = crate::dns_providers::auto_setup(&state, &account, &added).await;
+        Ok(redirect_with(&format!("/dashboard/domains/{}", added.id), outcome.flash(&added.domain)))
     }.await)
 }
 
@@ -969,7 +979,7 @@ pub async fn customer_dns_setup(
                     Ok(url) => {
                         // Navigate via a link so the dashboard's same-origin
                         // form policy also works in browsers that check redirects.
-                        let setup = DnsSetup { authority: Some(authority), approval: Some(url.as_str()) };
+                        let setup = DnsSetup { authority: Some(authority), approval: Some(url.as_str()), connected: false };
                         let hint = Flash::ok("Continue to your DNS provider and approve the records to connect your domain.");
                         return render_customer_domain(&state, chrome.theme, &account, &listing, setup, Some(&hint)).await;
                     }
@@ -992,9 +1002,13 @@ pub async fn customer_dns_setup(
                 "We couldn’t find the DNS provider. Use the manual steps at the provider listed in your domain’s nameserver settings.",
             ),
         };
+        let connected = match authority.as_ref().and_then(|a| a.provider).filter(|p| dns_api::supports(*p)) {
+            Some(provider) => crate::dns_providers::stored(&state, &account.id, provider).await?.is_some(),
+            None => false,
+        };
         // A failed token attempt comes back here with its reason.
         let hint = Flash::from_query(&query).or_else(|| notice.map(Flash::warn));
-        let setup = DnsSetup { authority: authority.as_ref(), approval: None };
+        let setup = DnsSetup { authority: authority.as_ref(), approval: None, connected };
         render_customer_domain(&state, chrome.theme, &account, &listing, setup, hint.as_ref()).await
     }.await;
     if start_approval {
@@ -1004,18 +1018,13 @@ pub async fn customer_dns_setup(
     }
 }
 
-#[derive(Deserialize)]
-pub struct DnsTokenForm {
-    token: String,
-}
-
 /// `POST /dashboard/domains/{id}/dns/apply`: write the records through the DNS
 /// host's API with a token pasted once, then check straight away.
 pub async fn customer_dns_apply(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Form(form): Form<DnsTokenForm>,
+    Form(form): Form<HashMap<String, String>>,
 ) -> Response {
     let chrome = state.chrome(&headers);
     let back = Panel::Customer.domain_href(&id);
@@ -1035,21 +1044,47 @@ pub async fn customer_dns_apply(
             .provider
             .filter(|p| dns_api::supports(*p))
             .ok_or_else(|| ProError::BadRequest("Automatic setup with a token isn’t available for this DNS host.".into()))?;
-        let expect = crate::domain_expectation(&state);
-        if dns::is_apex(&domain.domain, Some(&authority.zone)) && expect.addresses.is_empty() {
-            return Err(ProError::BadRequest("Root domains can’t be connected until the platform’s address is published.".into()));
-        }
-        let instructions =
-            dns::instructions_for_zone(&domain.domain, &domain.verification_token, &expect, Some(&authority.zone));
-        dns_api::apply(provider, &authority.zone, &form.token, &instructions.records).await?;
-        tracing::info!(domain = %domain.domain, provider = provider.name(), "DNS records written via provider API");
+        // Empty form: "use the credentials connected to my account".
+        let pasted = dns_api::any_given(provider, &form);
+        let mut remembered = false;
+        let live = if pasted {
+            if form.contains_key("remember") {
+                // Checked with the provider and kept before they are used, so
+                // credentials that cannot be saved are reported as such.
+                crate::dns_providers::connect(&state, &account, provider, &form).await?;
+                remembered = true;
+            }
+            let creds = dns_api::clean(provider, &form)?;
+            crate::dns_providers::apply_with(&state, domain, &authority.zone, provider, &creds).await?
+        } else {
+            let (row, creds) = crate::dns_providers::stored(&state, &account.id, provider)
+                .await?
+                .ok_or_else(|| ProError::BadRequest(format!(
+                    "{} isn’t connected to your account. Enter its API credentials to continue.",
+                    provider.name()
+                )))?;
+            match crate::dns_providers::apply_with(&state, domain, &authority.zone, provider, &creds).await {
+                Ok(live) => {
+                    pro_db::dns_providers::record_use(&state.db, &row.id, None).await?;
+                    live
+                }
+                Err(error) => {
+                    pro_db::dns_providers::record_use(&state.db, &row.id, Some(&error.to_string())).await?;
+                    return Err(error);
+                }
+            }
+        };
 
-        let verdict = crate::verify_domain_now(&state, domain).await?;
-        let flash = if verdict.is_servable() {
-            Flash::ok(format!("Records added at {}. {} is connected.", provider.name(), domain.domain))
+        let saved = if remembered {
+            format!(" {} is now connected to your account for future domains.", provider.name())
+        } else {
+            String::new()
+        };
+        let flash = if live {
+            Flash::ok(format!("Records added at {}. {} is connected.{saved}", provider.name(), domain.domain))
         } else {
             Flash::ok(format!(
-                "Records added at {}. DNS can take a few minutes to update; Vuuut Pro keeps checking and connects {} on its own.",
+                "Records added at {}. DNS can take a few minutes to update; Vuuut Pro keeps checking and connects {} on its own.{saved}",
                 provider.name(),
                 domain.domain
             ))

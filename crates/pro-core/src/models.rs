@@ -6,11 +6,11 @@
 //! * **Staff** — the operator and whoever they trust. They run the platform.
 //!   That is me-the-host, not a customer. See [`StaffRole`].
 //! * **Account** — a paying customer of the platform. Owns tenants.
-//! * **Tenant** — one Ghost site: a directory, a database, a process, one or
+//! * **Tenant** — one Vuuut site: a directory, a database, a process, one or
 //!   more hostnames.
 //!
 //! A tenant's *own* users — its authors and editors — are not here at all.
-//! They live in that tenant's Ghost database and the platform never reads
+//! They live in that tenant's Vuuut database and the platform never reads
 //! them. That boundary is the point of the whole design: the control plane
 //! knows that a site exists and what plan it is on, and nothing about what is
 //! published on it.
@@ -246,13 +246,13 @@ pub mod suspension {
     }
 }
 
-/// One Ghost site.
+/// One Vuuut site.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tenant {
     pub id: String,
     /// The subdomain label, and the tenant's stable public name.
     pub slug: String,
-    /// The site's title, as shown in the dashboard. Ghost holds its own copy
+    /// The site's title, as shown in the dashboard. Vuuut holds its own copy
     /// in the tenant's settings; this one is for the platform's lists.
     pub name: String,
     pub account_id: String,
@@ -273,7 +273,7 @@ pub struct Tenant {
     /// When the files may actually be removed.
     pub delete_after: Option<String>,
     /// Bytes of content on disk, as last measured. Checked against the plan's
-    /// storage quota, which Ghost knows nothing about.
+    /// storage quota, which Vuuut knows nothing about.
     pub storage_bytes: i64,
     pub notes: Option<String>,
     /// The admin API key of the platform's integration on this site: the id
@@ -395,7 +395,7 @@ pub struct Domain {
     pub domain: String,
     pub kind: DomainKind,
     pub status: DomainStatus,
-    /// The canonical hostname: the one the tenant's Ghost `url` is set to, and
+    /// The canonical hostname: the one the tenant's Vuuut `url` is set to, and
     /// therefore the one every link and every redirect uses. Exactly one per
     /// tenant.
     pub is_primary: bool,
@@ -411,7 +411,7 @@ pub struct Domain {
 /// A platform subscription — what the customer pays *us*.
 ///
 /// Not to be confused with the member subscriptions inside a tenant's own
-/// Ghost, which are that site's business and live in its database.
+/// Vuuut, which are that site's business and live in its database.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Subscription {
     pub id: String,

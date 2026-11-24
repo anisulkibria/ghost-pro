@@ -8,7 +8,7 @@
 //!
 //! Two details are easy to get wrong and both are silent:
 //!
-//! 1. **`hostSettings` must be in the file, not the environment.** Ghost's
+//! 1. **`hostSettings` must be in the file, not the environment.** Vuuut's
 //!    env-var layer parses values as scalars, so `GHOST_HOSTSETTINGS={...}`
 //!    arrives as a *string*. `Limits::load` then finds no `limits` object and
 //!    every plan ceiling disappears — a paid plan silently becomes unlimited.
@@ -92,7 +92,7 @@ pub fn apply_plan_access(body: &mut Value, plan: &Plan) {
 
 /// The `database` block for a tenant, in the form its CMS expects.
 ///
-/// Knex's shape, which is what Ghost's config uses and Vuuut reads: a
+/// Knex's shape, which is what Vuuut's config uses and Vuuut reads: a
 /// `client` naming the engine and a `connection` holding either a filename or
 /// a set of server fields.
 ///
@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_the_shape_ghost_expects() {
+    fn writes_the_shape_vuuut_expects() {
         let plan = &pro_core::plans::default_plans()[0];
         let cfg = build(
             "https://alice.sites.example.com",
@@ -351,7 +351,7 @@ mod tests {
     }
 
     /// On MySQL the tenant is handed its own database and its own login, in
-    /// the shape Ghost's config expects.
+    /// the shape Vuuut's config expects.
     #[test]
     fn a_mysql_tenant_gets_its_own_database_and_user() {
         let creds = crate::tenant_db::Credentials {

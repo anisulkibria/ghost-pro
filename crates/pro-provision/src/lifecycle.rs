@@ -15,7 +15,7 @@ pub struct NewSite<'a> {
     /// The site's title.
     pub title: &'a str,
     pub plan: &'a Plan,
-    /// The owner's name and email inside the new Ghost — normally the
+    /// The owner's name and email inside the new Vuuut — normally the
     /// customer's own.
     pub owner_name: &'a str,
     pub owner_email: &'a str,
@@ -24,7 +24,7 @@ pub struct NewSite<'a> {
     /// Separate from their platform password on purpose: these are two
     /// different systems with two different user databases, and reusing one
     /// password across both would mean a compromise of either is a compromise
-    /// of both. Ghost requires at least 10 characters.
+    /// of both. Vuuut requires at least 10 characters.
     pub owner_password: &'a str,
     /// Where periodic limits count from — the subscription's start.
     pub period_start: &'a str,
@@ -42,7 +42,7 @@ pub async fn create_site(
     mail: &pro_core::config::MailConfig,
     new: NewSite<'_>,
 ) -> Result<Tenant> {
-    // Ghost's own floor. Checked here so the failure arrives before a
+    // Vuuut's own floor. Checked here so the failure arrives before a
     // directory and a database have been built, rather than at step five.
     if new.owner_password.len() < 10 {
         return Err(ProError::BadRequest(
@@ -137,7 +137,7 @@ async fn build_and_start(
     // Boots, runs its migrations, and binds its port.
     supervisor.ensure_running(tenant).await?;
 
-    complete_ghost_setup(tenant.port, new).await?;
+    complete_vuuut_setup(tenant.port, new).await?;
 
     // While the owner's credentials are still in hand from setup, mint the
     // platform's own long-lived way in: a custom integration whose admin key
@@ -165,7 +165,7 @@ async fn build_and_start(
     Ok(())
 }
 
-/// The directory layout a Ghost expects, relative to its working directory.
+/// The directory layout a Vuuut expects, relative to its working directory.
 async fn create_tree(dir: &Path) -> Result<()> {
     for sub in [
         "content/themes",
@@ -184,7 +184,7 @@ async fn create_tree(dir: &Path) -> Result<()> {
 /// Copy the starting themes in.
 ///
 /// Every tenant gets its own copy rather than a shared directory, because
-/// Ghost writes into a theme's directory — activation state, and the
+/// Vuuut writes into a theme's directory — activation state, and the
 /// `custom_theme_settings` a theme declares. A shared tree would let one
 /// tenant's theme change show up on another's site.
 async fn install_themes(config: &Arc<Config>, dir: &Path) -> Result<()> {
@@ -235,14 +235,14 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
 /// Deliberately *not* a database write. This is the same endpoint a human
 /// would reach in a browser, it refuses once setup is complete, and it means
 /// the platform holds no knowledge of how the CMS stores users.
-async fn complete_ghost_setup(port: u16, new: &NewSite<'_>) -> Result<()> {
+async fn complete_vuuut_setup(port: u16, new: &NewSite<'_>) -> Result<()> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| ProError::internal(e))?;
 
     let response = client
-        .post(format!("http://127.0.0.1:{port}/ghost/api/admin/authentication/setup"))
+        .post(format!("http://127.0.0.1:{port}/vuuut/api/admin/authentication/setup"))
         .json(&serde_json::json!({
             "setup": [{
                 "name": new.owner_name,
@@ -287,7 +287,7 @@ async fn create_platform_integration(
     port: u16,
     new: &NewSite<'_>,
 ) -> Result<(String, String)> {
-    let base = format!("http://127.0.0.1:{port}/ghost/api/admin");
+    let base = format!("http://127.0.0.1:{port}/vuuut/api/admin");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -548,7 +548,7 @@ mod tests {
         let mut c: Config = serde_json::from_value(serde_json::json!({
             "url": "http://pro.localhost:8080",
             "subdomainBase": "localhost",
-            "paths": { "ghostBinary": "/bin/sh", "dataDir": base.to_str().unwrap() },
+            "paths": { "vuuutBinary": "/bin/sh", "dataDir": base.to_str().unwrap() },
         }))
         .unwrap();
         c.plans = pro_core::plans::default_plans();
@@ -574,7 +574,7 @@ mod tests {
         (hasher.finish() % u16::MAX as u64) as u16
     }
 
-    /// Ghost's own password floor, checked before any directory exists so the
+    /// Vuuut's own password floor, checked before any directory exists so the
     /// failure is cheap and the message is about the password.
     #[tokio::test]
     async fn refuses_a_short_site_password() {
@@ -695,7 +695,7 @@ mod tests {
         tokio::fs::remove_dir_all(&dir).await.unwrap();
     }
 
-    /// Each tenant gets its own copy of the themes, because Ghost writes into
+    /// Each tenant gets its own copy of the themes, because Vuuut writes into
     /// a theme's directory.
     #[tokio::test]
     async fn copies_themes_per_tenant() {

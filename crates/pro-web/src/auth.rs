@@ -94,7 +94,7 @@ pub fn set_plain_cookie(name: &str, value: &str, secure: bool) -> String {
 /// Every page is server-rendered with the resolved class already on `<html>`,
 /// because there is no script to put it there after the fact — see
 /// `crate::view` for why. An unset or unrecognised cookie is light, which is
-/// Ghost's own default rather than the operating system's.
+/// Vuuut's own default rather than the operating system's.
 pub fn theme(headers: &HeaderMap) -> crate::view::Theme {
     cookie(headers, crate::view::THEME_COOKIE)
         .as_deref()
@@ -398,7 +398,7 @@ mod tests {
                 let mut c: pro_core::Config = serde_json::from_value(serde_json::json!({
                     "url": "http://pro.localhost:8080",
                     "subdomainBase": "localhost",
-                    "paths": { "ghostBinary": "/bin/sh" },
+                    "paths": { "vuuutBinary": "/bin/sh" },
                 }))
                 .unwrap();
                 c.plans = pro_core::plans::default_plans();
@@ -419,7 +419,7 @@ mod tests {
                 let mut c: pro_core::Config = serde_json::from_value(serde_json::json!({
                     "url": "http://pro.localhost:8080",
                     "subdomainBase": "localhost",
-                    "paths": { "ghostBinary": "/bin/sh" },
+                    "paths": { "vuuutBinary": "/bin/sh" },
                 }))
                 .unwrap();
                 c.plans = pro_core::plans::default_plans();

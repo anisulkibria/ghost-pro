@@ -93,7 +93,7 @@ impl ProError {
             ProError::Forbidden(_) => 403,
             ProError::NotFound(_) => 404,
             ProError::Conflict(_) => 409,
-            // Ghost answers a limit with 403 and a `host-limit` code; the
+            // Vuuut answers a limit with 403 and a `host-limit` code; the
             // platform matches it, so a client behaves the same way whichever
             // side refused.
             ProError::PlanLimit { .. } => 403,

@@ -449,7 +449,7 @@ async fn tenant_usage(
         .timeout(Duration::from_secs(5))
         .build()
         .ok()?;
-    let base = format!("http://127.0.0.1:{port}/ghost/api/admin");
+    let base = format!("http://127.0.0.1:{port}/vuuut/api/admin");
     let auth = format!("Ghost {token}");
 
     // Members: the site's own totals, free and paying alike.
@@ -495,10 +495,10 @@ async fn tenant_usage(
     Some(TenantCounts { members, posts, emails, email_report })
 }
 
-/// Mint the short-lived token the Admin API expects, in Ghost's own shape.
+/// Mint the short-lived token the Admin API expects, in Vuuut's own shape.
 ///
 /// The signing key is the stored secret **decoded from hex into bytes** —
-/// signing the hex text would produce a token every Ghost client rejects —
+/// signing the hex text would produce a token every Vuuut client rejects —
 /// and `aud` names the API being called, which is what stops a Content API
 /// token being replayed here.
 pub(crate) fn mint_admin_token(key_id: &str, key_secret: &str) -> Option<String> {
@@ -511,7 +511,7 @@ pub(crate) fn mint_admin_token(key_id: &str, key_secret: &str) -> Option<String>
     let claims = serde_json::json!({
         "iat": chrono::Utc::now().timestamp(),
         "exp": chrono::Utc::now().timestamp() + 5 * 60,
-        "aud": "/ghost/api/admin/",
+        "aud": "/vuuut/api/admin/",
     });
     let header_b64 = b64.encode(serde_json::to_string(&header).ok()?);
     let claims_b64 = b64.encode(serde_json::to_string(&claims).ok()?);
@@ -746,11 +746,11 @@ async fn housekeeping_pass(state: &AppState) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// The token must be the shape Ghost's Admin API verifies: three parts,
+    /// The token must be the shape Vuuut's Admin API verifies: three parts,
     /// an HS256 header naming the key, and a signature over `header.claims`
     /// made with the secret's bytes, not its hex text.
     #[test]
-    fn a_minted_token_matches_ghosts_scheme() {
+    fn a_minted_token_matches_vuuuts_scheme() {
         use base64::Engine;
         use hmac::{Hmac, Mac};
         use sha2::Sha256;
@@ -770,7 +770,7 @@ mod tests {
 
         let claims: serde_json::Value =
             serde_json::from_slice(&b64.decode(c).unwrap()).unwrap();
-        assert_eq!(claims["aud"], "/ghost/api/admin/");
+        assert_eq!(claims["aud"], "/vuuut/api/admin/");
         assert!(claims["iat"].is_i64() && claims["exp"].is_i64());
 
         let mut mac = Hmac::<Sha256>::new_from_slice(&hex::decode(&secret_hex).unwrap())

@@ -17,9 +17,50 @@ pub enum Provider {
     Ionos,
     Namecheap,
     Hostinger,
+    HostGator,
+    DigitalOcean,
+    Porkbun,
+    Gandi,
+    NameCom,
+    Hetzner,
 }
 
 impl Provider {
+    pub const ALL: [Provider; 11] = [
+        Provider::Cloudflare,
+        Provider::GoDaddy,
+        Provider::Ionos,
+        Provider::Namecheap,
+        Provider::Hostinger,
+        Provider::HostGator,
+        Provider::DigitalOcean,
+        Provider::Porkbun,
+        Provider::Gandi,
+        Provider::NameCom,
+        Provider::Hetzner,
+    ];
+
+    /// The stable identifier stored with a connected account and used in URLs.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::Cloudflare => "cloudflare",
+            Self::GoDaddy => "godaddy",
+            Self::Ionos => "ionos",
+            Self::Namecheap => "namecheap",
+            Self::Hostinger => "hostinger",
+            Self::HostGator => "hostgator",
+            Self::DigitalOcean => "digitalocean",
+            Self::Porkbun => "porkbun",
+            Self::Gandi => "gandi",
+            Self::NameCom => "namecom",
+            Self::Hetzner => "hetzner",
+        }
+    }
+
+    pub fn from_slug(slug: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.slug() == slug)
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::Cloudflare => "Cloudflare",
@@ -27,6 +68,12 @@ impl Provider {
             Self::Ionos => "IONOS",
             Self::Namecheap => "Namecheap",
             Self::Hostinger => "Hostinger",
+            Self::HostGator => "HostGator",
+            Self::DigitalOcean => "DigitalOcean",
+            Self::Porkbun => "Porkbun",
+            Self::Gandi => "Gandi",
+            Self::NameCom => "Name.com",
+            Self::Hetzner => "Hetzner",
         }
     }
 
@@ -37,6 +84,12 @@ impl Provider {
             Self::Ionos => "https://my.ionos.com/domains",
             Self::Namecheap => "https://ap.www.namecheap.com/domains/list/",
             Self::Hostinger => "https://hpanel.hostinger.com/domains",
+            Self::HostGator => "https://portal.hostgator.com/",
+            Self::DigitalOcean => "https://cloud.digitalocean.com/networking/domains",
+            Self::Porkbun => "https://porkbun.com/account/domainsSpeedy",
+            Self::Gandi => "https://admin.gandi.net/domain/",
+            Self::NameCom => "https://www.name.com/account/domain",
+            Self::Hetzner => "https://console.hetzner.com/",
         }
     }
 
@@ -47,6 +100,12 @@ impl Provider {
             Self::Ionos => &["ui-dns.com", "ui-dns.de", "ui-dns.org", "ui-dns.biz"],
             Self::Namecheap => &["registrar-servers.com", "namecheaphosting.com"],
             Self::Hostinger => &["dns-parking.com", "hostinger.com"],
+            Self::HostGator => &["hostgator.com", "websitewelcome.com"],
+            Self::DigitalOcean => &["digitalocean.com"],
+            Self::Porkbun => &["porkbun.com"],
+            Self::Gandi => &["gandi.net"],
+            Self::NameCom => &["name.com"],
+            Self::Hetzner => &["hetzner.com", "hetzner.de"],
         };
         suffixes.iter().any(|suffix| {
             nameserver == *suffix
@@ -66,7 +125,7 @@ impl Provider {
                 "https://api.domainconnect.ionos.com",
                 "https://api.domainconnect.1and1.com",
             ],
-            Self::Namecheap | Self::Hostinger => &[],
+            Self::Namecheap | Self::Hostinger | Self::HostGator | Self::DigitalOcean | Self::Porkbun | Self::Gandi | Self::NameCom | Self::Hetzner => &[],
         }
     }
 
@@ -82,9 +141,14 @@ impl Provider {
                 "https://domainconnect.ionos.com",
                 "https://domainconnect.1and1.com",
             ],
-            Self::Namecheap | Self::Hostinger => &[],
+            Self::Namecheap | Self::Hostinger | Self::HostGator | Self::DigitalOcean | Self::Porkbun | Self::Gandi | Self::NameCom | Self::Hetzner => &[],
         }
     }
+}
+
+#[cfg(test)]
+pub(crate) fn matches_for_test(provider: Provider, nameserver: &str) -> bool {
+    provider.matches(nameserver)
 }
 
 #[derive(Debug)]
@@ -95,15 +159,9 @@ pub struct Authority {
 }
 
 fn provider_for(nameservers: &[String]) -> Option<Provider> {
-    [
-        Provider::Cloudflare,
-        Provider::GoDaddy,
-        Provider::Ionos,
-        Provider::Namecheap,
-        Provider::Hostinger,
-    ]
-    .into_iter()
-    .find(|provider| !nameservers.is_empty() && nameservers.iter().all(|ns| provider.matches(ns)))
+    Provider::ALL
+        .into_iter()
+        .find(|provider| !nameservers.is_empty() && nameservers.iter().all(|ns| provider.matches(ns)))
 }
 
 /// Walk up to the registered domain, stopping at the nearest delegated zone.

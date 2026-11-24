@@ -1,6 +1,6 @@
 //! `pro-supervisor` — starting, stopping and hibernating tenant processes.
 //!
-//! Every tenant is its own `ghost` process, with its own working directory,
+//! Every tenant is its own `vuuut` process, with its own working directory,
 //! its own SQLite database and its own config file. The CMS is used exactly as
 //! it ships: nothing here patches it, links against it, or reaches into its
 //! internals. That is the single most important property of this design —
@@ -23,7 +23,7 @@
 //!
 //! Most sites on a hosting platform are idle most of the time. A tenant with
 //! no traffic for `idleTimeoutSecs` is stopped; the next request for it starts
-//! it again, which takes a fraction of a second because a Rust Ghost has no
+//! it again, which takes a fraction of a second because a Rust Vuuut has no
 //! runtime to warm up. The visitor waits for the start, and nothing else
 //! notices.
 //!

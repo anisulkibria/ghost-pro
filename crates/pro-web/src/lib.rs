@@ -30,6 +30,7 @@ pub mod console;
 pub mod updates;
 pub mod dashboard;
 pub mod dashboard_billing;
+pub mod dns_providers;
 pub mod domains;
 pub mod public;
 pub mod reply;
@@ -122,6 +123,11 @@ fn platform_routes() -> Router<AppState> {
         )
         .route("/dashboard/domains/{id}/dns/apply", post(domains::customer_dns_apply))
         .route("/dashboard/domains/{id}/dns/finish/{token}", get(domains::customer_dns_finished))
+        .route(
+            "/dashboard/dns-providers",
+            get(dns_providers::page).post(dns_providers::save),
+        )
+        .route("/dashboard/dns-providers/{provider}/remove", post(dns_providers::remove))
         .route("/dashboard/billing", get(dashboard_billing::billing))
         .route("/dashboard/billing/change", post(dashboard_billing::change_plan))
         .route(

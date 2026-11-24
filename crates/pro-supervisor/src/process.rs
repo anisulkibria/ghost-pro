@@ -63,15 +63,15 @@ pub struct Supervisor {
     /// Resolved once at construction so a missing binary is a boot failure
     /// with a clear message, rather than a confusing spawn error the first
     /// time somebody signs up.
-    ghost_binary: PathBuf,
+    vuuut_binary: PathBuf,
     slots: std::sync::Mutex<HashMap<String, Arc<Slot>>>,
 }
 
 impl Supervisor {
     pub fn new(config: Arc<Config>) -> Result<Self> {
-        let ghost_binary = resolve_binary(&config)?;
-        tracing::info!("tenant processes will run {}", ghost_binary.display());
-        Ok(Self { config, ghost_binary, slots: std::sync::Mutex::new(HashMap::new()) })
+        let vuuut_binary = resolve_binary(&config)?;
+        tracing::info!("tenant processes will run {}", vuuut_binary.display());
+        Ok(Self { config, vuuut_binary, slots: std::sync::Mutex::new(HashMap::new()) })
     }
 
     fn slot(&self, tenant_id: &str) -> Arc<Slot> {
@@ -164,12 +164,12 @@ impl Supervisor {
     ///
     /// Two things here are load-bearing:
     ///
-    /// * **`current_dir`** is the tenant's directory. Ghost reads
+    /// * **`current_dir`** is the tenant's directory. Vuuut reads
     ///   `config.production.json` from its working directory and resolves
     ///   `contentPath` and the database path relative to it, so the working
     ///   directory *is* how a tenant is told which site it is. Nothing is
     ///   passed on the command line.
-    /// * **`hostSettings` is not passed through the environment.** Ghost's
+    /// * **`hostSettings` is not passed through the environment.** Vuuut's
     ///   env-var layer parses values as scalars only, so a JSON object
     ///   arriving that way becomes a *string* and the limits silently vanish.
     ///   It has to be in the config file, which is `pro-provision`'s job.
@@ -194,7 +194,7 @@ impl Supervisor {
         let log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path)?;
         let log_err = log.try_clone()?;
 
-        let mut cmd = Command::new(&self.ghost_binary);
+        let mut cmd = Command::new(&self.vuuut_binary);
         cmd.current_dir(&dir)
             .env("GHOST_ENV", &self.config.tenants.env)
             // The tenant binds loopback only. Every request reaches it
@@ -213,7 +213,7 @@ impl Supervisor {
             ProError::Internal(format!(
                 "could not start tenant {}: {e} (binary {})",
                 tenant.slug,
-                self.ghost_binary.display()
+                self.vuuut_binary.display()
             ))
         })
     }
@@ -387,19 +387,19 @@ impl Supervisor {
     }
 }
 
-/// Find the `ghost` binary, so a missing one fails at boot with a message
+/// Find the `vuuut` binary, so a missing one fails at boot with a message
 /// naming what to fix.
 ///
 /// A path — including a relative one, which is taken from the deployment
 /// directory — is used as given. A bare name is searched for on `PATH`.
 fn resolve_binary(config: &Config) -> Result<PathBuf> {
-    let configured = &config.paths.ghost_binary;
-    if let Some(p) = config.ghost_binary_path() {
+    let configured = &config.paths.vuuut_binary;
+    if let Some(p) = config.vuuut_binary_path() {
         return if p.exists() {
             Ok(p)
         } else {
             Err(ProError::Config(format!(
-                "paths.ghostBinary points at {}, which does not exist. Build Vuuut \
+                "paths.vuuutBinary points at {}, which does not exist. Build Vuuut \
                  (cargo build --release in its checkout), or correct the path in pro.json.",
                 p.display()
             )))
@@ -415,7 +415,7 @@ fn resolve_binary(config: &Config) -> Result<PathBuf> {
     }
     Err(ProError::Config(format!(
         "could not find the “{configured}” binary on PATH. Build Vuuut and set \
-         paths.ghostBinary to its target/release/ghost."
+         paths.vuuutBinary to its target/release/vuuut."
     )))
 }
 
@@ -460,7 +460,7 @@ mod tests {
             "subdomainBase": "localhost",
             // Every platform has /bin/sh, so the supervisor's own logic can be
             // tested without building the CMS.
-            "paths": { "ghostBinary": "/bin/sh", "dataDir": "/tmp/pro-supervisor-test" },
+            "paths": { "vuuutBinary": "/bin/sh", "dataDir": "/tmp/pro-supervisor-test" },
         }))
         .unwrap();
         c.plans = pro_core::plans::default_plans();
@@ -501,7 +501,7 @@ mod tests {
         let mut c: Config = serde_json::from_value(serde_json::json!({
             "url": "http://pro.localhost:8080",
             "subdomainBase": "localhost",
-            "paths": { "ghostBinary": "/nonexistent/ghost" },
+            "paths": { "vuuutBinary": "/nonexistent/vuuut" },
         }))
         .unwrap();
         c.plans = pro_core::plans::default_plans();
@@ -517,7 +517,7 @@ mod tests {
         let mut c: Config = serde_json::from_value(serde_json::json!({
             "url": "http://pro.localhost:8080",
             "subdomainBase": "localhost",
-            "paths": { "ghostBinary": binary },
+            "paths": { "vuuutBinary": binary },
         }))
         .unwrap();
         c.plans = pro_core::plans::default_plans();
@@ -545,12 +545,12 @@ mod tests {
         let resolved = resolve_binary(&with_binary("../bin/sh", "/bin")).unwrap();
         assert!(resolved.exists(), "{} should exist", resolved.display());
 
-        let err = resolve_binary(&with_binary("../bin/no-such-ghost", "/bin")).unwrap_err();
+        let err = resolve_binary(&with_binary("../bin/no-such-vuuut", "/bin")).unwrap_err();
         assert!(err.to_string().contains("does not exist"), "got {err}");
         // The message names the resolved path, not the relative fragment:
-        // "../bin/no-such-ghost does not exist" sends an operator looking in
+        // "../bin/no-such-vuuut does not exist" sends an operator looking in
         // the wrong directory.
-        assert!(err.to_string().contains("/bin/../bin/no-such-ghost"), "got {err}");
+        assert!(err.to_string().contains("/bin/../bin/no-such-vuuut"), "got {err}");
     }
 
     /// Spawning must refuse a tenant that was never provisioned, rather than
@@ -576,7 +576,7 @@ mod tests {
         let mut c = (*cfg).clone();
         // `sh` with no script reads stdin, which is /dev/null here, so it
         // starts and exits without ever listening.
-        c.paths.ghost_binary = "/bin/sh".into();
+        c.paths.vuuut_binary = "/bin/sh".into();
         c.tenants.start_timeout_secs = 1;
         let Ok(sup) = Supervisor::new(Arc::new(c)) else { panic!("/bin/sh should resolve") };
 

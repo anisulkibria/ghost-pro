@@ -1,6 +1,6 @@
 //! Each tenant's own database, when tenants live on MySQL.
 //!
-//! A tenant is a whole Ghost site, and its data belongs to the customer, not
+//! A tenant is a whole Vuuut site, and its data belongs to the customer, not
 //! to the platform: posts, drafts, members, their own staff logins. So every
 //! tenant gets a database of its own and a MySQL user of its own, and that
 //! user is granted rights on that one database and nothing else.
@@ -19,7 +19,7 @@ use pro_core::{ProError, Result, TenantStore};
 use sqlx::any::install_default_drivers;
 use sqlx::{AnyConnection, Connection, Executor};
 
-/// Everything a tenant's Ghost needs in order to reach its own database.
+/// Everything a tenant's Vuuut needs in order to reach its own database.
 #[derive(Debug, Clone)]
 pub struct Credentials {
     pub database: String,
@@ -120,7 +120,7 @@ pub async fn create(store: &TenantStore, tenant_id: &str) -> Result<Credentials>
 
     let mut conn = connect(store).await?;
 
-    // Collation matched to Ghost's own: utf8mb4 so a post can hold an emoji,
+    // Collation matched to Vuuut's own: utf8mb4 so a post can hold an emoji,
     // and the same default collation upstream Ghost's schema uses, so a
     // database exported from here imports into stock Ghost unchanged.
     let steps: Vec<String> = vec![

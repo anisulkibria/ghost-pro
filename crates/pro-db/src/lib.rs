@@ -2,7 +2,7 @@
 //!
 //! One database holding what the *platform* knows: that a site exists, who
 //! pays for it, which hostnames reach it. It holds nothing a tenant publishes.
-//! Each tenant's posts, members and staff live in that tenant's own Ghost
+//! Each tenant's posts, members and staff live in that tenant's own Vuuut
 //! database, which this crate never opens.
 //!
 //! That boundary is the main structural decision in the whole platform, and it
@@ -49,6 +49,7 @@ mod click;
 pub mod audit;
 pub mod backups;
 pub mod dialect;
+pub mod dns_providers;
 pub mod domains;
 pub mod jobs;
 pub mod pool;

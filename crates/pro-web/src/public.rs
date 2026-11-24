@@ -3,7 +3,7 @@
 //! Two shapes, both from `crate::view`'s Material 3 system: the sales page is
 //! a top bar over a hero and a row of filled plan cards, and everything that
 //! asks for a password is the centred `auth` surface — one card floating over
-//! three blurred tonal blobs, which is where Ghost's own sign-in screen puts
+//! three blurred tonal blobs, which is where Vuuut's own sign-in screen puts
 //! its form too.
 use axum::extract::{Form, Query, State};
 use axum::http::HeaderMap;
@@ -144,7 +144,7 @@ pub async fn appearance(
 /// compare.
 ///
 /// The document itself is authored as a static page under `landing/`, not
-/// built by [`crate::view`], so it can be lifted into a Ghost theme later
+/// built by [`crate::view`], so it can be lifted into a Vuuut theme later
 /// with the markup intact.
 /// Served to everybody, signed in or not. The root used to bounce a signed-in
 /// visitor straight to `/dashboard`, which made the domain's homepage
@@ -240,7 +240,7 @@ pub async fn pricing(
 
     let body = format!(
         r#"<div class="hero">
-<h1>Managed Ghost hosting</h1>
+<h1>Managed Vuuut hosting</h1>
 <p>A publication on your own domain, with HTTPS, backups and updates handled.
 Installed in seconds.</p>
 </div>
@@ -254,7 +254,7 @@ renewed automatically — nothing to install, nothing to remember.</p></div></di
 <h3>Automatic backups</h3><p>A full nightly snapshot of your database, uploads and
 theme, downloadable from your dashboard at any time.</p></div></div>
 <div class="feature"><span class="ic tint-purple">{shield}</span><div>
-<h3>Nothing to maintain</h3><p>No servers to patch, no Ghost upgrades to run, no
+<h3>Nothing to maintain</h3><p>No servers to patch, no Vuuut upgrades to run, no
 certificate renewals to miss.</p></div></div>
 </div>
 <p class="footnote" style="text-align:center">Already have an account?

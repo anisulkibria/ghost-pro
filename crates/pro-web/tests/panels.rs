@@ -8,7 +8,7 @@
 //! the kind of break a `cargo build` cannot see.
 //!
 //! Everything runs against an in-memory database and a supervisor pointed at
-//! `/bin/sh`, so no Ghost binary and no network are involved. The requests go
+//! `/bin/sh`, so no Vuuut binary and no network are involved. The requests go
 //! through the real router, so the host gate, the cookies and the
 //! post-redirect-get flow are all genuinely exercised.
 
@@ -53,8 +53,8 @@ async fn platform() -> (pro_web::AppState, tempdir::Dir) {
         "url": format!("http://{HOST}"),
         "subdomainBase": "localhost",
         // Every platform has /bin/sh, so the supervisor constructs without a
-        // Ghost build present. Nothing in these tests starts a tenant.
-        "paths": { "ghostBinary": "/bin/sh", "dataDir": dir.path().to_str().unwrap() },
+        // Vuuut build present. Nothing in these tests starts a tenant.
+        "paths": { "vuuutBinary": "/bin/sh", "dataDir": dir.path().to_str().unwrap() },
         "ssl": { "enabled": false },
         "mail": { "transport": "log" },
         "billing": { "provider": "none" },
@@ -175,7 +175,7 @@ async fn as_operator(state: &pro_web::AppState, role: StaffRole) -> String {
     session_from(&headers)
 }
 
-/// A site on this account, without running a Ghost process for it.
+/// A site on this account, without running a Vuuut process for it.
 async fn seed_site(state: &pro_web::AppState, account_id: &str, slug: &str) -> pro_core::Tenant {
     let tenant = pro_db::tenants::create(
         &state.db,
@@ -292,7 +292,7 @@ async fn a_brand_new_site_page_renders() {
 
 /// Every link to a tenant goes through the same edge as the panel itself, so
 /// it has to carry that edge's port. On this platform — and on any development
-/// machine — that port is 8080, and a link to `http://fresh.localhost/ghost/`
+/// machine — that port is 8080, and a link to `http://fresh.localhost/vuuut/`
 /// reaches nothing at all: the customer clicks "Open admin" and the browser
 /// fails to connect. The address shown beside the link is the same promise in
 /// text, so it carries the port too.
@@ -331,7 +331,7 @@ async fn links_to_a_site_carry_the_edge_port() {
     ] {
         let (_, body) = get(&state, &path, Some(who)).await;
         assert!(
-            body.contains(r#"href="http://fresh.localhost:8080/ghost/""#),
+            body.contains(r#"href="http://fresh.localhost:8080/vuuut/""#),
             "{path}: Open admin does not point at the admin"
         );
     }
@@ -1850,4 +1850,62 @@ async fn an_owner_updates_vuuut_from_the_console() {
     assert_eq!(failed.state, "failed");
     assert!(failed.message.contains("vuuut-update.path"), "{}", failed.message);
     assert!(!updates.join("request.json").exists(), "the stale request is withdrawn");
+}
+
+/// DNS providers: the page shows what is connected, a stored token is never
+/// echoed, another account cannot see it, and it can be disconnected.
+#[tokio::test]
+async fn dns_providers_show_what_is_connected_and_can_be_disconnected() {
+    let (state, _dir) = platform().await;
+    let (account, cookie) = as_customer(&state).await;
+
+    let (status, body) = get(&state, "/dashboard/dns-providers", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_m3_shell(&body, "/dashboard/dns-providers");
+    for name in ["Cloudflare", "GoDaddy", "Namecheap", "HostGator", "Hostinger", "DigitalOcean", "Porkbun", "Gandi", "IONOS", "Name.com", "Hetzner"] {
+        assert!(body.contains(name), "{name} is offered");
+    }
+    // A two-field provider renders both of its inputs, with ids unique on the page.
+    assert!(body.contains(r#"id="new-godaddy-key""#) && body.contains(r#"id="new-godaddy-secret""#));
+    // A GoDaddy form missing its secret is refused before any request.
+    let (_, headers, _) = send(&state, "POST", "/dashboard/dns-providers", Some(&cookie), Some("provider=godaddy&key=abc")).await;
+    assert!(headers[header::LOCATION].to_str().unwrap().contains("GoDaddy"));
+    // A HostGator server outside HostGator is refused (no requests to arbitrary hosts).
+    let (_, headers, _) = send(&state, "POST", "/dashboard/dns-providers", Some(&cookie),
+        Some("provider=hostgator&host=127.0.0.1&user=u&token=t")).await;
+    assert!(headers[header::LOCATION].to_str().unwrap().contains("HostGator"));
+    assert_eq!(body.matches("Not connected").count() >= 2, true, "both start disconnected");
+
+    let (_, domains) = get(&state, "/dashboard/domains", Some(&cookie)).await;
+    assert!(domains.contains("Connect a provider"), "the Domains page points at the setting");
+
+    // A malformed token is refused before any request leaves the machine.
+    let (status, headers, _) = send(
+        &state, "POST", "/dashboard/dns-providers", Some(&cookie),
+        Some("provider=cloudflare&token=has+space"),
+    ).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(headers[header::LOCATION].to_str().unwrap().contains("exactly"));
+    assert!(pro_db::dns_providers::list_for_account(&state.db, &account.id).await.unwrap().is_empty());
+
+    // Store a connection the way `connect` does, without calling Cloudflare.
+    let boxed = pro_core::secret_box::SecretBox::load_or_create(&state.config.data_dir()).unwrap();
+    let sealed = boxed.seal("cf-secret-token-9876", &format!("dns-provider:{}:cloudflare", account.id)).unwrap();
+    pro_db::dns_providers::save(&state.db, &account.id, "cloudflare", &sealed, "…9876", &["example.com".into()])
+        .await
+        .unwrap();
+
+    let (_, body) = get(&state, "/dashboard/dns-providers", Some(&cookie)).await;
+    assert!(body.contains("Cloudflare connected") && body.contains("…9876") && body.contains("example.com"));
+    assert!(!body.contains("cf-secret-token-9876"), "the token is never shown");
+    let (_, domains) = get(&state, "/dashboard/domains", Some(&cookie)).await;
+    assert!(domains.contains("Connected:") && domains.contains("Cloudflare"));
+
+    // A different customer sees nothing of it, and cannot remove it.
+    let other = pro_db::accounts::create(&state.db, "other@example.com", "Other", "$argon2id$x").await.unwrap();
+    assert!(pro_db::dns_providers::list_for_account(&state.db, &other.id).await.unwrap().is_empty());
+
+    let (status, _, _) = send(&state, "POST", "/dashboard/dns-providers/cloudflare/remove", Some(&cookie), Some("")).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(pro_db::dns_providers::get(&state.db, &account.id, "cloudflare").await.unwrap().is_none());
 }

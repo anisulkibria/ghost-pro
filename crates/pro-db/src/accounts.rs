@@ -362,7 +362,7 @@ mod tests {
         create(&pool, "real@example.com", "R", &hash).await.unwrap();
 
         let wrong_password = authenticate(&pool, "real@example.com", "nope").await.unwrap_err();
-        let no_account = authenticate(&pool, "ghost@example.com", "nope").await.unwrap_err();
+        let no_account = authenticate(&pool, "vuuut@example.com", "nope").await.unwrap_err();
         assert_eq!(wrong_password.status(), no_account.status());
         assert_eq!(wrong_password.to_string(), no_account.to_string());
     }

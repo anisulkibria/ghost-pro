@@ -50,7 +50,7 @@ async fn build_platform(billing: serde_json::Value) -> Platform {
     let mut config: Config = serde_json::from_value(serde_json::json!({
         "url": format!("http://{HOST}"),
         "subdomainBase": "localhost",
-        "paths": { "ghostBinary": "/bin/sh", "dataDir": dir.path().to_str().unwrap() },
+        "paths": { "vuuutBinary": "/bin/sh", "dataDir": dir.path().to_str().unwrap() },
         "ssl": { "enabled": false },
         "mail": { "transport": "log" },
         "billing": billing,
@@ -673,7 +673,7 @@ async fn a_plan_change_moves_the_site() {
 }
 
 /// A downgrade is the same path, and must not be refused for taking the site
-/// below what it currently uses — Ghost refuses *new* members rather than
+/// below what it currently uses — Vuuut refuses *new* members rather than
 /// deleting any, so the limits simply tighten.
 #[tokio::test]
 async fn a_downgrade_applies_too() {

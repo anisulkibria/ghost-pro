@@ -40,7 +40,7 @@ class LauncherTests(unittest.TestCase):
         self.env.update(PRO_DIR=str(self.deployment), RUST_LOG="info")
         self.config = {
             "url": "http://localhost:8080", "subdomainBase": "localhost",
-            "paths": {"ghostBinary": "/bin/sh", "dataDir": "data"},
+            "paths": {"vuuutBinary": "/bin/sh", "dataDir": "data"},
             "billing": {"provider": "none"}, "mail": {"transport": "log"},
         }
 
@@ -57,11 +57,11 @@ class LauncherTests(unittest.TestCase):
 
     def test_missing_local_cms_is_built_at_the_configured_target(self):
         checkout = self.base / "Vuuut checkout"
-        (checkout / "crates/ghost").mkdir(parents=True)
+        (checkout / "crates/vuuut").mkdir(parents=True)
         (checkout / "Cargo.toml").write_text("[workspace]\n")
-        (checkout / "crates/ghost/Cargo.toml").write_text('[package]\nname="ghost"\n')
-        binary = checkout / "target/release/ghost"
-        self.config["paths"]["ghostBinary"] = str(binary)
+        (checkout / "crates/vuuut/Cargo.toml").write_text('[package]\nname="vuuut"\n')
+        binary = checkout / "target/release/vuuut"
+        self.config["paths"]["vuuutBinary"] = str(binary)
         commands = self.base / "commands"
         commands.mkdir()
         cargo = commands / "cargo"
@@ -69,7 +69,7 @@ class LauncherTests(unittest.TestCase):
 import pathlib, sys
 args = sys.argv[1:]
 assert args[:2] == ["build", "--release"]
-target = pathlib.Path(args[args.index("--target-dir") + 1]) / "release/ghost"
+target = pathlib.Path(args[args.index("--target-dir") + 1]) / "release/vuuut"
 target.parent.mkdir(parents=True)
 target.write_text("#!/bin/sh\\nexit 0\\n")
 target.chmod(0o755)
@@ -82,22 +82,22 @@ target.chmod(0o755)
         self.assertTrue(os.access(binary, os.X_OK))
 
     def test_missing_custom_binary_fails_before_launch(self):
-        self.config["paths"]["ghostBinary"] = str(self.base / "missing/ghost")
+        self.config["paths"]["vuuutBinary"] = str(self.base / "missing/vuuut")
         result = self.preflight()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("tenant CMS binary is missing", result.stderr)
         self.assertFalse((self.deployment / ".vuuut-pro.pid").exists())
 
     def test_environment_and_environment_file_override_base_path(self):
-        self.config["paths"]["ghostBinary"] = "/missing/base/ghost"
+        self.config["paths"]["vuuutBinary"] = "/missing/base/vuuut"
         (self.deployment / "pro.development.json").write_text(
-            json.dumps({"paths": {"ghostBinary": "/bin/sh"}}))
+            json.dumps({"paths": {"vuuutBinary": "/bin/sh"}}))
         result = self.preflight()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.env["PRO_PATHS__GHOST_BINARY"] = "/missing/environment/ghost"
+        self.env["PRO_PATHS__VUUUT_BINARY"] = "/missing/environment/vuuut"
         result = self.preflight()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("/missing/environment/ghost", result.stderr)
+        self.assertIn("/missing/environment/vuuut", result.stderr)
 
     def prepare_server(self):
         if not BINARY.exists():

@@ -10,7 +10,7 @@
 //! `CREATE DATABASE`, `CREATE USER` and `GRANT`:
 //!
 //! ```sh
-//! docker run -d --name ghostpro-mysql -e MYSQL_ROOT_PASSWORD=rootpw -p 13306:3306 mysql:8
+//! docker run -d --name vuuut-pro-mysql -e MYSQL_ROOT_PASSWORD=rootpw -p 13306:3306 mysql:8
 //! PRO_TEST_MYSQL_URL='mysql://root:rootpw@127.0.0.1:13306' \
 //!   cargo test -p pro-provision --test tenant_mysql
 //! ```
@@ -87,7 +87,7 @@ mysql_test!(a_site_can_use_the_credentials_it_is_given, |store| {
 //
 // This is the whole reason for a database and a user per site instead of one
 // shared schema with table prefixes. If this test ever fails, one customer's
-// Ghost can read another customer's posts, and no amount of care in the CMS
+// Vuuut can read another customer's posts, and no amount of care in the CMS
 // would prevent it.
 mysql_test!(one_site_cannot_reach_another_sites_data, |store| {
     let (alice, bob) = (tenant_id(), tenant_id());

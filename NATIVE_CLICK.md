@@ -25,7 +25,7 @@ Restart to reconcile existing tenants. The background worker is independent of
 provisioning/backups, stores exact snapshots and monotonic revisions, retries
 uncertain responses and records errors/dead state. Site detail pages expose
 state/revisions, TXT instructions, retry, rotation, disconnect and reconnect.
-The tenant's native report link opens `/ghost/analytics/click/` in its own Admin.
+The tenant's native report link opens `/vuuut/analytics/click/` in its own Admin.
 No Click configuration means no remote analytics dependency.
 
 SQLite/MySQL migrations 0004–0005 capture tenant/domain changes transactionally.

@@ -1,7 +1,7 @@
 //! `pro-provision` — creating, reconfiguring and removing tenant sites.
 //!
 //! This is the crate that turns "a customer clicked Create site" into a
-//! running Ghost. The sequence is deliberately ordered so that every failure
+//! running Vuuut. The sequence is deliberately ordered so that every failure
 //! leaves something an operator can see and retry, and nothing is charged for
 //! until it exists:
 //!
@@ -14,7 +14,7 @@
 //!
 //! Step 5 is worth dwelling on. The platform does **not** write into the
 //! tenant's database to create its owner user. It calls
-//! `POST /ghost/api/admin/authentication/setup` on the tenant's own loopback
+//! `POST /vuuut/api/admin/authentication/setup` on the tenant's own loopback
 //! port — the same endpoint a human would hit in a browser. That endpoint
 //! refuses once setup is complete, so it cannot be replayed, and using it
 //! means the platform needs no knowledge of the CMS's user schema. When
