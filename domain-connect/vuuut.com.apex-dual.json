@@ -7,7 +7,7 @@
   "description": "Connect your domain to a Vuuut Pro site.",
   "syncPubKeyDomain": "domainconnect.vuuut.com",
   "syncRedirectDomain": "vuuut.com",
-  "variableDescription": "%ipv4% contains public IPv4 address of the Vuuut Pro deployment. %ipv6% contains public IPv6 address of the Vuuut Pro deployment. %ownership% contains domain ownership token without the ghost-pro-verify= prefix.",
+  "variableDescription": "%ipv4% contains public IPv4 address of the Vuuut Pro deployment. %ipv6% contains public IPv6 address of the Vuuut Pro deployment. %ownership% contains domain ownership token without the vuuut-pro-verify= prefix.",
   "records": [
     {
       "type": "A",
@@ -23,12 +23,12 @@
     },
     {
       "type": "TXT",
-      "host": "_ghost-pro-challenge",
-      "data": "ghost-pro-verify=%ownership%",
+      "host": "_vuuut-pro-challenge",
+      "data": "vuuut-pro-verify=%ownership%",
       "ttl": 600,
       "essential": "OnApply",
       "txtConflictMatchingMode": "Prefix",
-      "txtConflictMatchingPrefix": "ghost-pro-verify="
+      "txtConflictMatchingPrefix": "vuuut-pro-verify="
     }
   ]
 }

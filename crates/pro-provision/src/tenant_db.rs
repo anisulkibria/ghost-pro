@@ -58,7 +58,7 @@ async fn connect(store: &TenantStore) -> Result<AnyConnection> {
 
 /// Check the configured account can actually provision a tenant.
 ///
-/// Run by `ghost-pro db` and `doctor` rather than discovered at the first
+/// Run by `vuuut-pro db` and `doctor` rather than discovered at the first
 /// signup. The failure this prevents is the expensive one: a customer pays,
 /// provisioning starts, and the platform finds out mid-sequence that it
 /// cannot create a database — leaving a charged customer with a broken site.

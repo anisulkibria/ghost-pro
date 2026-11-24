@@ -16,7 +16,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "run.sh"
-BINARY = ROOT / "target/release/ghost-pro"
+BINARY = ROOT / "target/release/vuuut-pro"
 
 
 class LauncherTests(unittest.TestCase):
@@ -29,7 +29,7 @@ class LauncherTests(unittest.TestCase):
         self.script = self.base / "run.sh"
         self.script.write_text(SCRIPT.read_text())
         self.script.chmod(0o755)
-        binary = self.base / "target/release/ghost-pro"
+        binary = self.base / "target/release/vuuut-pro"
         binary.parent.mkdir(parents=True)
         if BINARY.exists():
             binary.symlink_to(BINARY)
@@ -86,7 +86,7 @@ target.chmod(0o755)
         result = self.preflight()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("tenant CMS binary is missing", result.stderr)
-        self.assertFalse((self.deployment / ".ghost-pro.pid").exists())
+        self.assertFalse((self.deployment / ".vuuut-pro.pid").exists())
 
     def test_environment_and_environment_file_override_base_path(self):
         self.config["paths"]["ghostBinary"] = "/missing/base/ghost"
@@ -101,7 +101,7 @@ target.chmod(0o755)
 
     def prepare_server(self):
         if not BINARY.exists():
-            self.skipTest("build ghost-pro --release for launcher smoke checks")
+            self.skipTest("build vuuut-pro --release for launcher smoke checks")
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -119,7 +119,7 @@ target.chmod(0o755)
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("output from this launch", result.stdout)
         self.assertNotIn("HISTORICAL DATABASE ERROR", result.stdout)
-        self.assertFalse((self.deployment / ".ghost-pro.pid").exists())
+        self.assertFalse((self.deployment / ".vuuut-pro.pid").exists())
 
     def test_server_survives_launcher_exit_and_opens_its_database(self):
         port = self.prepare_server()
@@ -127,7 +127,7 @@ target.chmod(0o755)
         result = subprocess.run([str(self.script), "start"], env=self.env,
                                 capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        pid = int((self.deployment / ".ghost-pro.pid").read_text())
+        pid = int((self.deployment / ".vuuut-pro.pid").read_text())
         def stop():
             try:
                 os.kill(pid, signal.SIGTERM)

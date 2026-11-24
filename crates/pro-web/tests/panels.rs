@@ -1578,7 +1578,7 @@ async fn a_domain_is_connected_managed_and_removed_from_its_own_page() {
     assert!(body.contains("Waiting for DNS"), "its state, in words");
     assert!(body.contains("CNAME"), "the record that routes it");
     assert!(body.contains(&added.verification_token), "and the ownership token");
-    assert!(body.contains("_ghost-pro-challenge.blog"));
+    assert!(body.contains("_vuuut-pro-challenge.blog"));
     assert!(body.contains("Connect automatically"));
     assert!(body.contains(&format!(r#"action="{page}/dns/setup""#)));
     assert!(body.contains("Set up DNS manually"));

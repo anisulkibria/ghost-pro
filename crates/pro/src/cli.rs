@@ -76,10 +76,10 @@ pub fn parse() -> Command {
 
 pub fn print_help() {
     println!(
-        r#"ghost-pro {version} — managed hosting for Ghost
+        r#"vuuut-pro {version} — managed hosting for Ghost
 
 USAGE
-    ghost-pro [command] [options]
+    vuuut-pro [command] [options]
 
 COMMANDS
     serve                 Run the platform (the default)
@@ -124,12 +124,12 @@ DATABASE
     PRO_DATABASE__URL and PRO_DATABASE__TENANT_URL.
 
 EXAMPLES
-    ghost-pro setup --url https://pro.example.com --subdomain-base sites.example.com \
+    vuuut-pro setup --url https://pro.example.com --subdomain-base sites.example.com \
         --ghost-binary /opt/ghost-rust/target/release/ghost --ssl --email you@example.com
-    ghost-pro create-staff --email you@example.com --name "Your Name"
-    ghost-pro db
-    ghost-pro doctor
-    ghost-pro serve
+    vuuut-pro create-staff --email you@example.com --name "Your Name"
+    vuuut-pro db
+    vuuut-pro doctor
+    vuuut-pro serve
 "#,
         version = env!("CARGO_PKG_VERSION")
     );
@@ -273,9 +273,9 @@ pub async fn setup(args: Args) -> Result<()> {
         }
     }
     println!("Next:");
-    println!("  1. ghost-pro create-staff --email you@example.com --name \"Your Name\"");
-    println!("  2. ghost-pro doctor");
-    println!("  3. ghost-pro serve");
+    println!("  1. vuuut-pro create-staff --email you@example.com --name \"Your Name\"");
+    println!("  2. vuuut-pro doctor");
+    println!("  3. vuuut-pro serve");
     println!(
         "\nThen open {}/owner/dashboard to choose a payment provider.\n",
         config["url"].as_str().unwrap_or("")
@@ -287,7 +287,7 @@ pub async fn setup(args: Args) -> Result<()> {
 pub async fn doctor() -> Result<()> {
     let mut problems = 0;
 
-    println!("\nghost-pro doctor\n");
+    println!("\nvuuut-pro doctor\n");
 
     let config = match Config::load(None) {
         Ok(c) => {
@@ -399,7 +399,7 @@ pub async fn doctor() -> Result<()> {
             "this is a SQLite file, so the platform is pinned to this one machine \
              and its database is one file on this disk. Set database.url to a \
              mysql:// server in pro.production.json, then check it with: \
-             ghost-pro db",
+             vuuut-pro db",
         );
         problems += 1;
     }
@@ -413,7 +413,7 @@ pub async fn doctor() -> Result<()> {
                 check(
                     false,
                     "operator login",
-                    "none — run: ghost-pro create-staff --email you@example.com --name \"You\"",
+                    "none — run: vuuut-pro create-staff --email you@example.com --name \"You\"",
                 );
                 problems += 1;
             } else {
@@ -544,7 +544,7 @@ pub async fn doctor() -> Result<()> {
             let hint = if config.edge_port() < 1024 && e.kind() == std::io::ErrorKind::PermissionDenied
             {
                 " — a port below 1024 needs privileges. Grant them with: \
-                 sudo setcap 'cap_net_bind_service=+ep' $(which ghost-pro)"
+                 sudo setcap 'cap_net_bind_service=+ep' $(which vuuut-pro)"
             } else {
                 ""
             };
@@ -616,7 +616,7 @@ pub async fn doctor() -> Result<()> {
 
     println!();
     if problems == 0 {
-        println!("Everything checks out. Run: ghost-pro serve\n");
+        println!("Everything checks out. Run: vuuut-pro serve\n");
         Ok(())
     } else {
         println!("{problems} problem(s) above need attention.\n");
@@ -645,7 +645,7 @@ pub async fn db() -> Result<()> {
     let target = config.db_target()?;
     let store = config.tenant_store()?;
 
-    println!("\nghost-pro database\n");
+    println!("\nvuuut-pro database\n");
     check(true, "engine", target.engine().name());
     // Redacted: this is the one config value that routinely holds a password,
     // and an operator runs this with somebody watching their screen.
@@ -698,7 +698,7 @@ pub async fn db() -> Result<()> {
         );
     }
 
-    println!("\nReady. Run: ghost-pro serve\n");
+    println!("\nReady. Run: vuuut-pro serve\n");
     Ok(())
 }
 

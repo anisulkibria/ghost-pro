@@ -1,4 +1,4 @@
-//! `ghost-pro` — the hosting platform's binary.
+//! `vuuut-pro` — the hosting platform's binary.
 //!
 //! One process runs the whole control plane: the edge proxy, both panels, the
 //! job queue and the supervisor that starts and stops tenant sites.
@@ -59,7 +59,7 @@ async fn run(command: cli::Command) -> Result<()> {
             Ok(())
         }
         cli::Command::Version => {
-            println!("ghost-pro {}", env!("CARGO_PKG_VERSION"));
+            println!("vuuut-pro {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
         cli::Command::Setup(args) => cli::setup(args).await,
@@ -75,7 +75,7 @@ async fn run(command: cli::Command) -> Result<()> {
 async fn serve_platform() -> Result<()> {
     let config = Arc::new(Config::load(None)?);
     tracing::info!(
-        "ghost-pro {} starting in {} mode",
+        "vuuut-pro {} starting in {} mode",
         env!("CARGO_PKG_VERSION"),
         config.env
     );
@@ -134,7 +134,7 @@ async fn serve_platform() -> Result<()> {
     if pro_db::staff::count(&db).await? == 0 {
         tracing::warn!(
             "no operator login exists yet. Create one with:\n\n    \
-             ghost-pro create-staff --email you@example.com --name \"Your Name\"\n"
+             vuuut-pro create-staff --email you@example.com --name \"Your Name\"\n"
         );
     }
 

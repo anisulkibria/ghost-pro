@@ -372,9 +372,7 @@ impl Approval {
             ring::signature::RsaKeyPair::from_pkcs8(pem.contents()).map_err(|_| error())?;
 
         // The template supplies the prefix. DNS still receives the full token.
-        let ownership = ownership_token
-            .strip_prefix(pro_core::ids::DOMAIN_VERIFICATION_PREFIX)
-            .filter(|value| !value.is_empty())
+        let ownership = pro_core::ids::domain_verification_secret(ownership_token)
             .ok_or_else(|| ProError::BadRequest("Invalid DNS verification token.".into()))?;
         let mut fields = self.records;
         fields.extend([

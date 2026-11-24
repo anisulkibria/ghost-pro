@@ -16,6 +16,7 @@
 //! `serve` module: it is the one place that has to own the listener.
 pub mod domain_connect;
 pub mod dns;
+pub mod dns_api;
 pub mod forward;
 pub mod router;
 

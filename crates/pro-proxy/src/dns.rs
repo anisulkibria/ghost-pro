@@ -125,20 +125,32 @@ pub async fn check(
 
 /// Is our token published as a TXT record?
 ///
-/// Checked both at the domain itself and at the `_ghost-pro-challenge`
-/// subdomain, because a customer who already has TXT records at the apex —
-/// SPF, DMARC, another provider's verification — often cannot add another
-/// there, and a dedicated name avoids the collision entirely.
+/// Checked at the domain itself and at the `_vuuut-pro-challenge` subdomain,
+/// because a customer who already has TXT records at the apex — SPF, DMARC,
+/// another provider's verification — often cannot add another there, and a
+/// dedicated name avoids the collision entirely. The pre-rename name and
+/// prefix (`_ghost-pro-challenge`, `ghost-pro-verify=`) are still accepted so
+/// domains set up before the rename keep verifying.
 async fn check_txt(
     resolver: &hickory_resolver::TokioResolver,
     domain: &str,
     token: &str,
 ) -> bool {
     use hickory_resolver::proto::rr::{RData, RecordType};
-    if token.is_empty() {
+    use pro_core::ids;
+    let Some(secret) = ids::domain_verification_secret(token) else {
         return false;
-    }
-    for name in [format!("{domain}."), format!("_ghost-pro-challenge.{domain}.")] {
+    };
+    let accepted = [
+        format!("{}{secret}", ids::DOMAIN_VERIFICATION_PREFIX),
+        format!("{}{secret}", ids::LEGACY_DOMAIN_VERIFICATION_PREFIX),
+    ];
+    let names = [
+        format!("{domain}."),
+        format!("{}.{domain}.", ids::DOMAIN_CHALLENGE_LABEL),
+        format!("{}.{domain}.", ids::LEGACY_DOMAIN_CHALLENGE_LABEL),
+    ];
+    for name in names {
         if let Ok(response) = resolver.lookup(name, RecordType::TXT).await {
             for record in response.answers() {
                 if let RData::TXT(txt) = &record.data {
@@ -149,7 +161,7 @@ async fn check_txt(
                         .iter()
                         .map(|bytes| String::from_utf8_lossy(bytes).to_string())
                         .collect();
-                    if joined.trim() == token.trim() {
+                    if accepted.iter().any(|value| joined.trim() == value) {
                         return true;
                     }
                 }
@@ -229,15 +241,16 @@ pub fn instructions_for_zone(
         });
     }
 
+    let label = pro_core::ids::DOMAIN_CHALLENGE_LABEL;
     let challenge = if host.is_empty() {
-        "_ghost-pro-challenge".into()
+        label.to_string()
     } else {
-        format!("_ghost-pro-challenge.{host}")
+        format!("{label}.{host}")
     };
     records.push(DnsRecord {
         kind: "TXT",
         name: challenge,
-        value: token.to_string(),
+        value: pro_core::ids::domain_verification_record(token),
         note: "Optional. Proves control before you switch traffic over.",
     });
 
@@ -324,12 +337,12 @@ mod tests {
     #[test]
     fn always_offers_the_ownership_record() {
         for (domain, host) in [
-            ("customer.com", "_ghost-pro-challenge"),
-            ("blog.customer.com", "_ghost-pro-challenge.blog"),
+            ("customer.com", "_vuuut-pro-challenge"),
+            ("blog.customer.com", "_vuuut-pro-challenge.blog"),
         ] {
             let i = instructions(domain, "ghost-pro-verify=abc", &expect());
             let txt = i.records.iter().find(|r| r.kind == "TXT").expect("a TXT record");
-            assert_eq!(txt.value, "ghost-pro-verify=abc");
+            assert_eq!(txt.value, "vuuut-pro-verify=abc", "an old stored token is shown with the new prefix");
             // At a dedicated name, so it cannot collide with SPF or DMARC at
             // the apex.
             assert_eq!(txt.name, host);
@@ -340,12 +353,12 @@ mod tests {
     fn record_names_are_relative_to_the_authoritative_zone() {
         let i = instructions("www.blog.customer.co.uk", "t", &expect());
         assert_eq!(i.records[0].name, "www.blog");
-        assert_eq!(i.records[1].name, "_ghost-pro-challenge.www.blog");
+        assert_eq!(i.records[1].name, "_vuuut-pro-challenge.www.blog");
 
         let i = instructions_for_zone("blog.customer.co.uk", "t", &expect(), Some("blog.customer.co.uk"));
         assert_eq!(i.records[0].kind, "A");
         assert_eq!(i.records[0].name, "@");
-        assert_eq!(i.records[1].name, "_ghost-pro-challenge");
+        assert_eq!(i.records[1].name, "_vuuut-pro-challenge");
     }
 
     /// A hostname with a port or a trailing dot must still be understood.

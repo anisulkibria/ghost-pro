@@ -16,7 +16,7 @@ use axum::http::{HeaderMap, Method};
 use axum::response::Response;
 use pro_core::{Domain, DomainKind, DomainStatus, ProError, Result, StaffRole, Tenant};
 use pro_db::domains::DomainListing;
-use pro_proxy::{dns, domain_connect::{self, Authority}};
+use pro_proxy::{dns, dns_api, domain_connect::{self, Authority}};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -254,6 +254,34 @@ struct DnsSetup<'a> {
     approval: Option<&'a str>,
 }
 
+/// Paste-a-token setup: Vuuut Pro writes the records through the provider's API.
+fn token_form(d: &pro_core::Domain, provider: domain_connect::Provider) -> String {
+    let (href, how) = dns_api::token_help(provider).unwrap_or(("", ""));
+    let name = provider.name();
+    view::card(&view::form(
+        &format!("/dashboard/domains/{}/dns/apply", d.id),
+        &format!(
+            r#"<h3>Connect automatically with {name_html}</h3>
+<div class="inline-form">{field}
+<button class="btn" type="submit">{icon} Connect automatically</button></div>
+<p class="hint">{how} <a href="{href}" target="_blank" rel="noopener noreferrer">Create a {name_html} token</a>.
+Vuuut Pro adds the records below for you. The token is used once and never saved.</p>"#,
+            name_html = esc(name),
+            field = view::field_full(
+                "token",
+                &format!("{name} API token"),
+                "password",
+                "",
+                None,
+                r#" required autocomplete="off" spellcheck="false""#,
+            ),
+            icon = view::svg("dns"),
+            how = esc(how),
+            href = attr(href),
+        ),
+    ))
+}
+
 /// The DNS card: what to publish, or, for a built-in address, that there is
 /// nothing to publish.
 fn dns_section(state: &AppState, panel: Panel, l: &DomainListing, setup: DnsSetup<'_>) -> String {
@@ -284,6 +312,9 @@ fn dns_section(state: &AppState, panel: Panel, l: &DomainListing, setup: DnsSetu
                 attr(url),
                 esc(provider.name())
             )
+        } else if provider.is_some_and(dns_api::supports) {
+            // The token form below the row is the action.
+            String::new()
         } else {
             view::action_button(
                 &format!("/dashboard/domains/{}/dns/setup", d.id),
@@ -312,6 +343,9 @@ fn dns_section(state: &AppState, panel: Panel, l: &DomainListing, setup: DnsSetu
             &description,
             &button,
         )));
+        if let (Some(provider), None) = (provider.filter(|p| dns_api::supports(*p)), setup.approval) {
+            out.push_str(&token_form(d, provider));
+        }
     }
 
     // An apex needs A records, and they can only be given if the platform knows
@@ -591,7 +625,7 @@ fn record_section(l: &DomainListing) -> String {
         line("Site id", &d.tenant_id),
         line("Status", d.status.as_str()),
         line("Kind", d.kind.as_str()),
-        line("Verification token", &d.verification_token),
+        line("Verification token", &pro_core::ids::domain_verification_record(&d.verification_token)),
         line("Added", &d.created_at),
         line("Verified", d.verified_at.as_deref().unwrap_or("")),
         line("Last checked", d.last_checked_at.as_deref().unwrap_or("")),
@@ -899,6 +933,7 @@ pub async fn customer_dns_setup(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Query(query): Query<HashMap<String, String>>,
     method: Method,
 ) -> Response {
     let chrome = state.chrome(&headers);
@@ -947,18 +982,18 @@ pub async fn customer_dns_setup(
             Some(authority) if authority.provider.is_none() => Some(
                 "Use the nameservers shown below to find your DNS provider, then follow the manual steps.",
             ),
-            Some(_) if config.is_none() => Some(
-                "DNS provider detected. Automatic approval requires a public HTTPS address and a configured Domain Connect integration. Follow the manual steps below.",
-            ),
+            // The token form on the card is the automatic path.
+            Some(authority) if authority.provider.is_some_and(dns_api::supports) => None,
             Some(_) if start_approval => Some(
-                "Automatic setup is unavailable for this domain. Follow the manual steps below.",
+                "Automatic setup isn’t available for this DNS host yet. Follow the manual steps below.",
             ),
             Some(_) => None,
             None => Some(
                 "We couldn’t find the DNS provider. Use the manual steps at the provider listed in your domain’s nameserver settings.",
             ),
         };
-        let hint = notice.map(Flash::warn);
+        // A failed token attempt comes back here with its reason.
+        let hint = Flash::from_query(&query).or_else(|| notice.map(Flash::warn));
         let setup = DnsSetup { authority: authority.as_ref(), approval: None };
         render_customer_domain(&state, chrome.theme, &account, &listing, setup, hint.as_ref()).await
     }.await;
@@ -967,6 +1002,60 @@ pub async fn customer_dns_setup(
     } else {
         reply::or_page_or_signin("/dashboard/signin", &chrome, result)
     }
+}
+
+#[derive(Deserialize)]
+pub struct DnsTokenForm {
+    token: String,
+}
+
+/// `POST /dashboard/domains/{id}/dns/apply`: write the records through the DNS
+/// host's API with a token pasted once, then check straight away.
+pub async fn customer_dns_apply(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Form(form): Form<DnsTokenForm>,
+) -> Response {
+    let chrome = state.chrome(&headers);
+    let back = Panel::Customer.domain_href(&id);
+    let setup = format!("{back}/dns/setup");
+    reply::or_redirect(&setup, &chrome, async {
+        auth::require_same_origin(&headers, &state.config.host())?;
+        let account = auth::account(&state, &headers).await?;
+        let listing = customer_domain(&state, &account, &id).await?;
+        let domain = &listing.domain;
+        if domain.kind != DomainKind::Custom || domain.status == DomainStatus::Active {
+            return Err(ProError::BadRequest("This domain is already connected.".into()));
+        }
+        let authority = domain_connect::detect(&domain.domain)
+            .await?
+            .ok_or_else(|| ProError::BadRequest("We couldn’t find this domain’s DNS host.".into()))?;
+        let provider = authority
+            .provider
+            .filter(|p| dns_api::supports(*p))
+            .ok_or_else(|| ProError::BadRequest("Automatic setup with a token isn’t available for this DNS host.".into()))?;
+        let expect = crate::domain_expectation(&state);
+        if dns::is_apex(&domain.domain, Some(&authority.zone)) && expect.addresses.is_empty() {
+            return Err(ProError::BadRequest("Root domains can’t be connected until the platform’s address is published.".into()));
+        }
+        let instructions =
+            dns::instructions_for_zone(&domain.domain, &domain.verification_token, &expect, Some(&authority.zone));
+        dns_api::apply(provider, &authority.zone, &form.token, &instructions.records).await?;
+        tracing::info!(domain = %domain.domain, provider = provider.name(), "DNS records written via provider API");
+
+        let verdict = crate::verify_domain_now(&state, domain).await?;
+        let flash = if verdict.is_servable() {
+            Flash::ok(format!("Records added at {}. {} is connected.", provider.name(), domain.domain))
+        } else {
+            Flash::ok(format!(
+                "Records added at {}. DNS can take a few minutes to update; Vuuut Pro keeps checking and connects {} on its own.",
+                provider.name(),
+                domain.domain
+            ))
+        };
+        Ok(redirect_with(&back, flash))
+    }.await)
 }
 
 #[derive(Deserialize)]

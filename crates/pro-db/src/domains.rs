@@ -499,7 +499,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(custom.status, DomainStatus::Pending);
-        assert!(custom.verification_token.starts_with("ghost-pro-verify="));
+        assert!(custom.verification_token.starts_with("vuuut-pro-verify="));
         assert!(custom.verified_at.is_none());
 
         // Only the live one is routable, so no traffic and no certificate for

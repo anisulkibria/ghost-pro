@@ -8,7 +8,7 @@
   "syncPubKeyDomain": "domainconnect.vuuut.com",
   "syncRedirectDomain": "vuuut.com",
   "hostRequired": true,
-  "variableDescription": "%target% contains CNAME target configured by the Vuuut Pro deployment. %ownership% contains domain ownership token without the ghost-pro-verify= prefix.",
+  "variableDescription": "%target% contains CNAME target configured by the Vuuut Pro deployment. %ownership% contains domain ownership token without the vuuut-pro-verify= prefix.",
   "records": [
     {
       "type": "CNAME",
@@ -18,12 +18,12 @@
     },
     {
       "type": "TXT",
-      "host": "_ghost-pro-challenge",
-      "data": "ghost-pro-verify=%ownership%",
+      "host": "_vuuut-pro-challenge",
+      "data": "vuuut-pro-verify=%ownership%",
       "ttl": 600,
       "essential": "OnApply",
       "txtConflictMatchingMode": "Prefix",
-      "txtConflictMatchingPrefix": "ghost-pro-verify="
+      "txtConflictMatchingPrefix": "vuuut-pro-verify="
     }
   ]
 }

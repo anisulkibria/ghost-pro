@@ -29,7 +29,31 @@ pub fn secret_token() -> String {
 }
 
 /// Identifies Vuuut Pro ownership tokens in DNS TXT records.
-pub const DOMAIN_VERIFICATION_PREFIX: &str = "ghost-pro-verify=";
+pub const DOMAIN_VERIFICATION_PREFIX: &str = "vuuut-pro-verify=";
+/// The prefix tokens were issued with before the rename. Still stored for
+/// older domains and still accepted in DNS, so nothing already connected breaks.
+pub const LEGACY_DOMAIN_VERIFICATION_PREFIX: &str = "ghost-pro-verify=";
+/// The dedicated TXT name, under the domain being connected.
+pub const DOMAIN_CHALLENGE_LABEL: &str = "_vuuut-pro-challenge";
+/// The name used before the rename; still checked.
+pub const LEGACY_DOMAIN_CHALLENGE_LABEL: &str = "_ghost-pro-challenge";
+
+/// The random part of a stored token, whichever prefix it was issued with.
+pub fn domain_verification_secret(token: &str) -> Option<&str> {
+    let token = token.trim();
+    token
+        .strip_prefix(DOMAIN_VERIFICATION_PREFIX)
+        .or_else(|| token.strip_prefix(LEGACY_DOMAIN_VERIFICATION_PREFIX))
+        .filter(|secret| !secret.is_empty())
+}
+
+/// A stored token as the customer should publish it today.
+pub fn domain_verification_record(token: &str) -> String {
+    match domain_verification_secret(token) {
+        Some(secret) => format!("{DOMAIN_VERIFICATION_PREFIX}{secret}"),
+        None => token.trim().to_string(),
+    }
+}
 
 /// The token a customer publishes as a DNS TXT record to prove they own a
 /// domain.
@@ -111,7 +135,10 @@ mod tests {
     #[test]
     fn domain_tokens_are_dns_safe() {
         let t = domain_verification_token();
-        assert!(t.starts_with("ghost-pro-verify="));
+        assert!(t.starts_with("vuuut-pro-verify="));
+        let legacy = t.replace("vuuut-pro-verify=", "ghost-pro-verify=");
+        assert_eq!(domain_verification_record(&legacy), t, "old tokens are shown with the new prefix");
+        assert_eq!(domain_verification_secret(&legacy), domain_verification_secret(&t));
         assert!(t.len() < 255);
         assert!(t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '='));
     }

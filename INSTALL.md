@@ -100,7 +100,7 @@ The first build of each takes a few minutes and is most of the time this
 guide costs. Confirm both binaries exist before continuing:
 
 ```bash
-ls -l ~/Ghost/vuuut/target/release/ghost ~/Ghost/vuuut-pro/target/release/ghost-pro
+ls -l ~/Ghost/vuuut/target/release/ghost ~/Ghost/vuuut-pro/target/release/vuuut-pro
 ```
 
 `./run.sh start` also builds a missing CMS binary when `paths.ghostBinary`
@@ -334,7 +334,7 @@ templates use `publicAddresses` with one address per configured IP family.
 
 1. Run `dc-template-linter -cloudflare -tolerate info domain-connect/*.json`.
    Test the records with sample values in the online editor and copy the test
-   links. The template adds `ghost-pro-verify=` to the `ownership` input.
+   links. The template adds `vuuut-pro-verify=` to the `ownership` input.
    [Domain Connect submission guide](https://github.com/Domain-Connect/Templates#submitting-a-pull-request)
 2. Put the templates in the root of a fork of the registry. Open a pull
    request using its PR template and include the editor test links.
@@ -404,7 +404,7 @@ platform differs in four ways:
 ```bash
 cd ~/Ghost/vuuut-pro
 mkdir -p run
-(cd run && ../target/release/ghost-pro setup --force \
+(cd run && ../target/release/vuuut-pro setup --force \
     --url https://pro.example.com \
     --subdomain-base sites.example.com \
     --ghost-binary ../../vuuut/target/release/ghost \
@@ -424,7 +424,7 @@ it does. Leave off any flag and it prompts for that value instead.
    Let's Encrypt rate-limits failures on the real CA. `ssl.email` is where
    renewal warnings go, so set it.
 3. **Port 443.** Binding below 1024 needs privileges:
-   `sudo setcap 'cap_net_bind_service=+ep' target/release/ghost-pro`.
+   `sudo setcap 'cap_net_bind_service=+ep' target/release/vuuut-pro`.
    Open 80 and 443 on the firewall — 80 is where ACME's HTTP-01 challenge is
    answered, so certificates do not issue without it.
 4. **`publicAddresses`.** The IPs customers point an `A`/`AAAA` record at when

@@ -237,7 +237,7 @@ pub async fn rename(pool: &Db, id: &str, name: &str) -> Result<()> {
 
 /// Create the first owner, if there is no staff at all.
 ///
-/// This is what `ghost-pro setup` calls. It is a no-op once anybody exists, so
+/// This is what `vuuut-pro setup` calls. It is a no-op once anybody exists, so
 /// it cannot be used to mint a second owner on a running platform.
 pub async fn bootstrap_owner(
     pool: &Db,

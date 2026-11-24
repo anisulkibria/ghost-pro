@@ -120,6 +120,7 @@ fn platform_routes() -> Router<AppState> {
             "/dashboard/domains/{id}/dns/setup",
             get(domains::customer_dns_setup).post(domains::customer_dns_setup),
         )
+        .route("/dashboard/domains/{id}/dns/apply", post(domains::customer_dns_apply))
         .route("/dashboard/domains/{id}/dns/finish/{token}", get(domains::customer_dns_finished))
         .route("/dashboard/billing", get(dashboard_billing::billing))
         .route("/dashboard/billing/change", post(dashboard_billing::change_plan))

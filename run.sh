@@ -56,7 +56,7 @@ if [ -n "${VUUUT_DIR:-}" ]; then
     export PRO_PATHS__THEME_SOURCE=${PRO_PATHS__THEME_SOURCE:-$VUUUT_DIR/content/themes}
 fi
 
-BIN=$ROOT/target/release/ghost-pro
+BIN=$ROOT/target/release/vuuut-pro
 # Where pro.json and data/ live. The platform reads its config from the
 # working directory, which is why this is a directory and not a file path.
 PRO_DIR=${PRO_DIR:-$ROOT/run}
@@ -66,7 +66,7 @@ PRO_DIR=${PRO_DIR:-$ROOT/run}
 # differently in each. The launcher would otherwise be told to open
 # run/run/server.log. Absolutize once, before anything derives from it.
 case $PRO_DIR in /*) ;; *) PRO_DIR=$ROOT/$PRO_DIR ;; esac
-PIDFILE=$PRO_DIR/.ghost-pro.pid
+PIDFILE=$PRO_DIR/.vuuut-pro.pid
 LOG=$PRO_DIR/server.log
 
 # Tenant processes bind loopback ports in this range. Only used to find
@@ -134,7 +134,7 @@ pid() { [ -f "$PIDFILE" ] && cat "$PIDFILE" 2>/dev/null || true; }
 
 # Pids are reused, and a pidfile that outlives its process can otherwise name
 # something else entirely.
-is_pro() { ps -o args= -p "$1" 2>/dev/null | grep -q "ghost-pro"; }
+is_pro() { ps -o args= -p "$1" 2>/dev/null | grep -q "vuuut-pro"; }
 
 alive() {
     local p
@@ -220,7 +220,7 @@ require_bin() {
 # Build the tenant executable too when its configured path names a local CMS
 # checkout.
 #
-# Where that is comes from the platform binary itself — `ghost-pro
+# Where that is comes from the platform binary itself — `vuuut-pro
 # tenant-binary` resolves pro.json, pro.<env>.json and the PRO_* environment
 # exactly as startup does, including the fallback to a Vuuut checkout beside
 # this one when the recorded path has been renamed or moved. This used to
